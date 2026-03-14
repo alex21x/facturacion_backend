@@ -8,8 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class SalesController extends Controller
-{
-    //COMENTARIO PARA PROBAR DESPLIEGUE
+{    
     private $stockProjection = [];
     private $lotStockProjection = [];
 

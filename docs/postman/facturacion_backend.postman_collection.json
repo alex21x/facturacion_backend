@@ -1,0 +1,221 @@
+{
+  "info": {
+    "name": "Facturacion Backend API",
+    "_postman_id": "f7d11d7d-65e2-4b0e-b5a0-c1e4f7a3ef90",
+    "description": "Collection para probar auth, refresh, RBAC y documentos comerciales.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/health",
+          "host": ["{{base_url}}"],
+          "path": ["api", "health"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\",\n  \"device_id\": \"{{device_id}}\",\n  \"device_name\": \"{{device_name}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/auth/login",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "login"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+              "var json = pm.response.json();",
+              "pm.expect(json).to.have.property('access_token');",
+              "pm.expect(json).to.have.property('refresh_token');",
+              "pm.environment.set('access_token', json.access_token);",
+              "pm.environment.set('refresh_token', json.refresh_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth - Refresh",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\",\n  \"device_id\": \"{{device_id}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/auth/refresh",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "refresh"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+              "var json = pm.response.json();",
+              "pm.environment.set('access_token', json.access_token);",
+              "pm.environment.set('refresh_token', json.refresh_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth - Me",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/auth/me",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "me"]
+        }
+      }
+    },
+    {
+      "name": "AppCfg - Modules",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appcfg/modules",
+          "host": ["{{base_url}}"],
+          "path": ["api", "appcfg", "modules"]
+        }
+      }
+    },
+    {
+      "name": "AppCfg - Feature Toggles",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/appcfg/feature-toggles",
+          "host": ["{{base_url}}"],
+          "path": ["api", "appcfg", "feature-toggles"]
+        }
+      }
+    },
+    {
+      "name": "Sales - Series Numbers",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/sales/series-numbers?document_kind=INVOICE",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sales", "series-numbers"],
+          "query": [
+            { "key": "document_kind", "value": "INVOICE" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Sales - List Commercial Documents",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/sales/commercial-documents?limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sales", "commercial-documents"],
+          "query": [
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Sales - Create Commercial Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"document_kind\": \"INVOICE\",\n  \"series\": \"{{series}}\",\n  \"issue_at\": \"2026-03-10T15:30:00-05:00\",\n  \"customer_id\": {{customer_id}},\n  \"currency_id\": {{currency_id}},\n  \"payment_method_id\": {{payment_method_id}},\n  \"status\": \"ISSUED\",\n  \"items\": [\n    {\n      \"description\": \"Producto demo\",\n      \"product_id\": {{product_id}},\n      \"unit_id\": {{unit_id}},\n      \"qty\": 2,\n      \"unit_price\": 10.5,\n      \"tax_total\": 3.78,\n      \"subtotal\": 21.0,\n      \"total\": 24.78,\n      \"lots\": [\n        {\n          \"lot_id\": {{lot_id}},\n          \"qty\": 2\n        }\n      ]\n    }\n  ],\n  \"payments\": [\n    {\n      \"payment_method_id\": {{payment_method_id}},\n      \"amount\": 24.78,\n      \"status\": \"PAID\",\n      \"paid_at\": \"2026-03-10T15:31:00-05:00\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/sales/commercial-documents",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sales", "commercial-documents"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201', function () { pm.response.to.have.status(201); });",
+              "var json = pm.response.json();",
+              "if (json && json.data && json.data.id) { pm.environment.set('document_id', json.data.id); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth - Logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{access_token}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/auth/logout",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "logout"]
+        }
+      }
+    }
+  ]
+}

@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Storage;
 
 class AppConfigController extends Controller
 {
@@ -468,5 +470,227 @@ class AppConfigController extends Controller
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+    // ─────────────────────────────────────────────────────────
+    // Perfil de empresa
+    // ─────────────────────────────────────────────────────────
+
+    public function companyProfile(Request $request)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $company = DB::table('core.companies')
+            ->select('id', 'tax_id', 'legal_name', 'trade_name', 'status')
+            ->where('id', $companyId)
+            ->first();
+
+        if (!$company) {
+            return response()->json(['message' => 'Company not found'], 404);
+        }
+
+        $settings = null;
+        if ($this->tableExists('core', 'company_settings')) {
+            $settings = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->first();
+        }
+
+        $logoUrl = null;
+        if ($settings && $settings->logo_path) {
+            $logoUrl = Storage::disk('public')->exists($settings->logo_path)
+                ? Storage::disk('public')->url($settings->logo_path)
+                : null;
+        }
+
+        return response()->json([
+            'company_id'  => $companyId,
+            'tax_id'      => $company->tax_id,
+            'legal_name'  => $company->legal_name,
+            'trade_name'  => $company->trade_name,
+            'status'      => (int) $company->status,
+            'address'     => $settings->address    ?? null,
+            'phone'       => $settings->phone       ?? null,
+            'email'       => $settings->email       ?? null,
+            'website'     => $settings->website     ?? null,
+            'logo_url'    => $logoUrl,
+            'has_cert'    => $settings && !empty($settings->cert_path),
+            'bank_accounts' => $settings
+                ? json_decode((string) $settings->bank_accounts, true) ?? []
+                : [],
+        ]);
+    }
+
+    public function updateCompanyProfile(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_id'    => 'nullable|integer|min:1',
+            'tax_id'        => 'nullable|string|max:20',
+            'legal_name'    => 'nullable|string|max:200',
+            'trade_name'    => 'nullable|string|max:200',
+            'address'       => 'nullable|string|max:500',
+            'phone'         => 'nullable|string|max:60',
+            'email'         => 'nullable|email|max:200',
+            'website'       => 'nullable|url|max:300',
+            'bank_accounts' => 'nullable|array',
+            'bank_accounts.*.bank_name'     => 'required_with:bank_accounts.*|string|max:100',
+            'bank_accounts.*.account_number'=> 'required_with:bank_accounts.*|string|max:50',
+            'bank_accounts.*.currency'      => 'nullable|string|max:10',
+            'bank_accounts.*.account_type'  => 'nullable|string|max:50',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload   = $validator->validated();
+        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        // Actualizar datos basicos de la empresa
+        $companyUpdates = array_filter([
+            'tax_id'     => $payload['tax_id']     ?? null,
+            'legal_name' => $payload['legal_name'] ?? null,
+            'trade_name' => $payload['trade_name'] ?? null,
+        ], fn($v) => $v !== null);
+
+        if (!empty($companyUpdates)) {
+            DB::table('core.companies')
+                ->where('id', $companyId)
+                ->update($companyUpdates);
+        }
+
+        // Actualizar configuracion extendida si la tabla existe
+        if ($this->tableExists('core', 'company_settings')) {
+            $settingsUpdates = [
+                'updated_at' => now(),
+            ];
+            if (array_key_exists('address', $payload)) {
+                $settingsUpdates['address'] = $payload['address'];
+            }
+            if (array_key_exists('phone', $payload)) {
+                $settingsUpdates['phone'] = $payload['phone'];
+            }
+            if (array_key_exists('email', $payload)) {
+                $settingsUpdates['email'] = $payload['email'];
+            }
+            if (array_key_exists('website', $payload)) {
+                $settingsUpdates['website'] = $payload['website'];
+            }
+            if (array_key_exists('bank_accounts', $payload)) {
+                $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
+            }
+
+            DB::table('core.company_settings')->updateOrInsert(
+                ['company_id' => $companyId],
+                $settingsUpdates
+            );
+        }
+
+        return $this->companyProfile($request);
+    }
+
+    public function uploadCompanyLogo(Request $request)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) ($request->input('company_id', $authUser->company_id));
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$request->hasFile('logo')) {
+            return response()->json(['message' => 'No se recibio el archivo logo'], 422);
+        }
+
+        $file = $request->file('logo');
+
+        // Validar MIME y tamaño (max 2 MB)
+        $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!in_array($file->getMimeType(), $allowedMimes, true)) {
+            return response()->json(['message' => 'Tipo de archivo no permitido. Use JPG, PNG, GIF o WEBP'], 422);
+        }
+        if ($file->getSize() > 2 * 1024 * 1024) {
+            return response()->json(['message' => 'El logo no puede superar 2 MB'], 422);
+        }
+
+        $ext      = $file->getClientOriginalExtension();
+        $path     = "logos/company_{$companyId}." . strtolower($ext);
+
+        Storage::disk('public')->put($path, file_get_contents($file->getRealPath()));
+
+        if ($this->tableExists('core', 'company_settings')) {
+            DB::table('core.company_settings')->updateOrInsert(
+                ['company_id' => $companyId],
+                ['logo_path' => $path, 'updated_at' => now()]
+            );
+        }
+
+        return response()->json([
+            'message'  => 'Logo actualizado',
+            'logo_url' => Storage::disk('public')->url($path),
+        ]);
+    }
+
+    public function uploadCompanyCert(Request $request)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) ($request->input('company_id', $authUser->company_id));
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$request->hasFile('cert')) {
+            return response()->json(['message' => 'No se recibio el certificado'], 422);
+        }
+
+        $certPassword = $request->input('cert_password', '');
+        if ($certPassword === '') {
+            return response()->json(['message' => 'La contrasena del certificado es requerida'], 422);
+        }
+
+        $file = $request->file('cert');
+
+        // Validar extension (.p12, .pfx, .pem)
+        $ext = strtolower($file->getClientOriginalExtension());
+        if (!in_array($ext, ['p12', 'pfx', 'pem'], true)) {
+            return response()->json(['message' => 'Solo se aceptan certificados .p12, .pfx o .pem'], 422);
+        }
+        if ($file->getSize() > 2 * 1024 * 1024) {
+            return response()->json(['message' => 'El certificado no puede superar 2 MB'], 422);
+        }
+
+        // Almacenar en disco LOCAL (nunca publico)
+        $certPath = "certs/company_{$companyId}.{$ext}";
+        Storage::disk('local')->put($certPath, file_get_contents($file->getRealPath()));
+
+        // Cifrar contrasena
+        $encPassword = Crypt::encryptString($certPassword);
+
+        if ($this->tableExists('core', 'company_settings')) {
+            DB::table('core.company_settings')->updateOrInsert(
+                ['company_id' => $companyId],
+                [
+                    'cert_path'         => $certPath,
+                    'cert_password_enc' => $encPassword,
+                    'updated_at'        => now(),
+                ]
+            );
+        }
+
+        return response()->json([
+            'message'  => 'Certificado digital actualizado',
+            'has_cert' => true,
+        ]);
     }
 }

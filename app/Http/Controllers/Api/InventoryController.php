@@ -388,6 +388,64 @@ class InventoryController extends Controller
         ]);
     }
 
+    public function kardex(Request $request)
+    {
+        $authUser    = $request->attributes->get('auth_user');
+        $companyId   = (int) $request->query('company_id', $authUser->company_id);
+        $productId   = $request->query('product_id');
+        $warehouseId = $request->query('warehouse_id');
+        $dateFrom    = $request->query('date_from');
+        $dateTo      = $request->query('date_to');
+        $limit       = min((int) $request->query('limit', 100), 500);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $query = DB::table('inventory.inventory_ledger as il')
+            ->leftJoin('inventory.products as p', 'p.id', '=', 'il.product_id')
+            ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'il.warehouse_id')
+            ->leftJoin('inventory.product_lots as pl', 'pl.id', '=', 'il.lot_id')
+            ->select([
+                'il.id',
+                'il.warehouse_id',
+                DB::raw('w.code as warehouse_code'),
+                DB::raw('w.name as warehouse_name'),
+                'il.product_id',
+                DB::raw('p.sku as product_sku'),
+                DB::raw('p.name as product_name'),
+                'il.lot_id',
+                DB::raw('pl.lot_code'),
+                'il.movement_type',
+                'il.quantity',
+                'il.unit_cost',
+                DB::raw('(il.quantity * il.unit_cost) as line_total'),
+                'il.ref_type',
+                'il.ref_id',
+                'il.notes',
+                'il.moved_at',
+            ])
+            ->where('il.company_id', $companyId)
+            ->orderByDesc('il.moved_at')
+            ->orderByDesc('il.id')
+            ->limit($limit);
+
+        if ($productId !== null && $productId !== '') {
+            $query->where('il.product_id', (int) $productId);
+        }
+        if ($warehouseId !== null && $warehouseId !== '') {
+            $query->where('il.warehouse_id', (int) $warehouseId);
+        }
+        if ($dateFrom !== null && $dateFrom !== '') {
+            $query->where('il.moved_at', '>=', $dateFrom);
+        }
+        if ($dateTo !== null && $dateTo !== '') {
+            $query->where('il.moved_at', '<=', $dateTo . ' 23:59:59');
+        }
+
+        return response()->json(['data' => $query->get()]);
+    }
+
     public function createStockEntry(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');

@@ -51,6 +51,24 @@ class Handler extends ExceptionHandler
      */
     public function render($request, Throwable $exception): Response
     {
-        return parent::render($request, $exception);
+        $response = parent::render($request, $exception);
+
+        if ($request->is('api/*')) {
+            $contentType = (string) $response->headers->get('Content-Type', '');
+            if (stripos($contentType, 'application/json') !== false) {
+                return $response;
+            }
+
+            $status = method_exists($response, 'getStatusCode') ? $response->getStatusCode() : 500;
+            $message = $status >= 500
+                ? (config('app.debug') ? $exception->getMessage() : 'Server Error')
+                : ($response->statusText() ?: 'Request failed');
+
+            return response()->json([
+                'message' => $message,
+            ], $status);
+        }
+
+        return $response;
     }
 }

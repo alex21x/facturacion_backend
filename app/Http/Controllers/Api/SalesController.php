@@ -759,6 +759,19 @@ class SalesController extends Controller
                 }
             }
 
+            $this->registerCashIncomeFromDocument(
+                $companyId,
+                $branchId !== null ? (int) $branchId : null,
+                $cashRegisterId !== null ? (int) $cashRegisterId : null,
+                (int) $documentId,
+                (string) $payload['document_kind'],
+                (string) $payload['series'],
+                (int) $nextNumber,
+                (float) $paidTotal,
+                (int) $authUser->id,
+                $payload['payments'] ?? []
+            );
+
             return [
                 'id' => (int) $documentId,
                 'document_kind' => $payload['document_kind'],
@@ -881,6 +894,77 @@ class SalesController extends Controller
         return response()->json([
             'data' => $query->get(),
         ]);
+    }
+
+    private function registerCashIncomeFromDocument(
+        int $companyId,
+        ?int $branchId,
+        ?int $cashRegisterId,
+        int $documentId,
+        string $documentKind,
+        string $series,
+        int $number,
+        float $paidTotal,
+        int $userId,
+        array $payments = []
+    ): void {
+        if ($cashRegisterId === null || $paidTotal <= 0) {
+            return;
+        }
+
+        if (!$this->tableExists('sales.cash_sessions') || !$this->tableExists('sales.cash_movements')) {
+            return;
+        }
+
+        $session = DB::table('sales.cash_sessions')
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
+            ->where('status', 'OPEN')
+            ->orderByDesc('opened_at')
+            ->first();
+
+        if (!$session) {
+            return;
+        }
+
+        $firstPaidMethod = collect($payments)
+            ->first(function ($payment) {
+                return ($payment['status'] ?? 'PENDING') === 'PAID';
+            });
+
+        DB::table('sales.cash_movements')->insert([
+            'company_id' => $companyId,
+            'branch_id' => $branchId,
+            'cash_register_id' => $cashRegisterId,
+            'cash_session_id' => (int) $session->id,
+            'movement_type' => 'INCOME',
+            'payment_method_id' => $firstPaidMethod['payment_method_id'] ?? null,
+            'amount' => round($paidTotal, 4),
+            'description' => 'Cobro doc ' . $documentKind . ' ' . $series . '-' . $number,
+            'notes' => 'Cobro doc ' . $documentKind . ' ' . $series . '-' . $number,
+            'ref_type' => 'COMMERCIAL_DOCUMENT',
+            'ref_id' => $documentId,
+            'created_by' => $userId,
+            'user_id' => $userId,
+            'movement_at' => now(),
+            'created_at' => now(),
+        ]);
+
+        $totalIn = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', (int) $session->id)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->sum('amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', (int) $session->id)
+            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
+            ->sum('amount');
+
+        DB::table('sales.cash_sessions')
+            ->where('id', (int) $session->id)
+            ->update([
+                'expected_balance' => round((float) $session->opening_balance + $totalIn - $totalOut, 4),
+            ]);
     }
 
     private function resolveTaxCategories(int $companyId)

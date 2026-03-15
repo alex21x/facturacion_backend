@@ -29,6 +29,10 @@ Route::middleware('auth.token')->group(function () {
         Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings');
+        Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
+        Route::get('/cash/sessions', 'Api\\CashController@sessions');
+        Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
+        Route::get('/cash/movements', 'Api\\CashController@movements');
     });
 
     Route::middleware(['rbac.module:APPCFG,view', 'throttle:240,1'])->group(function () {
@@ -47,6 +51,13 @@ Route::middleware('auth.token')->group(function () {
     Route::middleware('rbac.module:APPCFG,update')->group(function () {
         Route::put('/appcfg/operational-limits', 'Api\\AppConfigController@updateOperationalLimits');
         Route::put('/appcfg/commerce-settings', 'Api\\AppConfigController@updateCommerceSettings');
+    Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
+    Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
+    Route::post('/appcfg/company-cert', 'Api\\AppConfigController@uploadCompanyCert');
+
+    Route::post('/cash/sessions', 'Api\\CashController@openSession');
+    Route::put('/cash/sessions/{id}/close', 'Api\\CashController@closeSession');
+    Route::post('/cash/movements', 'Api\\CashController@createMovement');
 
         Route::post('/masters/warehouses', 'Api\\MasterDataController@createWarehouse');
         Route::put('/masters/warehouses/{id}', 'Api\\MasterDataController@updateWarehouse');
@@ -87,6 +98,7 @@ Route::middleware('auth.token')->group(function () {
         Route::get('/inventory/current-stock', 'Api\\InventoryController@currentStock');
         Route::get('/inventory/lots', 'Api\\InventoryController@lots');
         Route::get('/inventory/stock-entries', 'Api\\InventoryController@stockEntries');
+        Route::get('/inventory/kardex', 'Api\\InventoryController@kardex');
     });
 
     Route::middleware('rbac.module:INVENTORY,update')->group(function () {

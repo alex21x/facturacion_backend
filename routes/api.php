@@ -14,12 +14,12 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('throttle:30,1')->group(function () {
+Route::middleware('throttle:500,1')->group(function () {
     Route::post('/auth/login', 'Api\\AuthController@login');
     Route::post('/auth/refresh', 'Api\\AuthController@refresh');
 });
 
-Route::middleware('auth.token')->group(function () {
+Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
 
@@ -32,12 +32,14 @@ Route::middleware('auth.token')->group(function () {
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/cash/sessions', 'Api\\CashController@sessions');
         Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
+        Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
         Route::get('/cash/movements', 'Api\\CashController@movements');
     });
 
-    Route::middleware(['rbac.module:APPCFG,view', 'throttle:240,1'])->group(function () {
+    Route::middleware(['rbac.module:APPCFG,view', 'throttle:1500,1'])->group(function () {
         Route::get('/masters/dashboard', 'Api\\MasterDataController@dashboard');
         Route::get('/masters/options', 'Api\\MasterDataController@options');
+        Route::get('/masters/access-control', 'Api\\MasterDataController@accessControl');
         Route::get('/masters/units', 'Api\\MasterDataController@units');
         Route::get('/masters/warehouses', 'Api\\MasterDataController@warehouses');
         Route::get('/masters/cash-registers', 'Api\\MasterDataController@cashRegisters');
@@ -75,6 +77,10 @@ Route::middleware('auth.token')->group(function () {
         Route::put('/masters/inventory-settings', 'Api\\MasterDataController@updateInventorySettings');
         Route::put('/masters/document-kinds', 'Api\\MasterDataController@updateDocumentKinds');
         Route::put('/masters/units', 'Api\\MasterDataController@updateUnits');
+        Route::post('/masters/roles', 'Api\\MasterDataController@createRole');
+        Route::put('/masters/roles/{id}', 'Api\\MasterDataController@updateRole');
+        Route::post('/masters/users', 'Api\\MasterDataController@createUser');
+        Route::put('/masters/users/{id}', 'Api\\MasterDataController@updateUser');
     });
 
     Route::middleware('rbac.module:SALES,view')->group(function () {
@@ -83,10 +89,13 @@ Route::middleware('auth.token')->group(function () {
         Route::get('/sales/customers/autocomplete', 'Api\\SalesController@customerAutocomplete');
         Route::get('/sales/series-numbers', 'Api\\SalesController@seriesNumbers');
         Route::get('/sales/commercial-documents', 'Api\\SalesController@commercialDocuments');
+        Route::get('/sales/commercial-documents/export', 'Api\\SalesController@exportCommercialDocuments');
+        Route::get('/sales/commercial-documents/{id}', 'Api\\SalesController@showCommercialDocument');
     });
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
         Route::post('/sales/commercial-documents', 'Api\\SalesController@createCommercialDocument');
+        Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesController@convertCommercialDocument');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
     });

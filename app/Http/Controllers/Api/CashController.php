@@ -19,10 +19,21 @@ class CashController extends Controller
         $companyId    = (int) $request->query('company_id', $authUser->company_id);
         $cashRegId    = $request->query('cash_register_id');
         $status       = $request->query('status');
-        $limit        = min((int) $request->query('limit', 20), 100);
+        $page         = (int) $request->query('page', 1);
+        $limit        = (int) $request->query('per_page', $request->query('limit', 10));
+
+        if ($page < 1) {
+            $page = 1;
+        }
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 100) {
+            $limit = 100;
+        }
 
         if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
+            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
         }
 
         $query = DB::table('sales.cash_sessions as cs')
@@ -44,8 +55,7 @@ class CashController extends Controller
                 'cs.notes',
             ])
             ->where('cs.company_id', $companyId)
-            ->orderByDesc('cs.opened_at')
-            ->limit($limit);
+            ->orderByDesc('cs.opened_at');
 
         if ($cashRegId !== null && $cashRegId !== '') {
             $query->where('cs.cash_register_id', (int) $cashRegId);
@@ -54,7 +64,26 @@ class CashController extends Controller
             $query->where('cs.status', $status);
         }
 
-        return response()->json(['data' => $query->get()]);
+        $total = (clone $query)->count('cs.id');
+        $lastPage = (int) max(1, ceil($total / $limit));
+        if ($page > $lastPage) {
+            $page = $lastPage;
+        }
+
+        $rows = $query
+            ->offset(($page - 1) * $limit)
+            ->limit($limit)
+            ->get();
+
+        return response()->json([
+            'data' => $rows,
+            'meta' => [
+                'page' => $page,
+                'per_page' => $limit,
+                'total' => (int) $total,
+                'last_page' => $lastPage,
+            ],
+        ]);
     }
 
     public function currentSession(Request $request)
@@ -64,7 +93,7 @@ class CashController extends Controller
         $cashRegId = $request->query('cash_register_id');
 
         if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
+            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
         }
 
         $query = DB::table('sales.cash_sessions as cs')
@@ -103,14 +132,14 @@ class CashController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
         }
 
         $payload   = $validator->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
 
         if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
+            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
         }
 
         // Verificar que no haya una sesion abierta para esta caja
@@ -172,7 +201,7 @@ class CashController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
         }
 
         $payload = $validator->validated();
@@ -190,6 +219,26 @@ class CashController extends Controller
 
         $expectedBalance = round((float) $session->opening_balance + $totalIn - $totalOut, 4);
 
+        // Obtener desglose de ventas por tipo de pago (solo documentos tributarios)
+        // Los documentos se obtienen a través de cash_movements
+            $salesByPaymentMethod = DB::table('sales.cash_movements as cm')
+                ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
+                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+                ->select([
+                    DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
+                    DB::raw("COALESCE(pm.code, 'SIN_METODO') as payment_method_code"),
+                    DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
+                DB::raw('COUNT(cd.id) as document_count'),
+                DB::raw('SUM(cd.total) as total_amount'),
+            ])
+            ->where('cm.cash_session_id', $id)
+            ->where('cm.company_id', $companyId)
+            ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
+            ->where('cd.status', '!=', 'CANCELED')
+                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(pm.code, 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
+                ->orderBy(DB::raw("COALESCE(pm.code, 'SIN_METODO')"))
+            ->get();
+
         DB::table('sales.cash_sessions')->where('id', $id)->update([
             'closed_at'        => now(),
             'closed_by'        => $authUser->id,
@@ -200,6 +249,18 @@ class CashController extends Controller
         ]);
 
         $updated = DB::table('sales.cash_sessions')->where('id', $id)->first();
+
+        // Formatear desglose de ventas por tipo de pago
+        $paymentMethodBreakdown = [];
+        foreach ($salesByPaymentMethod as $record) {
+            $paymentMethodBreakdown[] = [
+                'payment_method_id'   => (int) $record->payment_method_id,
+                'payment_method_code' => $record->payment_method_code,
+                'payment_method_name' => $record->payment_method_name,
+                'document_count'      => (int) $record->document_count,
+                'total_amount'        => round((float) $record->total_amount, 4),
+            ];
+        }
 
         return response()->json([
             'message'          => 'Sesion de caja cerrada',
@@ -212,6 +273,7 @@ class CashController extends Controller
                 'closing_balance'  => round((float) $payload['closing_balance'], 4),
                 'difference'       => round((float) $payload['closing_balance'] - $expectedBalance, 4),
             ],
+            'sales_by_payment_method' => $paymentMethodBreakdown,
         ]);
     }
 
@@ -228,11 +290,16 @@ class CashController extends Controller
         $limit     = min((int) $request->query('limit', 50), 200);
 
         if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
+            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
         }
 
         $query = DB::table('sales.cash_movements as cm')
             ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cm.user_id, cm.created_by)'))
+                ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                    $join->on('cd.id', '=', 'cm.ref_id')
+                         ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+                })
+                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->select([
                 'cm.id',
                 'cm.cash_register_id',
@@ -245,6 +312,7 @@ class CashController extends Controller
                 DB::raw('COALESCE(cm.user_id, cm.created_by) as user_id'),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
                 'cm.movement_at',
+                    DB::raw("pm.name as payment_method_name"),
             ])
             ->where('cm.company_id', $companyId)
             ->orderByDesc('cm.movement_at')
@@ -258,6 +326,203 @@ class CashController extends Controller
         }
 
         return response()->json(['data' => $query->get()]);
+    }
+
+    public function sessionDetail(Request $request, $id)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) $authUser->company_id;
+
+        // Obtener sesión
+        $session = DB::table('sales.cash_sessions as cs')
+            ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cs.user_id, cs.opened_by)'))
+            ->leftJoin('sales.cash_registers as cr', 'cr.id', '=', 'cs.cash_register_id')
+            ->select([
+                'cs.id',
+                'cs.cash_register_id',
+                DB::raw('cr.code as cash_register_code'),
+                DB::raw('cr.name as cash_register_name'),
+                DB::raw('COALESCE(cs.user_id, cs.opened_by) as user_id'),
+                DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
+                'cs.opened_at',
+                'cs.closed_at',
+                'cs.opening_balance',
+                'cs.closing_balance',
+                'cs.expected_balance',
+                'cs.status',
+                'cs.notes',
+            ])
+            ->where('cs.id', $id)
+            ->where('cs.company_id', $companyId)
+            ->first();
+
+        if (!$session) {
+            return response()->json(['message' => 'Sesion no encontrada'], 404);
+        }
+
+        // Calcular totales IN/OUT
+        $totalIn  = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $id)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->sum('amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $id)
+            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
+            ->sum('amount');
+
+        // Obtener movimientos de la sesión
+        $rawMovements = DB::table('sales.cash_movements as cm')
+            ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cm.user_id, cm.created_by)'))
+            ->select([
+                'cm.id',
+                DB::raw("CASE WHEN cm.movement_type IN ('IN','INCOME') THEN 'IN' ELSE 'OUT' END as movement_type"),
+                'cm.amount',
+                DB::raw('COALESCE(cm.description, cm.notes) as description'),
+                'cm.ref_type',
+                'cm.ref_id',
+                DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
+                'cm.movement_at',
+            ])
+            ->where('cm.cash_session_id', $id)
+            ->where('cm.company_id', $companyId)
+            ->orderBy('cm.movement_at')
+            ->get();
+
+        $movements = array_map(function ($m) {
+            return [
+                'id'            => (int) $m->id,
+                'movement_type' => $m->movement_type,
+                'amount'        => round((float) $m->amount, 2),
+                'description'   => $m->description,
+                'ref_type'      => $m->ref_type,
+                'ref_id'        => $m->ref_id,
+                'user_name'     => $m->user_name,
+                'movement_at'   => $m->movement_at,
+            ];
+        }, $rawMovements->toArray());
+
+        // Obtener comprobantes vendidos en esta sesión (sales.customers, no core.customers)
+        $documents = DB::table('sales.commercial_documents as cd')
+            ->join('sales.cash_movements as cm', function ($join) use ($id) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->where('cm.cash_session_id', $id)
+                    ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+            })
+            ->leftJoin('sales.customers as cust', 'cust.id', '=', 'cd.customer_id')
+            ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+            ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
+            ->select([
+                'cd.id',
+                'cd.document_kind',
+                'cd.series',
+                'cd.number',
+                DB::raw("CONCAT(cd.series, '-', cd.number) as document_number"),
+                DB::raw("COALESCE(cust.legal_name, cust.trade_name, cust.first_name, '-') as customer_name"),
+                'pm.name as payment_method_name',
+                'cd.total',
+                'cd.status',
+                'cd.created_at',
+                DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as user_name"),
+            ])
+            ->where('cd.company_id', $companyId)
+            ->where('cd.status', '!=', 'CANCELED')
+            ->orderBy('cd.created_at')
+            ->get();
+
+        // Para cada documento, obtener sus líneas (items tienen description propia, unidades en core.units)
+        $documentsWithItems = [];
+        foreach ($documents as $doc) {
+            $items = DB::table('sales.commercial_document_items as cdi')
+                ->leftJoin('core.units as u', 'u.id', '=', 'cdi.unit_id')
+                ->select([
+                    'cdi.id',
+                    'cdi.description',
+                    'cdi.qty',
+                    DB::raw('COALESCE(u.code, \'-\') as unit_code'),
+                    'cdi.unit_price',
+                    'cdi.total as line_total',
+                ])
+                ->where('cdi.document_id', $doc->id)
+                ->orderBy('cdi.line_no')
+                ->get();
+
+            $documentsWithItems[] = [
+                'id'                  => (int) $doc->id,
+                'document_number'     => $doc->document_number,
+                'document_kind'       => $doc->document_kind,
+                'customer_name'       => $doc->customer_name,
+                'payment_method_name' => $doc->payment_method_name,
+                'total'               => round((float) $doc->total, 2),
+                'status'              => $doc->status,
+                'created_at'          => $doc->created_at,
+                'user_name'           => $doc->user_name,
+                'items'               => array_map(function ($item) {
+                    return [
+                        'description' => $item->description,
+                        'quantity'    => round((float) $item->qty, 3),
+                        'unit_code'   => $item->unit_code,
+                        'unit_price'  => round((float) $item->unit_price, 2),
+                        'line_total'  => round((float) $item->line_total, 2),
+                    ];
+                }, $items->toArray()),
+            ];
+        }
+
+        // Desglose de ventas por tipo de pago
+        $salesByPaymentMethod = DB::table('sales.cash_movements as cm')
+            ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
+                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+                ->select([
+                    DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
+                    DB::raw("COALESCE(pm.code, 'SIN_METODO') as payment_method_code"),
+                    DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
+                DB::raw('COUNT(cd.id) as document_count'),
+                DB::raw('SUM(cd.total) as total_amount'),
+            ])
+            ->where('cm.cash_session_id', $id)
+            ->where('cm.company_id', $companyId)
+            ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
+            ->where('cd.status', '!=', 'CANCELED')
+                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(pm.code, 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
+                ->orderBy(DB::raw("COALESCE(pm.code, 'SIN_METODO')"))
+            ->get();
+
+        $paymentMethodBreakdown = array_map(function ($record) {
+            return [
+                'payment_method_id'   => (int) $record->payment_method_id,
+                'payment_method_code' => $record->payment_method_code,
+                'payment_method_name' => $record->payment_method_name,
+                'document_count'      => (int) $record->document_count,
+                'total_amount'        => round((float) $record->total_amount, 2),
+            ];
+        }, $salesByPaymentMethod->toArray());
+
+        return response()->json([
+            'session' => [
+                'id'                 => (int) $session->id,
+                'cash_register_code' => $session->cash_register_code,
+                'cash_register_name' => $session->cash_register_name,
+                'user_name'          => $session->user_name,
+                'opened_at'          => $session->opened_at,
+                'closed_at'          => $session->closed_at,
+                'opening_balance'    => round((float) $session->opening_balance, 2),
+                'closing_balance'    => $session->closing_balance ? round((float) $session->closing_balance, 2) : null,
+                'expected_balance'   => round((float) $session->expected_balance, 2),
+                'status'             => $session->status,
+                'notes'              => $session->notes,
+            ],
+            'summary' => [
+                'total_in'   => round($totalIn, 2),
+                'total_out'  => round($totalOut, 2),
+                'difference' => $session->closing_balance
+                    ? round((float) $session->closing_balance - ((float) $session->opening_balance + $totalIn - $totalOut), 2)
+                    : null,
+            ],
+            'movements'                => $movements,
+            'documents'                => $documentsWithItems,
+            'payment_method_breakdown' => $paymentMethodBreakdown,
+        ]);
     }
 
     public function createMovement(Request $request)
@@ -274,14 +539,14 @@ class CashController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
         }
 
         $payload   = $validator->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
 
         if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
+            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
         }
 
         // Buscar sesion abierta si no se especifico

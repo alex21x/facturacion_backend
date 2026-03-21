@@ -39,6 +39,8 @@ class AuthController extends Controller
             ], 401);
         }
 
+        $roleContext = $this->resolvePrimaryRoleContext((int) $user->id, (int) $user->company_id);
+
         $deviceId = trim((string) $request->input('device_id'));
         $refreshToken = ApiToken::makeRefreshToken();
         $refreshTokenHash = ApiToken::hashRefreshToken($refreshToken, $deviceId);
@@ -97,6 +99,8 @@ class AuthController extends Controller
                 'first_name' => $user->first_name,
                 'last_name' => $user->last_name,
                 'email' => $user->email,
+                'role_code' => $roleContext['role_code'],
+                'role_profile' => $roleContext['role_profile'],
             ],
         ]);
     }
@@ -147,6 +151,8 @@ class AuthController extends Controller
             ], 401);
         }
 
+        $roleContext = $this->resolvePrimaryRoleContext((int) $session->user_id, (int) $session->company_id);
+
         $newRefreshToken = ApiToken::makeRefreshToken();
         $newRefreshHash = ApiToken::hashRefreshToken($newRefreshToken, $deviceId);
         $refreshExpiresAt = now()->addDays((int) env('REFRESH_TOKEN_TTL_DAYS', 30));
@@ -194,6 +200,8 @@ class AuthController extends Controller
                 'first_name' => $session->first_name,
                 'last_name' => $session->last_name,
                 'email' => $session->email,
+                'role_code' => $roleContext['role_code'],
+                'role_profile' => $roleContext['role_profile'],
             ],
         ]);
     }
@@ -211,8 +219,47 @@ class AuthController extends Controller
                 'first_name' => $user->first_name,
                 'last_name' => $user->last_name,
                 'email' => $user->email,
+                'role_code' => $user->role_code ?? null,
+                'role_profile' => $user->role_profile ?? null,
             ],
         ]);
+    }
+
+    private function resolvePrimaryRoleContext(int $userId, int $companyId): array
+    {
+        $this->ensureCompanyRoleProfilesTable();
+
+        $row = DB::table('auth.user_roles as ur')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId) {
+                $join->on('crp.role_id', '=', 'r.id')
+                    ->where('crp.company_id', '=', $companyId);
+            })
+            ->where('ur.user_id', $userId)
+            ->where('r.company_id', $companyId)
+            ->where('r.status', 1)
+            ->orderBy('r.id')
+            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
+            ->first();
+
+        return [
+            'role_code' => $row && $row->role_code !== null ? (string) $row->role_code : null,
+            'role_profile' => $row && $row->role_profile !== null ? (string) $row->role_profile : null,
+        ];
+    }
+
+    private function ensureCompanyRoleProfilesTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
+                company_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                functional_profile VARCHAR(20) NULL,
+                updated_by BIGINT NULL,
+                updated_at TIMESTAMP NULL,
+                PRIMARY KEY (company_id, role_id)
+            )'
+        );
     }
 
     public function logout(Request $request)

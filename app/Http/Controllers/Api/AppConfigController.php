@@ -15,6 +15,7 @@ class AppConfigController extends Controller
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',
+        'SALES_SELLER_TO_CASHIER',
     ];
 
     public function operationalContext(Request $request)
@@ -198,8 +199,8 @@ class AppConfigController extends Controller
                 'is_enabled' => $isEnabled,
                 'company_enabled' => $company ? (bool) $company->is_enabled : null,
                 'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
-                'company_config' => $company ? $company->config : null,
-                'branch_config' => $branch ? $branch->config : null,
+                'company_config' => $company ? $this->decodeJsonConfig($company->config) : null,
+                'branch_config' => $branch ? $this->decodeJsonConfig($branch->config) : null,
             ];
         })->values();
 
@@ -344,7 +345,7 @@ class AppConfigController extends Controller
             return [
                 'feature_code' => $code,
                 'is_enabled' => $row ? (bool) $row->is_enabled : false,
-                'config' => $row ? $row->config : null,
+                'config' => $row ? $this->decodeJsonConfig($row->config) : null,
             ];
         })->values();
 
@@ -361,9 +362,9 @@ class AppConfigController extends Controller
         $validator = Validator::make($request->all(), [
             'company_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING',
+            'features.*.feature_code' => 'required|string|in:PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,SALES_SELLER_TO_CASHIER',
             'features.*.is_enabled' => 'required|boolean',
-            'features.*.config' => 'nullable|array',
+            'features.*.config' => 'nullable',
         ]);
 
         if ($validator->fails()) {
@@ -390,7 +391,7 @@ class AppConfigController extends Controller
                 ],
                 [
                     'is_enabled' => (bool) $feature['is_enabled'],
-                    'config' => array_key_exists('config', $feature) ? json_encode($feature['config']) : null,
+                    'config' => array_key_exists('config', $feature) ? $this->encodeJsonConfig($feature['config']) : null,
                     'updated_by' => $authUser->id,
                     'updated_at' => now(),
                 ]
@@ -398,6 +399,52 @@ class AppConfigController extends Controller
         }
 
         return $this->commerceSettings($request);
+    }
+
+    private function decodeJsonConfig($value)
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $decoded = json_decode($trimmed, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $decoded;
+        }
+
+        return $value;
+    }
+
+    private function encodeJsonConfig($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return null;
+            }
+
+            $decoded = json_decode($trimmed, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return json_encode($decoded);
+            }
+
+            return json_encode($value);
+        }
+
+        return json_encode($value);
     }
 
     private function fetchPlatformLimits(): array

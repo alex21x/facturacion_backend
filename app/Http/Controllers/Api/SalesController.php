@@ -423,9 +423,38 @@ class SalesController extends Controller
 
         try {
             $result = DB::transaction(function () use ($payload, $authUser, $companyId, $branchId, $warehouseId, $cashRegisterId) {
+                $isSellerToCashierMode = $this->isCommerceFeatureEnabled($companyId, 'SALES_SELLER_TO_CASHIER');
+                $isPreDocument = in_array($payload['document_kind'], ['SALES_ORDER', 'QUOTATION'], true);
+                $roleContext = $this->resolveAuthRoleContext((int) $authUser->id, $companyId);
+                $roleCode = strtoupper((string) ($roleContext['role_code'] ?? ''));
+                $roleProfile = strtoupper((string) ($roleContext['role_profile'] ?? ''));
+
+                if ($isSellerToCashierMode) {
+                    if ($isPreDocument && $this->isCashierActor($roleProfile, $roleCode)) {
+                        throw new \RuntimeException('En este modo, caja no genera pedidos. Use Reporte para convertir pedidos pendientes.');
+                    }
+
+                    if (!$isPreDocument && $this->isSellerActor($roleProfile, $roleCode)) {
+                        throw new \RuntimeException('En este modo, vendedor no emite comprobantes finales. Debe generar pedido para caja.');
+                    }
+                }
+
+                if ($isSellerToCashierMode && $isPreDocument) {
+                    $payload['status'] = 'DRAFT';
+                    $payload['payments'] = [];
+                    $cashRegisterId = null;
+                }
+
                 $documentStatus = $payload['status'] ?? 'DRAFT';
                 $stockDirection = $this->stockDirectionForDocument($payload['document_kind']);
-                $affectsStock = $this->shouldAffectStock($payload['document_kind'], $documentStatus);
+                $metadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+                $stockAlreadyDiscounted = false;
+
+                if (array_key_exists('stock_already_discounted', $metadata)) {
+                    $stockAlreadyDiscounted = filter_var($metadata['stock_already_discounted'], FILTER_VALIDATE_BOOLEAN);
+                }
+
+                $affectsStock = !$stockAlreadyDiscounted && $this->shouldAffectStock($payload['document_kind'], $documentStatus);
                 $settings = $this->inventorySettingsForCompany($companyId);
 
                 $seriesRow = DB::table('sales.series_numbers')
@@ -447,7 +476,7 @@ class SalesController extends Controller
                     ->first();
 
                 if (!$seriesRow) {
-                    throw new \RuntimeException('Series not found or disabled');
+                    throw new \RuntimeException('No hay serie activa para ' . $payload['document_kind'] . ' en la sucursal/almacen seleccionado. Configurala en Maestros > Series.');
                 }
 
                 $nextNumber = ((int) $seriesRow->current_number) + 1;
@@ -837,12 +866,25 @@ class SalesController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
-        $branchId = $request->query('branch_id', $authUser->branch_id);
-        $warehouseId = $request->query('warehouse_id');
-        $cashRegisterId = $request->query('cash_register_id');
-        $documentKind = $request->query('document_kind');
-        $status = $request->query('status');
-        $limit = (int) $request->query('limit', 50);
+        $filters = [
+            'branch_id' => $request->query('branch_id', $authUser->branch_id),
+            'warehouse_id' => $request->query('warehouse_id'),
+            'cash_register_id' => $request->query('cash_register_id'),
+            'document_kind' => $request->query('document_kind'),
+            'status' => $request->query('status'),
+            'conversion_state' => $request->query('conversion_state'),
+            'customer' => trim((string) $request->query('customer', '')),
+            'issue_date_from' => $request->query('issue_date_from'),
+            'issue_date_to' => $request->query('issue_date_to'),
+            'series' => trim((string) $request->query('series', '')),
+            'number' => trim((string) $request->query('number', '')),
+        ];
+        $page = (int) $request->query('page', 1);
+        $limit = (int) $request->query('per_page', $request->query('limit', 10));
+
+        if ($page < 1) {
+            $page = 1;
+        }
 
         if ($limit < 1) {
             $limit = 1;
@@ -853,6 +895,7 @@ class SalesController extends Controller
 
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'd.payment_method_id')
             ->select([
                 'd.id',
                 'd.company_id',
@@ -861,15 +904,190 @@ class SalesController extends Controller
                 'd.series',
                 'd.number',
                 'd.issue_at',
+                'd.created_at',
                 'd.status',
                 'd.external_status',
                 'd.total',
                 'd.balance_due',
+                                DB::raw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) as source_document_id"),
+                                DB::raw("(
+                                        SELECT dsrc.document_kind
+                                        FROM sales.commercial_documents dsrc
+                                        WHERE dsrc.company_id = d.company_id
+                                            AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                                        LIMIT 1
+                                ) as source_document_kind"),
+                DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                                DB::raw("EXISTS (
+                                        SELECT 1
+                                        FROM sales.commercial_documents d2
+                                        WHERE d2.company_id = d.company_id
+                                            AND d2.document_kind IN ('INVOICE', 'RECEIPT')
+                                            AND d2.status NOT IN ('VOID', 'CANCELED')
+                                            AND COALESCE((d2.metadata->>'source_document_id')::BIGINT, 0) = d.id
+                                ) as has_tributary_conversion"),
+                                DB::raw("EXISTS (
+                                                        SELECT 1
+                                                        FROM sales.commercial_documents d3
+                                                        WHERE d3.company_id = d.company_id
+                                                            AND d3.document_kind = 'SALES_ORDER'
+                                                            AND d3.status NOT IN ('VOID', 'CANCELED')
+                                                            AND COALESCE((d3.metadata->>'source_document_id')::BIGINT, 0) = d.id
+                                                ) as has_order_conversion"),
+                                DB::raw("EXISTS (
+                                                        SELECT 1
+                                                        FROM sales.commercial_document_items di
+                                                        WHERE di.document_id = d.id
+                                                ) as has_items"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
             ])
-            ->where('d.company_id', $companyId)
+            ->where('d.company_id', $companyId);
+
+        $this->applyCommercialDocumentFilters($query, $filters);
+
+        $total = (clone $query)->count('d.id');
+        $lastPage = (int) max(1, ceil($total / $limit));
+        if ($page > $lastPage) {
+            $page = $lastPage;
+        }
+
+        $rows = $query
             ->orderBy('d.issue_at', 'desc')
-            ->limit($limit);
+            ->orderBy('d.id', 'desc')
+            ->offset(($page - 1) * $limit)
+            ->limit($limit)
+            ->get();
+
+        return response()->json([
+            'data' => $rows,
+            'meta' => [
+                'page' => $page,
+                'per_page' => $limit,
+                'total' => (int) $total,
+                'last_page' => $lastPage,
+            ],
+        ]);
+    }
+
+    public function exportCommercialDocuments(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $format = strtolower(trim((string) $request->query('format', 'csv')));
+        $filters = [
+            'branch_id' => $request->query('branch_id', $authUser->branch_id),
+            'warehouse_id' => $request->query('warehouse_id'),
+            'cash_register_id' => $request->query('cash_register_id'),
+            'document_kind' => $request->query('document_kind'),
+            'status' => $request->query('status'),
+            'conversion_state' => $request->query('conversion_state'),
+            'customer' => trim((string) $request->query('customer', '')),
+            'issue_date_from' => $request->query('issue_date_from'),
+            'issue_date_to' => $request->query('issue_date_to'),
+            'series' => trim((string) $request->query('series', '')),
+            'number' => trim((string) $request->query('number', '')),
+        ];
+
+        $max = (int) $request->query('max', 5000);
+        if ($max < 1) {
+            $max = 1;
+        }
+        if ($max > 20000) {
+            $max = 20000;
+        }
+
+        $query = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->select([
+                'd.id',
+                'd.document_kind',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.status',
+                'd.total',
+                'd.balance_due',
+                DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+            ])
+            ->where('d.company_id', $companyId);
+
+        $this->applyCommercialDocumentFilters($query, $filters);
+
+        $rows = $query
+            ->orderBy('d.issue_at', 'desc')
+            ->orderBy('d.id', 'desc')
+            ->limit($max)
+            ->get();
+
+        if ($format === 'json') {
+            return response()->json([
+                'data' => $rows,
+                'meta' => [
+                    'count' => (int) $rows->count(),
+                    'max' => $max,
+                ],
+            ]);
+        }
+
+        $filename = 'reporte_ventas_' . now()->format('Ymd_His') . '.csv';
+
+        return response()->streamDownload(function () use ($rows) {
+            $out = fopen('php://output', 'w');
+            if ($out === false) {
+                return;
+            }
+
+            // UTF-8 BOM for Excel compatibility.
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, [
+                'ID',
+                'Documento',
+                'Serie',
+                'Numero',
+                'Fecha Emision',
+                'Cliente',
+                'Forma de Pago',
+                'Estado',
+                'Total',
+                'Saldo',
+            ], ';');
+
+            foreach ($rows as $row) {
+                fputcsv($out, [
+                    (int) $row->id,
+                    (string) $row->document_kind,
+                    (string) $row->series,
+                    (string) $row->number,
+                    $row->issue_at ? (string) $row->issue_at : '',
+                    (string) ($row->customer_name ?? ''),
+                    (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
+                    (string) $row->status,
+                    number_format((float) ($row->total ?? 0), 2, '.', ''),
+                    number_format((float) ($row->balance_due ?? 0), 2, '.', ''),
+                ], ';');
+            }
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    private function applyCommercialDocumentFilters($query, array $filters): void
+    {
+        $branchId = $filters['branch_id'] ?? null;
+        $warehouseId = $filters['warehouse_id'] ?? null;
+        $cashRegisterId = $filters['cash_register_id'] ?? null;
+        $documentKind = $filters['document_kind'] ?? null;
+        $status = $filters['status'] ?? null;
+        $conversionState = $filters['conversion_state'] ?? null;
+        $customer = trim((string) ($filters['customer'] ?? ''));
+        $issueDateFrom = $filters['issue_date_from'] ?? null;
+        $issueDateTo = $filters['issue_date_to'] ?? null;
+        $series = trim((string) ($filters['series'] ?? ''));
+        $number = trim((string) ($filters['number'] ?? ''));
 
         if ($branchId !== null && $branchId !== '') {
             $query->where('d.branch_id', (int) $branchId);
@@ -884,15 +1102,394 @@ class SalesController extends Controller
         }
 
         if ($documentKind) {
-            $query->where('d.document_kind', $documentKind);
+            $kinds = array_values(array_filter(array_map('trim', explode(',', (string) $documentKind))));
+
+            if (count($kinds) > 1) {
+                $query->whereIn('d.document_kind', $kinds);
+            } else {
+                $query->where('d.document_kind', $kinds[0] ?? (string) $documentKind);
+            }
         }
 
         if ($status) {
-            $query->where('d.status', $status);
+            $query->where('d.status', (string) $status);
+        }
+
+        if ($customer !== '') {
+            $like = '%' . $customer . '%';
+            $query->where(function ($nested) use ($like) {
+                $nested->where('c.legal_name', 'ilike', $like)
+                    ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like])
+                    ->orWhere('c.doc_number', 'ilike', $like);
+            });
+        }
+
+        if ($issueDateFrom) {
+            $query->whereDate('d.issue_at', '>=', $issueDateFrom);
+        }
+
+        if ($issueDateTo) {
+            $query->whereDate('d.issue_at', '<=', $issueDateTo);
+        }
+
+        if ($series !== '') {
+            $query->where('d.series', 'ilike', '%' . $series . '%');
+        }
+
+        if ($number !== '') {
+            if (ctype_digit($number)) {
+                $query->where('d.number', (int) $number);
+            } else {
+                $query->whereRaw('CAST(d.number AS TEXT) ILIKE ?', ['%' . $number . '%']);
+            }
+        }
+
+        if ($conversionState === 'PENDING') {
+            $query
+                ->whereIn('d.document_kind', ['QUOTATION', 'SALES_ORDER'])
+                ->whereRaw("NOT EXISTS (
+                    SELECT 1
+                    FROM sales.commercial_documents d2
+                    WHERE d2.company_id = d.company_id
+                      AND d2.document_kind IN ('INVOICE', 'RECEIPT')
+                      AND d2.status NOT IN ('VOID', 'CANCELED')
+                      AND COALESCE((d2.metadata->>'source_document_id')::BIGINT, 0) = d.id
+                )");
+        }
+
+        if ($conversionState === 'CONVERTED') {
+            $query
+                ->whereIn('d.document_kind', ['QUOTATION', 'SALES_ORDER'])
+                ->whereRaw("EXISTS (
+                    SELECT 1
+                    FROM sales.commercial_documents d2
+                    WHERE d2.company_id = d.company_id
+                      AND d2.document_kind IN ('INVOICE', 'RECEIPT')
+                      AND d2.status NOT IN ('VOID', 'CANCELED')
+                      AND COALESCE((d2.metadata->>'source_document_id')::BIGINT, 0) = d.id
+                )");
+        }
+    }
+
+    public function convertCommercialDocument(Request $request, $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT,SALES_ORDER',
+            'series' => 'nullable|string|max:10',
+            'issue_at' => 'nullable|date',
+            'due_at' => 'nullable|date',
+            'cash_register_id' => 'nullable|integer|min:1',
+            'payment_method_id' => 'nullable|integer|min:1',
+            'notes' => 'nullable|string',
+            'status' => 'nullable|string|in:ISSUED,DRAFT',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) $authUser->company_id;
+        $sourceId = (int) $id;
+        $roleContext = $this->resolveAuthRoleContext((int) $authUser->id, $companyId);
+        $roleCode = strtoupper((string) ($roleContext['role_code'] ?? ''));
+        $roleProfile = strtoupper((string) ($roleContext['role_profile'] ?? ''));
+
+        if ($this->isCommerceFeatureEnabled($companyId, 'SALES_SELLER_TO_CASHIER') && !$this->isCashierActor($roleProfile, $roleCode)) {
+            return response()->json([
+                'message' => 'Solo caja puede convertir pedidos en este modo de venta.',
+            ], 403);
+        }
+
+        $source = DB::table('sales.commercial_documents')
+            ->where('id', $sourceId)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if (!$source) {
+            return response()->json([
+                'message' => 'Documento origen no encontrado',
+            ], 404);
+        }
+
+        if (!in_array((string) $source->document_kind, ['QUOTATION', 'SALES_ORDER'], true)) {
+            return response()->json([
+                'message' => 'Solo se puede convertir cotizacion o pedido de venta',
+            ], 422);
+        }
+
+        if (in_array((string) $source->status, ['VOID', 'CANCELED'], true)) {
+            return response()->json([
+                'message' => 'No se puede convertir un documento anulado/cancelado',
+            ], 422);
+        }
+
+        $targetDocumentKind = (string) $payload['target_document_kind'];
+
+        if ((string) $source->document_kind === 'SALES_ORDER' && $targetDocumentKind === 'SALES_ORDER') {
+            return response()->json([
+                'message' => 'El documento origen ya es una nota de pedido',
+            ], 422);
+        }
+
+        $alreadyConverted = DB::table('sales.commercial_documents as d')
+            ->where('d.company_id', $companyId)
+            ->where('d.document_kind', $targetDocumentKind)
+            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->whereRaw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) = ?", [$sourceId])
+            ->exists();
+
+        if ($alreadyConverted) {
+            return response()->json([
+                'message' => 'El documento ya fue convertido a ' . $targetDocumentKind,
+            ], 409);
+        }
+
+        $sourceItems = DB::table('sales.commercial_document_items')
+            ->where('document_id', $sourceId)
+            ->orderBy('line_no')
+            ->get();
+
+        if ($sourceItems->isEmpty()) {
+            return response()->json([
+                'message' => 'El documento origen no tiene items para convertir',
+            ], 422);
+        }
+
+        $sourceItemIds = $sourceItems->pluck('id')->map(function ($rowId) {
+            return (int) $rowId;
+        })->values()->all();
+
+        $lotsByItem = DB::table('sales.commercial_document_item_lots')
+            ->whereIn('document_item_id', $sourceItemIds)
+            ->get()
+            ->groupBy('document_item_id');
+
+        $series = isset($payload['series']) && trim((string) $payload['series']) !== ''
+            ? trim((string) $payload['series'])
+            : null;
+
+        if ($series === null) {
+            $candidateSeries = DB::table('sales.series_numbers')
+                ->where('company_id', $companyId)
+                ->where('document_kind', $targetDocumentKind)
+                ->where('is_enabled', true)
+                ->when($source->branch_id !== null, function ($query) use ($source) {
+                    $query->where(function ($nested) use ($source) {
+                        $nested->where('branch_id', (int) $source->branch_id)
+                            ->orWhereNull('branch_id');
+                    });
+                })
+                ->when($source->warehouse_id !== null, function ($query) use ($source) {
+                    $query->where(function ($nested) use ($source) {
+                        $nested->where('warehouse_id', (int) $source->warehouse_id)
+                            ->orWhereNull('warehouse_id');
+                    });
+                })
+                ->orderByDesc('branch_id')
+                ->orderByDesc('warehouse_id')
+                ->orderBy('series')
+                ->first();
+
+            if (!$candidateSeries) {
+                return response()->json([
+                    'message' => 'No existe serie habilitada para ' . $targetDocumentKind,
+                ], 422);
+            }
+
+            $series = (string) $candidateSeries->series;
+        }
+
+        $sourceMetadata = [];
+        if (isset($source->metadata) && $source->metadata !== null && $source->metadata !== '') {
+            $decoded = json_decode((string) $source->metadata, true);
+            if (is_array($decoded)) {
+                $sourceMetadata = $decoded;
+            }
+        }
+
+        $sourceHadStockImpact = $this->shouldAffectStock((string) $source->document_kind, (string) $source->status);
+
+        $sourceNumber = (string) $source->series . '-' . (string) $source->number;
+        $itemsPayload = $sourceItems->map(function ($item) use ($lotsByItem) {
+            $itemLots = $lotsByItem->get((int) $item->id, collect())->map(function ($lot) {
+                return [
+                    'lot_id' => (int) $lot->lot_id,
+                    'qty' => (float) $lot->qty,
+                ];
+            })->values()->all();
+
+            return [
+                'line_no' => (int) $item->line_no,
+                'product_id' => $item->product_id !== null ? (int) $item->product_id : null,
+                'unit_id' => $item->unit_id !== null ? (int) $item->unit_id : null,
+                'price_tier_id' => $item->price_tier_id !== null ? (int) $item->price_tier_id : null,
+                'tax_category_id' => $item->tax_category_id !== null ? (int) $item->tax_category_id : null,
+                'description' => (string) $item->description,
+                'qty' => (float) $item->qty,
+                'qty_base' => (float) $item->qty_base,
+                'conversion_factor' => (float) $item->conversion_factor,
+                'base_unit_price' => (float) $item->base_unit_price,
+                'unit_price' => (float) $item->unit_price,
+                'unit_cost' => (float) $item->unit_cost,
+                'wholesale_discount_percent' => (float) $item->wholesale_discount_percent,
+                'price_source' => $item->price_source ?: 'MANUAL',
+                'discount_total' => (float) $item->discount_total,
+                'tax_total' => (float) $item->tax_total,
+                'subtotal' => (float) $item->subtotal,
+                'total' => (float) $item->total,
+                'metadata' => null,
+                'lots' => !empty($itemLots) ? $itemLots : null,
+            ];
+        })->values()->all();
+
+        $forwardPayload = [
+            'company_id' => $companyId,
+            'branch_id' => $source->branch_id !== null ? (int) $source->branch_id : null,
+            'warehouse_id' => $source->warehouse_id !== null ? (int) $source->warehouse_id : null,
+            'cash_register_id' => isset($payload['cash_register_id'])
+                ? (int) $payload['cash_register_id']
+                : (isset($sourceMetadata['cash_register_id']) && $sourceMetadata['cash_register_id'] !== null
+                    ? (int) $sourceMetadata['cash_register_id']
+                    : null),
+            'document_kind' => $targetDocumentKind,
+            'series' => $series,
+            'issue_at' => $payload['issue_at'] ?? now(),
+            'due_at' => $payload['due_at'] ?? $source->due_at,
+            'customer_id' => (int) $source->customer_id,
+            'currency_id' => (int) $source->currency_id,
+            'payment_method_id' => isset($payload['payment_method_id'])
+                ? (int) $payload['payment_method_id']
+                : ($source->payment_method_id !== null ? (int) $source->payment_method_id : null),
+            'exchange_rate' => $source->exchange_rate !== null ? (float) $source->exchange_rate : null,
+            'notes' => $payload['notes'] ?? $source->notes,
+            'metadata' => array_merge($sourceMetadata, [
+                'source_document_id' => $sourceId,
+                'source_document_kind' => (string) $source->document_kind,
+                'source_document_number' => $sourceNumber,
+                'conversion_origin' => 'SALES_MODULE',
+                'stock_already_discounted' => $sourceHadStockImpact,
+            ]),
+            'status' => $payload['status'] ?? 'ISSUED',
+            'items' => $itemsPayload,
+            'payments' => [],
+        ];
+
+        $forwardRequest = Request::create('/api/sales/commercial-documents', 'POST', $forwardPayload);
+        $forwardRequest->attributes->set('auth_user', $authUser);
+
+        return $this->createCommercialDocument($forwardRequest);
+    }
+
+    public function showCommercialDocument(Request $request, $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $authUser->company_id;
+        $documentId = (int) $id;
+
+        $doc = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->leftJoin('core.currencies as cur', 'cur.id', '=', 'd.currency_id')
+            ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->select([
+                'd.id',
+                'd.document_kind',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.due_at',
+                'd.status',
+                'd.total',
+                'd.balance_due',
+                'd.notes',
+                'd.metadata',
+                'cur.code as currency_code',
+                'cur.symbol as currency_symbol',
+                'pm.name as payment_method_name',
+                DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                'c.doc_number as customer_doc_number',
+                'c.address as customer_address',
+            ])
+            ->where('d.id', $documentId)
+            ->where('d.company_id', $companyId)
+            ->first();
+
+        if (!$doc) {
+            return response()->json([
+                'message' => 'Documento no encontrado',
+            ], 404);
+        }
+
+        $items = $this->resolveDocumentItemsWithFallback($companyId, $documentId);
+
+        $allTaxCategories = $this->resolveTaxCategories($companyId);
+
+        $mappedItems = $items->map(function ($item) use ($allTaxCategories) {
+            $taxCat = $item->tax_category_id ? $allTaxCategories->firstWhere('id', $item->tax_category_id) : null;
+            $taxLabel = is_array($taxCat) ? (string) ($taxCat['label'] ?? 'Sin IGV') : 'Sin IGV';
+            $taxRate = is_array($taxCat) ? (float) ($taxCat['rate_percent'] ?? 0) : 0;
+
+            return [
+                'lineNo' => (int) $item->line_no,
+                'qty' => (float) $item->qty,
+                'unitLabel' => (string) ($item->unit_code ?? ''),
+                'description' => (string) $item->description,
+                'unitPrice' => (float) $item->unit_price,
+                'lineTotal' => (float) $item->total,
+                'taxCategoryId' => $item->tax_category_id,
+                'taxLabel' => $taxLabel,
+                'taxRate' => $taxRate,
+                'taxAmount' => (float) $item->tax_total,
+            ];
+        })->values();
+
+        $gravadaTotal = 0;
+        $inafectaTotal = 0;
+        $exoneradaTotal = 0;
+        $taxTotal = 0;
+
+        foreach ($items as $item) {
+            $taxCat = $item->tax_category_id ? $allTaxCategories->firstWhere('id', $item->tax_category_id) : null;
+            $taxLabel = is_array($taxCat) ? (string) ($taxCat['label'] ?? 'Sin IGV') : 'Sin IGV';
+
+            if ($taxLabel === 'IGV') {
+                $gravadaTotal += (float) ($item->subtotal ?? 0);
+                $taxTotal += (float) ($item->tax_total ?? 0);
+            } elseif ($taxLabel === 'Inafecta') {
+                $inafectaTotal += (float) ($item->subtotal ?? 0);
+            } elseif ($taxLabel === 'Exonerada') {
+                $exoneradaTotal += (float) ($item->subtotal ?? 0);
+            }
         }
 
         return response()->json([
-            'data' => $query->get(),
+            'data' => [
+                'id' => (int) $doc->id,
+                'documentKind' => (string) $doc->document_kind,
+                'series' => (string) $doc->series,
+                'number' => (int) $doc->number,
+                'issueDate' => (string) ($doc->issue_at ?? ''),
+                'dueDate' => $doc->due_at ? (string) $doc->due_at : null,
+                'status' => (string) $doc->status,
+                'currencyCode' => (string) ($doc->currency_code ?? 'PEN'),
+                'currencySymbol' => (string) ($doc->currency_symbol ?? 'S/'),
+                'paymentMethodName' => (string) ($doc->payment_method_name ?? '-'),
+                'customerName' => (string) ($doc->customer_name ?? '-'),
+                'customerDocNumber' => (string) ($doc->customer_doc_number ?? '-'),
+                'customerAddress' => (string) ($doc->customer_address ?? '-'),
+                'subtotal' => (float) ($gravadaTotal + $inafectaTotal + $exoneradaTotal),
+                'taxTotal' => (float) $taxTotal,
+                'grandTotal' => (float) $doc->total,
+                'gravadaTotal' => (float) $gravadaTotal,
+                'inafectaTotal' => (float) $inafectaTotal,
+                'exoneradaTotal' => (float) $exoneradaTotal,
+                'items' => $mappedItems,
+            ],
         ]);
     }
 
@@ -1109,18 +1706,73 @@ class SalesController extends Controller
         return [$schema, $table];
     }
 
+    private function resolveDocumentItemsWithFallback(int $companyId, int $documentId, int $maxDepth = 5)
+    {
+        $visited = [];
+        $currentDocumentId = $documentId;
+
+        for ($depth = 0; $depth <= $maxDepth; $depth++) {
+            if (in_array($currentDocumentId, $visited, true)) {
+                break;
+            }
+            $visited[] = $currentDocumentId;
+
+            $items = DB::table('sales.commercial_document_items as i')
+                ->leftJoin('core.units as u', 'u.id', '=', 'i.unit_id')
+                ->select([
+                    'i.line_no',
+                    'i.qty',
+                    'i.description',
+                    'i.unit_price',
+                    'u.code as unit_code',
+                    'i.tax_category_id',
+                    'i.tax_total',
+                    'i.subtotal',
+                    'i.total',
+                ])
+                ->where('i.document_id', $currentDocumentId)
+                ->orderBy('i.line_no')
+                ->get();
+
+            if (!$items->isEmpty()) {
+                return $items;
+            }
+
+            $docRow = DB::table('sales.commercial_documents')
+                ->select('id', 'metadata')
+                ->where('company_id', $companyId)
+                ->where('id', $currentDocumentId)
+                ->first();
+
+            if (!$docRow || $docRow->metadata === null || $docRow->metadata === '') {
+                break;
+            }
+
+            $metadata = json_decode((string) $docRow->metadata, true);
+            $nextDocumentId = is_array($metadata) ? (int) ($metadata['source_document_id'] ?? 0) : 0;
+
+            if ($nextDocumentId <= 0) {
+                break;
+            }
+
+            $currentDocumentId = $nextDocumentId;
+        }
+
+        return collect();
+    }
+
     private function shouldAffectStock(string $documentKind, string $status): bool
     {
         if ($status !== 'ISSUED') {
             return false;
         }
 
-        return in_array($documentKind, ['INVOICE', 'RECEIPT', 'DEBIT_NOTE', 'CREDIT_NOTE'], true);
+        return in_array($documentKind, ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'DEBIT_NOTE', 'CREDIT_NOTE'], true);
     }
 
     private function stockDirectionForDocument(string $documentKind): int
     {
-        if (in_array($documentKind, ['INVOICE', 'RECEIPT', 'DEBIT_NOTE'], true)) {
+        if (in_array($documentKind, ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'DEBIT_NOTE'], true)) {
             return -1;
         }
 
@@ -1148,6 +1800,82 @@ class SalesController extends Controller
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
             'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
         ];
+    }
+
+    private function isCommerceFeatureEnabled(int $companyId, string $featureCode): bool
+    {
+        return DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->where('is_enabled', true)
+            ->exists();
+    }
+
+    private function isSellerActor(string $roleProfile, string $roleCode): bool
+    {
+        if ($roleProfile === 'SELLER') {
+            return true;
+        }
+
+        if ($roleCode === '') {
+            return false;
+        }
+
+        return strpos($roleCode, 'VENDED') !== false || strpos($roleCode, 'SELLER') !== false;
+    }
+
+    private function isCashierActor(string $roleProfile, string $roleCode): bool
+    {
+        if ($roleProfile === 'CASHIER') {
+            return true;
+        }
+
+        if ($roleCode === '') {
+            return false;
+        }
+
+        if (strpos($roleCode, 'ADMIN') !== false) {
+            return true;
+        }
+
+        return strpos($roleCode, 'CAJA') !== false || strpos($roleCode, 'CAJER') !== false || strpos($roleCode, 'CASHIER') !== false;
+    }
+
+    private function resolveAuthRoleContext(int $userId, int $companyId): array
+    {
+        $this->ensureCompanyRoleProfilesTable();
+
+        $row = DB::table('auth.user_roles as ur')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId) {
+                $join->on('crp.role_id', '=', 'r.id')
+                    ->where('crp.company_id', '=', $companyId);
+            })
+            ->where('ur.user_id', $userId)
+            ->where('r.company_id', $companyId)
+            ->where('r.status', 1)
+            ->orderBy('r.id')
+            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
+            ->first();
+
+        return [
+            'role_code' => $row && $row->role_code !== null ? (string) $row->role_code : null,
+            'role_profile' => $row && $row->role_profile !== null ? (string) $row->role_profile : null,
+        ];
+    }
+
+    private function ensureCompanyRoleProfilesTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
+                company_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                functional_profile VARCHAR(20) NULL,
+                updated_by BIGINT NULL,
+                updated_at TIMESTAMP NULL,
+                PRIMARY KEY (company_id, role_id)
+            )'
+        );
     }
 
     private function resolveLineConversion(int $companyId, $product, array $item, ?int $itemUnitId): array

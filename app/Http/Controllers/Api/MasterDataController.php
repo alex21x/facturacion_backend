@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class MasterDataController extends Controller
 {
+    private const ROLE_FUNCTIONAL_PROFILES = ['SELLER', 'CASHIER', 'GENERAL'];
+
     private const DOCUMENT_KIND_CATALOG = [
         ['code' => 'QUOTATION', 'label' => 'Cotizacion'],
         ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta'],
@@ -187,6 +190,352 @@ class MasterDataController extends Controller
                 'units_enabled_total' => $units->where('is_enabled', true)->count(),
             ],
         ]);
+    }
+
+    public function accessControl(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+        $this->ensureCompanyRoleProfilesTable();
+
+        $roleProfiles = DB::table('appcfg.company_role_profiles')
+            ->where('company_id', $companyId)
+            ->pluck('functional_profile', 'role_id');
+
+        $modules = DB::table('appcfg.modules')
+            ->select('id', 'code', 'name')
+            ->where('status', 1)
+            ->orderBy('name')
+            ->get();
+
+        $roles = DB::table('auth.roles')
+            ->select('id', 'company_id', 'code', 'name', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get()
+            ->map(function ($role) use ($modules, $roleProfiles) {
+                $permissions = DB::table('auth.role_module_access as rma')
+                    ->join('appcfg.modules as m', 'm.id', '=', 'rma.module_id')
+                    ->where('rma.role_id', $role->id)
+                    ->select([
+                        'm.code as module_code',
+                        'rma.can_view',
+                        'rma.can_create',
+                        'rma.can_update',
+                        'rma.can_delete',
+                        'rma.can_export',
+                        'rma.can_approve',
+                    ])
+                    ->get()
+                    ->keyBy('module_code');
+
+                $modulePermissions = $modules->map(function ($module) use ($permissions) {
+                    $current = $permissions->get($module->code);
+
+                    return [
+                        'module_code' => $module->code,
+                        'can_view' => $current ? (bool) $current->can_view : false,
+                        'can_create' => $current ? (bool) $current->can_create : false,
+                        'can_update' => $current ? (bool) $current->can_update : false,
+                        'can_delete' => $current ? (bool) $current->can_delete : false,
+                        'can_export' => $current ? (bool) $current->can_export : false,
+                        'can_approve' => $current ? (bool) $current->can_approve : false,
+                    ];
+                })->values();
+
+                return [
+                    'id' => (int) $role->id,
+                    'code' => $role->code,
+                    'name' => $role->name,
+                    'status' => (int) $role->status,
+                    'functional_profile' => $this->normalizeFunctionalProfile($roleProfiles->get($role->id) ?? null),
+                    'permissions' => $modulePermissions,
+                ];
+            })
+            ->values();
+
+        $users = DB::table('auth.users as u')
+            ->leftJoin('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->leftJoin('auth.roles as r', function ($join) use ($companyId) {
+                $join->on('r.id', '=', 'ur.role_id')
+                    ->where('r.company_id', '=', $companyId);
+            })
+            ->select([
+                'u.id',
+                'u.branch_id',
+                'u.username',
+                'u.first_name',
+                'u.last_name',
+                'u.email',
+                'u.phone',
+                'u.status',
+                DB::raw('MIN(r.id) as role_id'),
+                DB::raw('MIN(r.code) as role_code'),
+            ])
+            ->where('u.company_id', $companyId)
+            ->whereNull('u.deleted_at')
+            ->groupBy('u.id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.phone', 'u.status')
+            ->orderBy('u.username')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'id' => (int) $row->id,
+                    'branch_id' => $row->branch_id !== null ? (int) $row->branch_id : null,
+                    'username' => $row->username,
+                    'first_name' => $row->first_name,
+                    'last_name' => $row->last_name,
+                    'email' => $row->email,
+                    'phone' => $row->phone,
+                    'status' => (int) $row->status,
+                    'role_id' => $row->role_id !== null ? (int) $row->role_id : null,
+                    'role_code' => $row->role_code,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'modules' => $modules,
+            'roles' => $roles,
+            'users' => $users,
+        ]);
+    }
+
+    public function createRole(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'code' => 'required|string|max:40',
+            'name' => 'required|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+            'functional_profile' => 'nullable|string|in:SELLER,CASHIER,GENERAL',
+            'permissions' => 'required|array|min:1',
+            'permissions.*.module_code' => 'required|string|max:40',
+            'permissions.*.can_view' => 'required|boolean',
+            'permissions.*.can_create' => 'required|boolean',
+            'permissions.*.can_update' => 'required|boolean',
+            'permissions.*.can_delete' => 'required|boolean',
+            'permissions.*.can_export' => 'required|boolean',
+            'permissions.*.can_approve' => 'required|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $code = strtoupper(trim($payload['code']));
+
+        $roleId = DB::table('auth.roles')->insertGetId([
+            'company_id' => $companyId,
+            'code' => $code,
+            'name' => trim($payload['name']),
+            'status' => (int) ($payload['status'] ?? 1),
+        ]);
+
+        $this->syncRolePermissions((int) $roleId, $payload['permissions']);
+        $this->syncRoleFunctionalProfile($companyId, (int) $roleId, $payload['functional_profile'] ?? null, $authUser->id ?? null);
+
+        return response()->json(['message' => 'Role created', 'id' => (int) $roleId], 201);
+    }
+
+    public function updateRole(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'name' => 'nullable|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+            'functional_profile' => 'nullable|string|in:SELLER,CASHIER,GENERAL',
+            'permissions' => 'nullable|array|min:1',
+            'permissions.*.module_code' => 'required|string|max:40',
+            'permissions.*.can_view' => 'required|boolean',
+            'permissions.*.can_create' => 'required|boolean',
+            'permissions.*.can_update' => 'required|boolean',
+            'permissions.*.can_delete' => 'required|boolean',
+            'permissions.*.can_export' => 'required|boolean',
+            'permissions.*.can_approve' => 'required|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $exists = DB::table('auth.roles')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$exists) {
+            return response()->json(['message' => 'Role not found'], 404);
+        }
+
+        $payload = $validator->validated();
+        $updates = [];
+
+        if (array_key_exists('name', $payload)) {
+            $updates['name'] = trim($payload['name']);
+        }
+        if (array_key_exists('status', $payload)) {
+            $updates['status'] = (int) $payload['status'];
+        }
+
+        if (!empty($updates)) {
+            DB::table('auth.roles')->where('id', $id)->update($updates);
+        }
+
+        if (array_key_exists('permissions', $payload)) {
+            $this->syncRolePermissions($id, $payload['permissions']);
+        }
+
+        if (array_key_exists('functional_profile', $payload)) {
+            $this->syncRoleFunctionalProfile($companyId, $id, $payload['functional_profile'], $authUser->id ?? null);
+        }
+
+        return response()->json(['message' => 'Role updated']);
+    }
+
+    public function createUser(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'branch_id' => 'nullable|integer|min:1',
+            'username' => 'required|string|max:80',
+            'password' => 'required|string|min:6|max:120',
+            'first_name' => 'required|string|max:80',
+            'last_name' => 'nullable|string|max:80',
+            'email' => 'nullable|email|max:120',
+            'phone' => 'nullable|string|max:40',
+            'status' => 'nullable|integer|in:0,1',
+            'role_id' => 'required|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+
+        if (!empty($payload['branch_id'])) {
+            $branchExists = DB::table('core.branches')
+                ->where('id', (int) $payload['branch_id'])
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json(['message' => 'Invalid branch scope'], 422);
+            }
+        }
+
+        $roleExists = DB::table('auth.roles')
+            ->where('id', (int) $payload['role_id'])
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$roleExists) {
+            return response()->json(['message' => 'Invalid role scope'], 422);
+        }
+
+        $userId = DB::table('auth.users')->insertGetId([
+            'company_id' => $companyId,
+            'branch_id' => $payload['branch_id'] ?? null,
+            'username' => trim($payload['username']),
+            'password_hash' => Hash::make($payload['password']),
+            'first_name' => trim($payload['first_name']),
+            'last_name' => $payload['last_name'] ?? null,
+            'email' => $payload['email'] ?? null,
+            'phone' => $payload['phone'] ?? null,
+            'status' => (int) ($payload['status'] ?? 1),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('auth.user_roles')->insert([
+            'user_id' => (int) $userId,
+            'role_id' => (int) $payload['role_id'],
+        ]);
+
+        return response()->json(['message' => 'User created', 'id' => (int) $userId], 201);
+    }
+
+    public function updateUser(Request $request, int $id)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'branch_id' => 'nullable|integer|min:1',
+            'password' => 'nullable|string|min:6|max:120',
+            'first_name' => 'nullable|string|max:80',
+            'last_name' => 'nullable|string|max:80',
+            'email' => 'nullable|email|max:120',
+            'phone' => 'nullable|string|max:40',
+            'status' => 'nullable|integer|in:0,1',
+            'role_id' => 'nullable|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $exists = DB::table('auth.users')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$exists) {
+            return response()->json(['message' => 'User not found'], 404);
+        }
+
+        $payload = $validator->validated();
+
+        if (array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null) {
+            $branchExists = DB::table('core.branches')
+                ->where('id', (int) $payload['branch_id'])
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json(['message' => 'Invalid branch scope'], 422);
+            }
+        }
+
+        $updates = ['updated_at' => now()];
+
+        foreach (['branch_id', 'first_name', 'last_name', 'email', 'phone', 'status'] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $updates[$field] = $payload[$field];
+            }
+        }
+
+        if (!empty($payload['password'])) {
+            $updates['password_hash'] = Hash::make($payload['password']);
+        }
+
+        DB::table('auth.users')
+            ->where('id', $id)
+            ->update($updates);
+
+        if (array_key_exists('role_id', $payload)) {
+            $roleExists = DB::table('auth.roles')
+                ->where('id', (int) $payload['role_id'])
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if (!$roleExists) {
+                return response()->json(['message' => 'Invalid role scope'], 422);
+            }
+
+            DB::table('auth.user_roles')->where('user_id', $id)->delete();
+            DB::table('auth.user_roles')->insert([
+                'user_id' => $id,
+                'role_id' => (int) $payload['role_id'],
+            ]);
+        }
+
+        return response()->json(['message' => 'User updated']);
     }
 
     public function units(Request $request)
@@ -890,6 +1239,88 @@ class MasterDataController extends Controller
                 PRIMARY KEY (company_id, unit_id)
             )'
         );
+    }
+
+    private function ensureCompanyRoleProfilesTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
+                company_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                functional_profile VARCHAR(20) NULL,
+                updated_by BIGINT NULL,
+                updated_at TIMESTAMP NULL,
+                PRIMARY KEY (company_id, role_id)
+            )'
+        );
+    }
+
+    private function syncRoleFunctionalProfile(int $companyId, int $roleId, ?string $functionalProfile, $updatedBy): void
+    {
+        $this->ensureCompanyRoleProfilesTable();
+
+        $normalized = $this->normalizeFunctionalProfile($functionalProfile);
+
+        DB::table('appcfg.company_role_profiles')->updateOrInsert(
+            [
+                'company_id' => $companyId,
+                'role_id' => $roleId,
+            ],
+            [
+                'functional_profile' => $normalized,
+                'updated_by' => $updatedBy,
+                'updated_at' => now(),
+            ]
+        );
+    }
+
+    private function normalizeFunctionalProfile($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtoupper(trim((string) $value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (!in_array($normalized, self::ROLE_FUNCTIONAL_PROFILES, true)) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    private function syncRolePermissions(int $roleId, array $permissions): void
+    {
+        $moduleCodeMap = DB::table('appcfg.modules')
+            ->whereIn('code', collect($permissions)->pluck('module_code')->all())
+            ->pluck('id', 'code');
+
+        foreach ($permissions as $permission) {
+            if (!$moduleCodeMap->has($permission['module_code'])) {
+                continue;
+            }
+
+            $moduleId = (int) $moduleCodeMap->get($permission['module_code']);
+
+            DB::table('auth.role_module_access')->updateOrInsert(
+                [
+                    'role_id' => $roleId,
+                    'module_id' => $moduleId,
+                ],
+                [
+                    'can_view' => (bool) $permission['can_view'],
+                    'can_create' => (bool) $permission['can_create'],
+                    'can_update' => (bool) $permission['can_update'],
+                    'can_delete' => (bool) $permission['can_delete'],
+                    'can_export' => (bool) $permission['can_export'],
+                    'can_approve' => (bool) $permission['can_approve'],
+                    'updated_at' => now(),
+                ]
+            );
+        }
     }
 
     private function resolveCompanyId(Request $request): int

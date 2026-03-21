@@ -52,10 +52,42 @@ class AuthenticateApiToken
             ], 401);
         }
 
+        $this->ensureCompanyRoleProfilesTable();
+
+        $roleRow = DB::table('auth.user_roles as ur')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($user) {
+                $join->on('crp.role_id', '=', 'r.id')
+                    ->where('crp.company_id', '=', (int) $user->company_id);
+            })
+            ->where('ur.user_id', (int) $user->id)
+            ->where('r.company_id', (int) $user->company_id)
+            ->where('r.status', 1)
+            ->orderBy('r.id')
+            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
+            ->first();
+
+        $user->role_code = $roleRow && $roleRow->role_code !== null ? (string) $roleRow->role_code : null;
+        $user->role_profile = $roleRow && $roleRow->role_profile !== null ? (string) $roleRow->role_profile : null;
+
         $request->attributes->set('auth_user', $user);
         $request->attributes->set('auth_session_id', (int) $session->id);
         $request->attributes->set('auth_claims', $claims);
 
         return $next($request);
+    }
+
+    private function ensureCompanyRoleProfilesTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
+                company_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                functional_profile VARCHAR(20) NULL,
+                updated_by BIGINT NULL,
+                updated_at TIMESTAMP NULL,
+                PRIMARY KEY (company_id, role_id)
+            )'
+        );
     }
 }

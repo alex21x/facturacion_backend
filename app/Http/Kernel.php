@@ -55,6 +55,7 @@ class Kernel extends HttpKernel
         'auth' => \App\Http\Middleware\Authenticate::class,
         'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
         'rbac.module' => \App\Http\Middleware\ModuleRbacAccess::class,
+        'admin.only' => \App\Http\Middleware\RequireAdminRole::class,
         'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
         'bindings' => \Illuminate\Routing\Middleware\SubstituteBindings::class,
         'cache.headers' => \Illuminate\Http\Middleware\SetCacheHeaders::class,

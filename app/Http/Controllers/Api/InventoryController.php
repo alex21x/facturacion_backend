@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\Inventory\OutboxEngine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -20,6 +21,7 @@ class InventoryController extends Controller
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
 
+        $this->ensureProductCatalogSchema();
         $this->ensureCompanyUnitsTable();
 
         $units = DB::table('core.units as u')
@@ -42,9 +44,45 @@ class InventoryController extends Controller
             ->orderBy('name')
             ->get();
 
+        $lines = DB::table('inventory.product_lines')
+            ->select('id', 'name')
+            ->where('status', 1)
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
+        $brands = DB::table('inventory.product_brands')
+            ->select('id', 'name')
+            ->where('status', 1)
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
+        $locations = DB::table('inventory.product_locations')
+            ->select('id', 'name')
+            ->where('status', 1)
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
+        $warranties = DB::table('inventory.product_warranties')
+            ->select('id', 'name')
+            ->where('status', 1)
+            ->where('company_id', $companyId)
+            ->orderBy('name')
+            ->get();
+
         return response()->json([
             'units' => $units,
             'categories' => $categories,
+            'lines' => $lines,
+            'brands' => $brands,
+            'locations' => $locations,
+            'warranties' => $warranties,
+            'product_natures' => [
+                ['code' => 'PRODUCT', 'label' => 'Producto'],
+                ['code' => 'SUPPLY', 'label' => 'Insumo'],
+            ],
         ]);
     }
 
@@ -56,6 +94,8 @@ class InventoryController extends Controller
         $status = $request->query('status');
         $limit = (int) $request->query('limit', 100);
 
+        $this->ensureProductCatalogSchema();
+
         if ($limit < 1) {
             $limit = 1;
         }
@@ -66,6 +106,10 @@ class InventoryController extends Controller
         $query = DB::table('inventory.products as p')
             ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
             ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
+            ->leftJoin('inventory.product_lines as pl', 'pl.id', '=', 'p.line_id')
+            ->leftJoin('inventory.product_brands as pb', 'pb.id', '=', 'p.brand_id')
+            ->leftJoin('inventory.product_locations as plo', 'plo.id', '=', 'p.location_id')
+            ->leftJoin('inventory.product_warranties as pw', 'pw.id', '=', 'p.warranty_id')
             ->select([
                 'p.id',
                 'p.sku',
@@ -74,11 +118,23 @@ class InventoryController extends Controller
                 'p.name',
                 'p.sale_price',
                 'p.cost_price',
+                'p.line_id',
+                'p.brand_id',
+                'p.location_id',
+                'p.warranty_id',
+                'p.product_nature',
+                'p.sunat_code',
+                'p.image_url',
+                'p.seller_commission_percent',
                 'p.is_stockable',
                 'p.lot_tracking',
                 'p.has_expiration',
                 'p.status',
                 DB::raw('c.name as category_name'),
+                DB::raw('pl.name as line_name'),
+                DB::raw('pb.name as brand_name'),
+                DB::raw('plo.name as location_name'),
+                DB::raw('pw.name as warranty_name'),
                 DB::raw('u.code as unit_code'),
                 DB::raw('u.name as unit_name'),
             ])
@@ -109,6 +165,8 @@ class InventoryController extends Controller
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->input('company_id', $authUser->company_id);
 
+        $this->ensureProductCatalogSchema();
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
@@ -116,8 +174,16 @@ class InventoryController extends Controller
         $validator = Validator::make($request->all(), [
             'category_id' => 'nullable|integer|min:1',
             'unit_id' => 'nullable|integer|min:1',
+            'line_id' => 'nullable|integer|min:1',
+            'brand_id' => 'nullable|integer|min:1',
+            'location_id' => 'nullable|integer|min:1',
+            'warranty_id' => 'nullable|integer|min:1',
+            'product_nature' => 'nullable|string|in:PRODUCT,SUPPLY',
             'sku' => 'nullable|string|max:60',
             'barcode' => 'nullable|string|max:80',
+            'sunat_code' => 'nullable|string|max:40',
+            'image_url' => 'nullable|string|max:500',
+            'seller_commission_percent' => 'nullable|numeric|min:0|max:100',
             'name' => 'required|string|max:180',
             'sale_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
@@ -133,12 +199,32 @@ class InventoryController extends Controller
 
         $payload = $validator->validated();
 
+        foreach ([
+            ['line_id', 'inventory.product_lines'],
+            ['brand_id', 'inventory.product_brands'],
+            ['location_id', 'inventory.product_locations'],
+            ['warranty_id', 'inventory.product_warranties'],
+        ] as $masterRule) {
+            [$field, $table] = $masterRule;
+            if (!empty($payload[$field]) && !$this->productMasterExists($table, (int) $payload[$field], $companyId)) {
+                return response()->json(['message' => 'Invalid ' . $field], 422);
+            }
+        }
+
         $id = DB::table('inventory.products')->insertGetId([
             'company_id' => $companyId,
             'category_id' => $payload['category_id'] ?? null,
             'unit_id' => $payload['unit_id'] ?? null,
+            'line_id' => $payload['line_id'] ?? null,
+            'brand_id' => $payload['brand_id'] ?? null,
+            'location_id' => $payload['location_id'] ?? null,
+            'warranty_id' => $payload['warranty_id'] ?? null,
+            'product_nature' => $payload['product_nature'] ?? 'PRODUCT',
             'sku' => isset($payload['sku']) ? strtoupper(trim($payload['sku'])) : null,
             'barcode' => $payload['barcode'] ?? null,
+            'sunat_code' => $payload['sunat_code'] ?? null,
+            'image_url' => $payload['image_url'] ?? null,
+            'seller_commission_percent' => $payload['seller_commission_percent'] ?? 0,
             'name' => trim($payload['name']),
             'sale_price' => $payload['sale_price'] ?? 0,
             'cost_price' => $payload['cost_price'] ?? 0,
@@ -156,6 +242,8 @@ class InventoryController extends Controller
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->input('company_id', $authUser->company_id);
 
+        $this->ensureProductCatalogSchema();
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
@@ -163,8 +251,16 @@ class InventoryController extends Controller
         $validator = Validator::make($request->all(), [
             'category_id' => 'nullable|integer|min:1',
             'unit_id' => 'nullable|integer|min:1',
+            'line_id' => 'nullable|integer|min:1',
+            'brand_id' => 'nullable|integer|min:1',
+            'location_id' => 'nullable|integer|min:1',
+            'warranty_id' => 'nullable|integer|min:1',
+            'product_nature' => 'nullable|string|in:PRODUCT,SUPPLY',
             'sku' => 'nullable|string|max:60',
             'barcode' => 'nullable|string|max:80',
+            'sunat_code' => 'nullable|string|max:40',
+            'image_url' => 'nullable|string|max:500',
+            'seller_commission_percent' => 'nullable|numeric|min:0|max:100',
             'name' => 'nullable|string|max:180',
             'sale_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
@@ -191,17 +287,53 @@ class InventoryController extends Controller
         $payload = $validator->validated();
         $changes = [];
 
+        foreach ([
+            ['line_id', 'inventory.product_lines'],
+            ['brand_id', 'inventory.product_brands'],
+            ['location_id', 'inventory.product_locations'],
+            ['warranty_id', 'inventory.product_warranties'],
+        ] as $masterRule) {
+            [$field, $table] = $masterRule;
+            if (array_key_exists($field, $payload) && !empty($payload[$field]) && !$this->productMasterExists($table, (int) $payload[$field], $companyId)) {
+                return response()->json(['message' => 'Invalid ' . $field], 422);
+            }
+        }
+
         if (array_key_exists('category_id', $payload)) {
             $changes['category_id'] = $payload['category_id'];
         }
         if (array_key_exists('unit_id', $payload)) {
             $changes['unit_id'] = $payload['unit_id'];
         }
+        if (array_key_exists('line_id', $payload)) {
+            $changes['line_id'] = $payload['line_id'];
+        }
+        if (array_key_exists('brand_id', $payload)) {
+            $changes['brand_id'] = $payload['brand_id'];
+        }
+        if (array_key_exists('location_id', $payload)) {
+            $changes['location_id'] = $payload['location_id'];
+        }
+        if (array_key_exists('warranty_id', $payload)) {
+            $changes['warranty_id'] = $payload['warranty_id'];
+        }
+        if (array_key_exists('product_nature', $payload)) {
+            $changes['product_nature'] = $payload['product_nature'];
+        }
         if (array_key_exists('sku', $payload)) {
             $changes['sku'] = $payload['sku'] ? strtoupper(trim($payload['sku'])) : null;
         }
         if (array_key_exists('barcode', $payload)) {
             $changes['barcode'] = $payload['barcode'];
+        }
+        if (array_key_exists('sunat_code', $payload)) {
+            $changes['sunat_code'] = $payload['sunat_code'];
+        }
+        if (array_key_exists('image_url', $payload)) {
+            $changes['image_url'] = $payload['image_url'];
+        }
+        if (array_key_exists('seller_commission_percent', $payload)) {
+            $changes['seller_commission_percent'] = $payload['seller_commission_percent'];
         }
         if (array_key_exists('name', $payload)) {
             $changes['name'] = trim($payload['name']);
@@ -343,6 +475,15 @@ class InventoryController extends Controller
 
         $this->ensureStockEntriesTables();
 
+        $stockEntryColumns = $this->tableColumns('inventory.stock_entries');
+        $stockEntryItemColumns = $this->tableColumns('inventory.stock_entry_items');
+        $inventoryLedgerColumns = $this->tableColumns('inventory.inventory_ledger');
+
+        $hasPaymentMethodColumn = in_array('payment_method_id', $stockEntryColumns, true);
+        $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
+        $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
+        $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
+
         $summarySubquery = DB::table('inventory.stock_entry_items')
             ->selectRaw('entry_id, COUNT(*) as total_items, COALESCE(SUM(qty), 0) as total_qty, COALESCE(SUM(qty * unit_cost), 0) as total_amount')
             ->groupBy('entry_id');
@@ -457,6 +598,7 @@ class InventoryController extends Controller
             'entry_type' => 'required|string|in:PURCHASE,ADJUSTMENT',
             'reference_no' => 'nullable|string|max:60',
             'supplier_reference' => 'nullable|string|max:120',
+            'payment_method_id' => 'nullable|integer|min:1',
             'issue_at' => 'nullable|date',
             'notes' => 'nullable|string|max:300',
             'items' => 'required|array|min:1',
@@ -467,6 +609,8 @@ class InventoryController extends Controller
             'items.*.lot_code' => 'nullable|string|max:80',
             'items.*.manufacture_at' => 'nullable|date',
             'items.*.expires_at' => 'nullable|date',
+            'items.*.tax_category_id' => 'nullable|integer|min:1',
+            'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
             'items.*.notes' => 'nullable|string|max:200',
         ]);
 
@@ -500,6 +644,16 @@ class InventoryController extends Controller
         }
 
         $this->ensureStockEntriesTables();
+        OutboxEngine::ensureSchema();
+
+        $stockEntryColumns = $this->tableColumns('inventory.stock_entries');
+        $stockEntryItemColumns = $this->tableColumns('inventory.stock_entry_items');
+        $inventoryLedgerColumns = $this->tableColumns('inventory.inventory_ledger');
+
+        $hasPaymentMethodColumn = in_array('payment_method_id', $stockEntryColumns, true);
+        $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
+        $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
+        $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
 
         $productIds = collect($payload['items'])
             ->pluck('product_id')
@@ -510,7 +664,7 @@ class InventoryController extends Controller
             ->values();
 
         $products = DB::table('inventory.products')
-            ->select('id', 'name', 'is_stockable', 'lot_tracking', 'status')
+            ->select('id', 'name', 'is_stockable', 'lot_tracking', 'has_expiration', 'status')
             ->where('company_id', $companyId)
             ->whereIn('id', $productIds->all())
             ->whereNull('deleted_at')
@@ -520,10 +674,25 @@ class InventoryController extends Controller
         $settings = $this->inventorySettingsForCompany($companyId);
 
         try {
-            $result = DB::transaction(function () use ($payload, $authUser, $companyId, $branchId, $warehouseId, $products, $settings) {
+            $result = DB::transaction(function () use (
+                $payload,
+                $authUser,
+                $companyId,
+                $branchId,
+                $warehouseId,
+                $products,
+                $settings,
+                $hasPaymentMethodColumn,
+                $hasItemTaxCategoryColumn,
+                $hasItemTaxRateColumn,
+                $hasLedgerTaxRateColumn
+            ) {
                 $entryType = strtoupper((string) $payload['entry_type']);
+                $inventoryProEnabled = (bool) ($settings['enable_inventory_pro'] ?? false);
+                $lotTrackingEnabled = $inventoryProEnabled && (bool) ($settings['enable_lot_tracking'] ?? false);
+                $expiryTrackingEnabled = $lotTrackingEnabled && (bool) ($settings['enable_expiry_tracking'] ?? false);
 
-                $entryId = DB::table('inventory.stock_entries')->insertGetId([
+                $entryInsert = [
                     'company_id' => $companyId,
                     'branch_id' => $branchId,
                     'warehouse_id' => $warehouseId,
@@ -537,7 +706,13 @@ class InventoryController extends Controller
                     'updated_by' => $authUser->id,
                     'created_at' => now(),
                     'updated_at' => now(),
-                ]);
+                ];
+
+                if ($hasPaymentMethodColumn) {
+                    $entryInsert['payment_method_id'] = isset($payload['payment_method_id']) ? (int) $payload['payment_method_id'] : null;
+                }
+
+                $entryId = DB::table('inventory.stock_entries')->insertGetId($entryInsert);
 
                 foreach ($payload['items'] as $index => $item) {
                     $productId = (int) $item['product_id'];
@@ -565,11 +740,30 @@ class InventoryController extends Controller
                         throw new \RuntimeException('Adjustment line quantity cannot be zero for line ' . ($index + 1));
                     }
 
-                    $lotId = isset($item['lot_id']) ? (int) $item['lot_id'] : null;
-                    $lotCode = isset($item['lot_code']) ? trim((string) $item['lot_code']) : null;
+                    $lotId = $lotTrackingEnabled && isset($item['lot_id']) ? (int) $item['lot_id'] : null;
+                    $lotCode = $lotTrackingEnabled && isset($item['lot_code']) ? trim((string) $item['lot_code']) : null;
+                    $manufactureAt = $expiryTrackingEnabled ? ($item['manufacture_at'] ?? null) : null;
+                    $expiresAt = $expiryTrackingEnabled ? ($item['expires_at'] ?? null) : null;
+                    $taxCategoryId = isset($item['tax_category_id']) ? (int) $item['tax_category_id'] : null;
+                    $taxRate = isset($item['tax_rate']) ? round((float) $item['tax_rate'], 2) : 0.0;
 
-                    if ((bool) $product->lot_tracking && (bool) $settings['enforce_lot_for_tracked'] && !$lotId && !$lotCode) {
+                    if ($lotTrackingEnabled && (bool) $product->lot_tracking && (bool) $settings['enforce_lot_for_tracked'] && !$lotId && !$lotCode) {
                         throw new \RuntimeException('Lot is required for tracked product line ' . ($index + 1));
+                    }
+
+                    if ($expiryTrackingEnabled && (bool) $product->has_expiration && !$expiresAt) {
+                        throw new \RuntimeException('Expiration date is required for expirable product line ' . ($index + 1));
+                    }
+
+                    if ($taxCategoryId && $hasItemTaxCategoryColumn) {
+                        $taxCategoryExists = DB::table('appcfg.tax_categories')
+                            ->where('id', $taxCategoryId)
+                            ->where('status', 1)
+                            ->exists();
+
+                        if (!$taxCategoryExists) {
+                            throw new \RuntimeException('Tax category not found for line ' . ($index + 1));
+                        }
                     }
 
                     if ($lotId) {
@@ -592,13 +786,12 @@ class InventoryController extends Controller
                             'warehouse_id' => $warehouseId,
                             'product_id' => $productId,
                             'lot_code' => $lotCode,
-                            'manufacture_at' => $item['manufacture_at'] ?? null,
-                            'expires_at' => $item['expires_at'] ?? null,
+                            'manufacture_at' => $manufactureAt,
+                            'expires_at' => $expiresAt,
                             'received_at' => $payload['issue_at'] ?? now(),
                             'status' => 1,
                             'created_by' => $authUser->id,
                             'created_at' => now(),
-                            'updated_at' => now(),
                         ]);
                     }
 
@@ -625,7 +818,7 @@ class InventoryController extends Controller
                         );
                     }
 
-                    DB::table('inventory.stock_entry_items')->insert([
+                    $entryItemInsert = [
                         'entry_id' => $entryId,
                         'product_id' => $productId,
                         'lot_id' => $lotId,
@@ -633,9 +826,19 @@ class InventoryController extends Controller
                         'unit_cost' => $unitCost,
                         'notes' => $item['notes'] ?? null,
                         'created_at' => now(),
-                    ]);
+                    ];
 
-                    DB::table('inventory.inventory_ledger')->insert([
+                    if ($hasItemTaxCategoryColumn) {
+                        $entryItemInsert['tax_category_id'] = $taxCategoryId;
+                    }
+
+                    if ($hasItemTaxRateColumn) {
+                        $entryItemInsert['tax_rate'] = $taxRate;
+                    }
+
+                    DB::table('inventory.stock_entry_items')->insert($entryItemInsert);
+
+                    $ledgerInsert = [
                         'company_id' => $companyId,
                         'warehouse_id' => $warehouseId,
                         'product_id' => $productId,
@@ -648,7 +851,38 @@ class InventoryController extends Controller
                         'notes' => $payload['notes'] ?? null,
                         'moved_at' => $payload['issue_at'] ?? now(),
                         'created_by' => $authUser->id,
-                    ]);
+                    ];
+
+                    if ($hasLedgerTaxRateColumn) {
+                        $ledgerInsert['tax_rate'] = $taxRate;
+                    }
+
+                    DB::table('inventory.inventory_ledger')->insert($ledgerInsert);
+
+                    OutboxEngine::enqueue(
+                        $companyId,
+                        'STOCK_ENTRY',
+                        (string) $entryId,
+                        'INVENTORY_MOVEMENT_APPLIED',
+                        [
+                            'company_id' => $companyId,
+                            'branch_id' => $branchId,
+                            'warehouse_id' => $warehouseId,
+                            'entry_id' => (int) $entryId,
+                            'entry_type' => $entryType,
+                            'line_no' => $index + 1,
+                            'product_id' => $productId,
+                            'lot_id' => $lotId,
+                            'movement_type' => $movementType,
+                            'quantity' => round(abs($qty), 8),
+                            'unit_cost' => $unitCost,
+                            'tax_rate' => $taxRate,
+                            'ref_type' => 'STOCK_ENTRY',
+                            'ref_id' => (int) $entryId,
+                            'moved_at' => $payload['issue_at'] ?? now(),
+                            'created_by' => $authUser->id,
+                        ]
+                    );
 
                     if ($entryType === 'PURCHASE' && $unitCost > 0) {
                         DB::table('inventory.products')
@@ -964,12 +1198,30 @@ class InventoryController extends Controller
 
         if (!$row) {
             return [
+                'complexity_mode' => 'BASIC',
+                'inventory_mode' => 'KARDEX_SIMPLE',
+                'lot_outflow_strategy' => 'MANUAL',
+                'enable_inventory_pro' => false,
+                'enable_lot_tracking' => false,
+                'enable_expiry_tracking' => false,
+                'enable_advanced_reporting' => false,
+                'enable_graphical_dashboard' => false,
+                'enable_location_control' => false,
                 'allow_negative_stock' => false,
-                'enforce_lot_for_tracked' => true,
+                'enforce_lot_for_tracked' => false,
             ];
         }
 
         return [
+            'complexity_mode' => (string) ($row->complexity_mode ?? 'BASIC'),
+            'inventory_mode' => (string) ($row->inventory_mode ?? 'KARDEX_SIMPLE'),
+            'lot_outflow_strategy' => (string) ($row->lot_outflow_strategy ?? 'MANUAL'),
+            'enable_inventory_pro' => (bool) ($row->enable_inventory_pro ?? false),
+            'enable_lot_tracking' => (bool) ($row->enable_lot_tracking ?? false),
+            'enable_expiry_tracking' => (bool) ($row->enable_expiry_tracking ?? false),
+            'enable_advanced_reporting' => (bool) ($row->enable_advanced_reporting ?? false),
+            'enable_graphical_dashboard' => (bool) ($row->enable_graphical_dashboard ?? false),
+            'enable_location_control' => (bool) ($row->enable_location_control ?? false),
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
             'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
         ];
@@ -1109,6 +1361,8 @@ class InventoryController extends Controller
                 ON inventory.stock_entries (company_id, issue_at DESC, id DESC)'
         );
 
+        DB::statement('ALTER TABLE inventory.stock_entries ADD COLUMN IF NOT EXISTS payment_method_id BIGINT NULL');
+
         DB::statement(
             'CREATE TABLE IF NOT EXISTS inventory.stock_entry_items (
                 id BIGSERIAL PRIMARY KEY,
@@ -1126,5 +1380,240 @@ class InventoryController extends Controller
             'CREATE INDEX IF NOT EXISTS stock_entry_items_entry_idx
                 ON inventory.stock_entry_items (entry_id)'
         );
+
+        DB::statement('ALTER TABLE inventory.stock_entry_items ADD COLUMN IF NOT EXISTS tax_category_id BIGINT NULL');
+        DB::statement('ALTER TABLE inventory.stock_entry_items ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(8,4) NOT NULL DEFAULT 0');
+    }
+
+    private function tableColumns(string $qualifiedTable): array
+    {
+        [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
+
+        $rows = DB::select(
+            'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
+            [$schema, $table]
+        );
+
+        return collect($rows)->map(function ($row) {
+            return (string) $row->column_name;
+        })->values()->all();
+    }
+
+    private function splitQualifiedTable(string $qualifiedTable): array
+    {
+        if (strpos($qualifiedTable, '.') !== false) {
+            return explode('.', $qualifiedTable, 2);
+        }
+
+        return ['public', $qualifiedTable];
+    }
+
+    private function ensureProductCatalogSchema(): void
+    {
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_lines (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_brands (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_locations (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_warranties (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS line_id BIGINT NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS brand_id BIGINT NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS location_id BIGINT NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS warranty_id BIGINT NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS product_nature VARCHAR(20) NOT NULL DEFAULT 'PRODUCT'");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS sunat_code VARCHAR(40) NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS image_url TEXT NULL");
+        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS seller_commission_percent NUMERIC(8,4) NOT NULL DEFAULT 0");
+    }
+
+    private function productMasterExists(string $table, int $id, int $companyId): bool
+    {
+        return DB::table($table)
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->exists();
+    }
+
+    public function productMasters(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        $this->ensureProductCatalogSchema();
+
+        $lines = DB::table('inventory.product_lines')
+            ->select('id', 'name', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('name')->get();
+
+        $brands = DB::table('inventory.product_brands')
+            ->select('id', 'name', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('name')->get();
+
+        $locations = DB::table('inventory.product_locations')
+            ->select('id', 'name', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('name')->get();
+
+        $warranties = DB::table('inventory.product_warranties')
+            ->select('id', 'name', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('name')->get();
+
+        return response()->json([
+            'lines' => $lines,
+            'brands' => $brands,
+            'locations' => $locations,
+            'warranties' => $warranties,
+        ]);
+    }
+
+    public function createProductMaster(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'kind' => 'required|string|in:line,brand,location,warranty',
+            'name' => 'required|string|max:120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $this->ensureProductCatalogSchema();
+
+        $tableMap = [
+            'line'      => 'inventory.product_lines',
+            'brand'     => 'inventory.product_brands',
+            'location'  => 'inventory.product_locations',
+            'warranty'  => 'inventory.product_warranties',
+        ];
+
+        $table = $tableMap[$request->input('kind')];
+        $name  = trim($request->input('name'));
+
+        $existing = DB::table($table)
+            ->where('company_id', $companyId)
+            ->whereRaw('LOWER(name) = LOWER(?)', [$name])
+            ->first();
+
+        if ($existing) {
+            if ((int) $existing->status !== 1) {
+                DB::table($table)
+                    ->where('id', (int) $existing->id)
+                    ->update([
+                        'status' => 1,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            return response()->json(['id' => (int) $existing->id, 'name' => $existing->name, 'status' => 1]);
+        }
+
+        $id = DB::table($table)->insertGetId([
+            'company_id' => $companyId,
+            'name'       => $name,
+            'status'     => 1,
+            'created_by' => $authUser->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['id' => (int) $id, 'name' => $name, 'status' => 1], 201);
+    }
+
+    public function updateProductMaster(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'kind' => 'required|string|in:line,brand,location,warranty',
+            'name' => 'nullable|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $this->ensureProductCatalogSchema();
+
+        $tableMap = [
+            'line'      => 'inventory.product_lines',
+            'brand'     => 'inventory.product_brands',
+            'location'  => 'inventory.product_locations',
+            'warranty'  => 'inventory.product_warranties',
+        ];
+
+        $payload = $validator->validated();
+        $table = $tableMap[$payload['kind']];
+
+        $master = DB::table($table)
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if (!$master) {
+            return response()->json(['message' => 'Master not found'], 404);
+        }
+
+        $changes = [];
+
+        if (array_key_exists('name', $payload)) {
+            $name = trim((string) $payload['name']);
+            if ($name === '') {
+                return response()->json(['message' => 'Name cannot be empty'], 422);
+            }
+
+            $duplicate = DB::table($table)
+                ->where('company_id', $companyId)
+                ->where('id', '<>', $id)
+                ->whereRaw('LOWER(name) = LOWER(?)', [$name])
+                ->exists();
+
+            if ($duplicate) {
+                return response()->json(['message' => 'Name already exists'], 422);
+            }
+
+            $changes['name'] = $name;
+        }
+
+        if (array_key_exists('status', $payload)) {
+            $changes['status'] = (int) $payload['status'];
+        }
+
+        if (empty($changes)) {
+            return response()->json(['message' => 'No changes provided'], 422);
+        }
+
+        $changes['updated_at'] = now();
+
+        DB::table($table)
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->update($changes);
+
+        $updated = DB::table($table)
+            ->select('id', 'name', 'status')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->first();
+
+        return response()->json([
+            'id' => (int) $updated->id,
+            'name' => $updated->name,
+            'status' => (int) $updated->status,
+        ]);
     }
 }

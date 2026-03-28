@@ -28,7 +28,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
         Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
-        Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings');
+        Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/cash/sessions', 'Api\\CashController@sessions');
         Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
@@ -39,7 +39,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     Route::middleware(['rbac.module:APPCFG,view', 'throttle:1500,1'])->group(function () {
         Route::get('/masters/dashboard', 'Api\\MasterDataController@dashboard');
         Route::get('/masters/options', 'Api\\MasterDataController@options');
-        Route::get('/masters/access-control', 'Api\\MasterDataController@accessControl');
+        Route::get('/masters/access-control', 'Api\\MasterDataController@accessControl')->middleware('admin.only');
         Route::get('/masters/units', 'Api\\MasterDataController@units');
         Route::get('/masters/warehouses', 'Api\\MasterDataController@warehouses');
         Route::get('/masters/cash-registers', 'Api\\MasterDataController@cashRegisters');
@@ -52,7 +52,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
 
     Route::middleware('rbac.module:APPCFG,update')->group(function () {
         Route::put('/appcfg/operational-limits', 'Api\\AppConfigController@updateOperationalLimits');
-        Route::put('/appcfg/commerce-settings', 'Api\\AppConfigController@updateCommerceSettings');
+        Route::put('/appcfg/commerce-settings', 'Api\\AppConfigController@updateCommerceSettings')->middleware('admin.only');
     Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
     Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
     Route::post('/appcfg/company-cert', 'Api\\AppConfigController@uploadCompanyCert');
@@ -77,10 +77,10 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::put('/masters/inventory-settings', 'Api\\MasterDataController@updateInventorySettings');
         Route::put('/masters/document-kinds', 'Api\\MasterDataController@updateDocumentKinds');
         Route::put('/masters/units', 'Api\\MasterDataController@updateUnits');
-        Route::post('/masters/roles', 'Api\\MasterDataController@createRole');
-        Route::put('/masters/roles/{id}', 'Api\\MasterDataController@updateRole');
-        Route::post('/masters/users', 'Api\\MasterDataController@createUser');
-        Route::put('/masters/users/{id}', 'Api\\MasterDataController@updateUser');
+        Route::post('/masters/roles', 'Api\\MasterDataController@createRole')->middleware('admin.only');
+        Route::put('/masters/roles/{id}', 'Api\\MasterDataController@updateRole')->middleware('admin.only');
+        Route::post('/masters/users', 'Api\\MasterDataController@createUser')->middleware('admin.only');
+        Route::put('/masters/users/{id}', 'Api\\MasterDataController@updateUser')->middleware('admin.only');
     });
 
     Route::middleware('rbac.module:SALES,view')->group(function () {
@@ -101,9 +101,16 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     });
 
     Route::middleware('rbac.module:INVENTORY,view')->group(function () {
+        Route::get('/purchases/lookups', 'Api\\PurchasesController@lookups');
+        Route::get('/purchases/list', 'Api\\PurchasesController@listStockEntries');
+        Route::get('/purchases/export', 'Api\\PurchasesController@exportStockEntries');
+    });
+
+    Route::middleware('rbac.module:INVENTORY,view')->group(function () {
         Route::get('/inventory/product-lookups', 'Api\\InventoryController@productLookups');
         Route::get('/inventory/products', 'Api\\InventoryController@products');
         Route::get('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@productCommercialConfig');
+        Route::get('/inventory/product-masters', 'Api\\InventoryController@productMasters');
         Route::get('/inventory/current-stock', 'Api\\InventoryController@currentStock');
         Route::get('/inventory/lots', 'Api\\InventoryController@lots');
         Route::get('/inventory/stock-entries', 'Api\\InventoryController@stockEntries');
@@ -114,7 +121,21 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::post('/inventory/products', 'Api\\InventoryController@createProduct');
         Route::put('/inventory/products/{id}', 'Api\\InventoryController@updateProduct');
         Route::put('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@updateProductCommercialConfig');
+        Route::post('/inventory/product-masters', 'Api\\InventoryController@createProductMaster');
+        Route::put('/inventory/product-masters/{id}', 'Api\\InventoryController@updateProductMaster');
         Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
+    });
+
+    Route::middleware(['rbac.module:INVENTORY,view', 'throttle:1200,1'])->prefix('inventory-pro')->group(function () {
+        Route::get('/dashboard', 'Api\\InventoryReportsController@dashboard');
+        Route::get('/report-requests', 'Api\\InventoryReportsController@listRequests');
+        Route::get('/report-requests/{id}', 'Api\\InventoryReportsController@showRequest');
+        Route::get('/daily-snapshot', 'Api\\InventoryReportsController@dailySnapshot');
+        Route::get('/lot-expiry', 'Api\\InventoryReportsController@lotExpiry');
+    });
+
+    Route::middleware(['rbac.module:INVENTORY,update', 'throttle:500,1'])->prefix('inventory-pro')->group(function () {
+        Route::post('/report-requests', 'Api\\InventoryReportsController@createRequest');
     });
 });
 

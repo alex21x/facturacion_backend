@@ -24,8 +24,13 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')
-        //          ->hourly();
+        $schedule->command('inventory:process-report-requests --limit=30')
+            ->everyMinute()
+            ->withoutOverlapping();
+
+        $schedule->command('inventory:process-outbox-events --limit=200')
+            ->everyMinute()
+            ->withoutOverlapping();
     }
 
     /**

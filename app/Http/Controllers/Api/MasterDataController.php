@@ -148,10 +148,33 @@ class MasterDataController extends Controller
         if (!$inventorySettings) {
             $inventorySettings = [
                 'company_id' => $companyId,
+                'complexity_mode' => 'BASIC',
                 'inventory_mode' => 'KARDEX_SIMPLE',
                 'lot_outflow_strategy' => 'MANUAL',
+                'enable_inventory_pro' => false,
+                'enable_lot_tracking' => false,
+                'enable_expiry_tracking' => false,
+                'enable_advanced_reporting' => false,
+                'enable_graphical_dashboard' => false,
+                'enable_location_control' => false,
                 'allow_negative_stock' => false,
-                'enforce_lot_for_tracked' => true,
+                'enforce_lot_for_tracked' => false,
+            ];
+        } else {
+            // Cast boolean columns properly from database
+            $inventorySettings = [
+                'company_id' => $inventorySettings->company_id,
+                'complexity_mode' => $inventorySettings->complexity_mode ?? 'BASIC',
+                'inventory_mode' => $inventorySettings->inventory_mode ?? 'KARDEX_SIMPLE',
+                'lot_outflow_strategy' => $inventorySettings->lot_outflow_strategy ?? 'MANUAL',
+                'enable_inventory_pro' => (bool) $inventorySettings->enable_inventory_pro,
+                'enable_lot_tracking' => (bool) $inventorySettings->enable_lot_tracking,
+                'enable_expiry_tracking' => (bool) $inventorySettings->enable_expiry_tracking,
+                'enable_advanced_reporting' => (bool) $inventorySettings->enable_advanced_reporting,
+                'enable_graphical_dashboard' => (bool) $inventorySettings->enable_graphical_dashboard,
+                'enable_location_control' => (bool) $inventorySettings->enable_location_control,
+                'allow_negative_stock' => (bool) $inventorySettings->allow_negative_stock,
+                'enforce_lot_for_tracked' => (bool) $inventorySettings->enforce_lot_for_tracked,
             ];
         }
 
@@ -950,6 +973,7 @@ class MasterDataController extends Controller
     public function inventorySettings(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $this->ensureInventorySettingsSchema();
 
         $row = DB::table('inventory.inventory_settings')
             ->where('company_id', $companyId)
@@ -958,10 +982,33 @@ class MasterDataController extends Controller
         if (!$row) {
             $row = [
                 'company_id' => $companyId,
+                'complexity_mode' => 'BASIC',
                 'inventory_mode' => 'KARDEX_SIMPLE',
                 'lot_outflow_strategy' => 'MANUAL',
+                'enable_inventory_pro' => false,
+                'enable_lot_tracking' => false,
+                'enable_expiry_tracking' => false,
+                'enable_advanced_reporting' => false,
+                'enable_graphical_dashboard' => false,
+                'enable_location_control' => false,
                 'allow_negative_stock' => false,
-                'enforce_lot_for_tracked' => true,
+                'enforce_lot_for_tracked' => false,
+            ];
+        } else {
+            // Cast boolean columns properly from database
+            $row = [
+                'company_id' => $row->company_id,
+                'complexity_mode' => $row->complexity_mode ?? 'BASIC',
+                'inventory_mode' => $row->inventory_mode ?? 'KARDEX_SIMPLE',
+                'lot_outflow_strategy' => $row->lot_outflow_strategy ?? 'MANUAL',
+                'enable_inventory_pro' => (bool) $row->enable_inventory_pro,
+                'enable_lot_tracking' => (bool) $row->enable_lot_tracking,
+                'enable_expiry_tracking' => (bool) $row->enable_expiry_tracking,
+                'enable_advanced_reporting' => (bool) $row->enable_advanced_reporting,
+                'enable_graphical_dashboard' => (bool) $row->enable_graphical_dashboard,
+                'enable_location_control' => (bool) $row->enable_location_control,
+                'allow_negative_stock' => (bool) $row->allow_negative_stock,
+                'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
             ];
         }
 
@@ -971,10 +1018,18 @@ class MasterDataController extends Controller
     public function updateInventorySettings(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $this->ensureInventorySettingsSchema();
 
         $validator = Validator::make($request->all(), [
+            'complexity_mode' => 'nullable|string|in:BASIC,ADVANCED',
             'inventory_mode' => 'nullable|string|in:KARDEX_SIMPLE,LOT_TRACKING',
             'lot_outflow_strategy' => 'nullable|string|in:MANUAL,FIFO,FEFO',
+            'enable_inventory_pro' => 'nullable|boolean',
+            'enable_lot_tracking' => 'nullable|boolean',
+            'enable_expiry_tracking' => 'nullable|boolean',
+            'enable_advanced_reporting' => 'nullable|boolean',
+            'enable_graphical_dashboard' => 'nullable|boolean',
+            'enable_location_control' => 'nullable|boolean',
             'allow_negative_stock' => 'nullable|boolean',
             'enforce_lot_for_tracked' => 'nullable|boolean',
         ]);
@@ -986,10 +1041,47 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
         $updates = ['updated_at' => now()];
 
-        foreach (['inventory_mode', 'lot_outflow_strategy', 'allow_negative_stock', 'enforce_lot_for_tracked'] as $field) {
+        foreach ([
+            'complexity_mode',
+            'inventory_mode',
+            'lot_outflow_strategy',
+            'enable_inventory_pro',
+            'enable_lot_tracking',
+            'enable_expiry_tracking',
+            'enable_advanced_reporting',
+            'enable_graphical_dashboard',
+            'enable_location_control',
+            'allow_negative_stock',
+            'enforce_lot_for_tracked'
+        ] as $field) {
             if (array_key_exists($field, $payload)) {
                 $updates[$field] = $payload[$field];
             }
+        }
+
+        $complexityMode = (string) ($payload['complexity_mode'] ?? '');
+        if ($complexityMode === 'BASIC') {
+            $updates['inventory_mode'] = 'KARDEX_SIMPLE';
+            $updates['lot_outflow_strategy'] = 'MANUAL';
+            $updates['enable_inventory_pro'] = false;
+            $updates['enable_lot_tracking'] = false;
+            $updates['enable_expiry_tracking'] = false;
+            $updates['enable_advanced_reporting'] = false;
+            $updates['enable_graphical_dashboard'] = false;
+            $updates['enable_location_control'] = false;
+            $updates['enforce_lot_for_tracked'] = false;
+        }
+
+        if (($updates['enable_lot_tracking'] ?? null) === false) {
+            $updates['enforce_lot_for_tracked'] = false;
+            if (!array_key_exists('inventory_mode', $updates)) {
+                $updates['inventory_mode'] = 'KARDEX_SIMPLE';
+            }
+        }
+
+        if (($updates['enable_expiry_tracking'] ?? null) === true
+            && (($updates['enable_lot_tracking'] ?? ($payload['enable_lot_tracking'] ?? null)) === false)) {
+            return response()->json(['message' => 'Expiry tracking requires lot tracking'], 422);
         }
 
         DB::table('inventory.inventory_settings')->updateOrInsert(
@@ -998,6 +1090,18 @@ class MasterDataController extends Controller
         );
 
         return response()->json(['message' => 'Inventory settings updated']);
+    }
+
+    private function ensureInventorySettingsSchema(): void
+    {
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.inventory_settings (company_id BIGINT PRIMARY KEY, inventory_mode VARCHAR(30) NOT NULL DEFAULT \'KARDEX_SIMPLE\', lot_outflow_strategy VARCHAR(20) NOT NULL DEFAULT \'MANUAL\', allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE, enforce_lot_for_tracked BOOLEAN NOT NULL DEFAULT FALSE, updated_at TIMESTAMPTZ NULL)');
+        DB::statement("ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS complexity_mode VARCHAR(20) NOT NULL DEFAULT 'BASIC'");
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_inventory_pro BOOLEAN NOT NULL DEFAULT FALSE');
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_lot_tracking BOOLEAN NOT NULL DEFAULT FALSE');
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_expiry_tracking BOOLEAN NOT NULL DEFAULT FALSE');
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_advanced_reporting BOOLEAN NOT NULL DEFAULT FALSE');
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_graphical_dashboard BOOLEAN NOT NULL DEFAULT FALSE');
+        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_location_control BOOLEAN NOT NULL DEFAULT FALSE');
     }
 
     public function lots(Request $request)

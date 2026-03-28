@@ -60,12 +60,17 @@ class SalesController extends Controller
             return !$enabledToggles->has($featureCode) || (bool) $enabledToggles->get($featureCode);
         })->values();
 
+        if ($documentKinds->isEmpty()) {
+            $documentKinds = $catalog->values();
+        }
+
         return response()->json([
             'document_kinds' => $documentKinds,
             'currencies' => $currencies,
             'payment_methods' => $paymentMethods,
             'tax_categories' => $this->resolveTaxCategories($companyId),
             'units' => $this->enabledUnits($companyId),
+            'inventory_settings' => $this->inventorySettingsForCompany($companyId),
         ]);
     }
 
@@ -554,6 +559,7 @@ class SalesController extends Controller
                 $qtyBase = $conversion['qty_base'];
                 $conversionFactor = $conversion['conversion_factor'];
                 $baseUnitPrice = $conversion['base_unit_price'];
+                $lotOutflowStrategy = strtoupper((string) ($settings['lot_outflow_strategy'] ?? 'MANUAL'));
 
                 $itemLots = [];
                 $lotBaseQtyTotal = 0.0;
@@ -591,12 +597,46 @@ class SalesController extends Controller
                     }
                 }
 
+                if (
+                    $affectsStock
+                    && $stockDirection < 0
+                    && $warehouseId !== null
+                    && $product
+                    && (bool) $product->is_stockable
+                    && (bool) $product->lot_tracking
+                    && (bool) ($settings['enable_inventory_pro'] ?? false)
+                    && (bool) ($settings['enable_lot_tracking'] ?? false)
+                    && empty($itemLots)
+                    && in_array($lotOutflowStrategy, ['FIFO', 'FEFO'], true)
+                ) {
+                    $itemLots = $this->allocateOutboundLots(
+                        $companyId,
+                        (int) $warehouseId,
+                        (int) $product->id,
+                        (float) $qtyBase,
+                        (float) $conversionFactor,
+                        $lotOutflowStrategy,
+                        (bool) $settings['allow_negative_stock'],
+                        $index + 1
+                    );
+                }
+
                 if ($affectsStock && $product && (bool) $product->is_stockable) {
                     if ($warehouseId === null) {
                         throw new \RuntimeException('Warehouse is required for stockable product line ' . ($index + 1));
                     }
 
-                    if ($stockDirection < 0 && (bool) $product->lot_tracking && (bool) $settings['enforce_lot_for_tracked'] && empty($itemLots)) {
+                    if (
+                        $stockDirection < 0
+                        && (bool) $product->lot_tracking
+                        && empty($itemLots)
+                        && (
+                            !(bool) ($settings['enable_inventory_pro'] ?? false)
+                            || !(bool) ($settings['enable_lot_tracking'] ?? false)
+                            || $lotOutflowStrategy === 'MANUAL'
+                            || (bool) $settings['enforce_lot_for_tracked']
+                        )
+                    ) {
                         throw new \RuntimeException('Lot is required for tracked product line ' . ($index + 1));
                     }
                 }
@@ -901,6 +941,14 @@ class SalesController extends Controller
                 'd.company_id',
                 'd.branch_id',
                 'd.document_kind',
+                DB::raw("CASE d.document_kind
+                    WHEN 'QUOTATION'   THEN 'Cotizacion'
+                    WHEN 'SALES_ORDER' THEN 'Nota de Pedido'
+                    WHEN 'INVOICE'     THEN 'Factura'
+                    WHEN 'RECEIPT'     THEN 'Boleta'
+                    WHEN 'CREDIT_NOTE' THEN 'Nota de Credito'
+                    WHEN 'DEBIT_NOTE'  THEN 'Nota de Debito'
+                    ELSE d.document_kind END as document_kind_label"),
                 'd.series',
                 'd.number',
                 'd.issue_at',
@@ -1002,6 +1050,14 @@ class SalesController extends Controller
             ->select([
                 'd.id',
                 'd.document_kind',
+                DB::raw("CASE d.document_kind
+                    WHEN 'QUOTATION'   THEN 'Cotizacion'
+                    WHEN 'SALES_ORDER' THEN 'Nota de Pedido'
+                    WHEN 'INVOICE'     THEN 'Factura'
+                    WHEN 'RECEIPT'     THEN 'Boleta'
+                    WHEN 'CREDIT_NOTE' THEN 'Nota de Credito'
+                    WHEN 'DEBIT_NOTE'  THEN 'Nota de Debito'
+                    ELSE d.document_kind END as document_kind_label"),
                 'd.series',
                 'd.number',
                 'd.issue_at',
@@ -1057,7 +1113,7 @@ class SalesController extends Controller
             foreach ($rows as $row) {
                 fputcsv($out, [
                     (int) $row->id,
-                    (string) $row->document_kind,
+                    (string) ($row->document_kind_label ?? $row->document_kind),
                     (string) $row->series,
                     (string) $row->number,
                     $row->issue_at ? (string) $row->issue_at : '',
@@ -1568,7 +1624,7 @@ class SalesController extends Controller
     {
         $sourceTable = null;
 
-        foreach (['core.tax_categories', 'sales.tax_categories'] as $candidate) {
+        foreach (['core.tax_categories', 'sales.tax_categories', 'appcfg.tax_categories'] as $candidate) {
             if ($this->tableExists($candidate)) {
                 $sourceTable = $candidate;
                 break;
@@ -1791,12 +1847,30 @@ class SalesController extends Controller
 
         if (!$row) {
             return [
+                'complexity_mode' => 'BASIC',
+                'inventory_mode' => 'KARDEX_SIMPLE',
+                'lot_outflow_strategy' => 'MANUAL',
+                'enable_inventory_pro' => false,
+                'enable_lot_tracking' => false,
+                'enable_expiry_tracking' => false,
+                'enable_advanced_reporting' => false,
+                'enable_graphical_dashboard' => false,
+                'enable_location_control' => false,
                 'allow_negative_stock' => false,
-                'enforce_lot_for_tracked' => true,
+                'enforce_lot_for_tracked' => false,
             ];
         }
 
         return [
+            'complexity_mode' => (string) ($row->complexity_mode ?? 'BASIC'),
+            'inventory_mode' => (string) ($row->inventory_mode ?? 'KARDEX_SIMPLE'),
+            'lot_outflow_strategy' => (string) ($row->lot_outflow_strategy ?? 'MANUAL'),
+            'enable_inventory_pro' => (bool) ($row->enable_inventory_pro ?? false),
+            'enable_lot_tracking' => (bool) ($row->enable_lot_tracking ?? false),
+            'enable_expiry_tracking' => (bool) ($row->enable_expiry_tracking ?? false),
+            'enable_advanced_reporting' => (bool) ($row->enable_advanced_reporting ?? false),
+            'enable_graphical_dashboard' => (bool) ($row->enable_graphical_dashboard ?? false),
+            'enable_location_control' => (bool) ($row->enable_location_control ?? false),
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
             'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
         ];
@@ -1993,14 +2067,90 @@ class SalesController extends Controller
         $this->stockProjection[$projectionKey] = round($next, 8);
     }
 
-    private function applyLotStockDelta(
+    private function allocateOutboundLots(
         int $companyId,
         int $warehouseId,
         int $productId,
-        int $lotId,
-        float $delta,
-        bool $allowNegativeStock
-    ): void {
+        float $qtyBase,
+        float $conversionFactor,
+        string $strategy,
+        bool $allowNegativeStock,
+        int $lineNumber
+    ): array {
+        $candidateLots = DB::table('inventory.product_lots as pl')
+            ->leftJoin('inventory.current_stock_by_lot as csl', function ($join) use ($companyId, $warehouseId, $productId) {
+                $join->on('csl.lot_id', '=', 'pl.id')
+                    ->where('csl.company_id', '=', $companyId)
+                    ->where('csl.warehouse_id', '=', $warehouseId)
+                    ->where('csl.product_id', '=', $productId);
+            })
+            ->select([
+                'pl.id',
+                'pl.expires_at',
+                'pl.received_at',
+                DB::raw('COALESCE(csl.stock, 0) as stock'),
+            ])
+            ->where('pl.company_id', $companyId)
+            ->where('pl.warehouse_id', $warehouseId)
+            ->where('pl.product_id', $productId)
+            ->where('pl.status', 1)
+            ->orderByRaw($strategy === 'FEFO' ? 'CASE WHEN pl.expires_at IS NULL THEN 1 ELSE 0 END, pl.expires_at ASC, pl.received_at ASC, pl.id ASC' : 'pl.received_at ASC, pl.id ASC')
+            ->get();
+
+        if ($candidateLots->isEmpty()) {
+            throw new \RuntimeException('No hay lotes disponibles para asignacion automatica en la linea ' . $lineNumber);
+        }
+
+        $remainingBase = round(max($qtyBase, 0), 8);
+        $safeConversionFactor = max($conversionFactor, 0.00000001);
+        $assignedLots = [];
+
+        foreach ($candidateLots as $candidateLot) {
+            if ($remainingBase <= 0.00000001) {
+                break;
+            }
+
+            $availableBase = max(0, $this->projectedLotStock(
+                $companyId,
+                $warehouseId,
+                $productId,
+                (int) $candidateLot->id
+            ));
+
+            if ($availableBase <= 0.00000001) {
+                continue;
+            }
+
+            $allocatedBase = min($availableBase, $remainingBase);
+
+            $assignedLots[] = [
+                'lot_id' => (int) $candidateLot->id,
+                'qty' => round($allocatedBase / $safeConversionFactor, 8),
+                'qty_base' => round($allocatedBase, 8),
+            ];
+
+            $remainingBase = round($remainingBase - $allocatedBase, 8);
+        }
+
+        if ($remainingBase > 0.00000001) {
+            if (!$allowNegativeStock || empty($assignedLots)) {
+                throw new \RuntimeException('Stock insuficiente por lotes para asignacion automatica en la linea ' . $lineNumber);
+            }
+
+            $lastIndex = count($assignedLots) - 1;
+            $assignedLots[$lastIndex]['qty_base'] = round($assignedLots[$lastIndex]['qty_base'] + $remainingBase, 8);
+            $assignedLots[$lastIndex]['qty'] = round($assignedLots[$lastIndex]['qty_base'] / $safeConversionFactor, 8);
+        }
+
+        return $assignedLots;
+    }
+
+    private function projectedLotStock(
+        int $companyId,
+        int $warehouseId,
+        int $productId,
+        int $lotId
+    ): float {
         $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId . ':' . $lotId;
 
         if (!array_key_exists($projectionKey, $this->lotStockProjection)) {
@@ -2014,7 +2164,19 @@ class SalesController extends Controller
             $this->lotStockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
         }
 
-        $current = $this->lotStockProjection[$projectionKey];
+        return (float) $this->lotStockProjection[$projectionKey];
+    }
+
+    private function applyLotStockDelta(
+        int $companyId,
+        int $warehouseId,
+        int $productId,
+        int $lotId,
+        float $delta,
+        bool $allowNegativeStock
+    ): void {
+        $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId . ':' . $lotId;
+        $current = $this->projectedLotStock($companyId, $warehouseId, $productId, $lotId);
         $next = $current + $delta;
 
         if (!$allowNegativeStock && $next < -0.00000001) {

@@ -101,6 +101,7 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'role_code' => $roleContext['role_code'],
                 'role_profile' => $roleContext['role_profile'],
+                'permissions' => $this->resolveUserPermissions((int) $user->id, (int) $user->company_id),
             ],
         ]);
     }
@@ -202,6 +203,7 @@ class AuthController extends Controller
                 'email' => $session->email,
                 'role_code' => $roleContext['role_code'],
                 'role_profile' => $roleContext['role_profile'],
+                'permissions' => $this->resolveUserPermissions((int) $session->user_id, (int) $session->company_id),
             ],
         ]);
     }
@@ -221,8 +223,64 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'role_code' => $user->role_code ?? null,
                 'role_profile' => $user->role_profile ?? null,
+                'permissions' => $this->resolveUserPermissions((int) $user->id, (int) $user->company_id),
             ],
         ]);
+    }
+
+    private function resolveUserPermissions(int $userId, int $companyId): array
+    {
+        $modules = DB::table('appcfg.modules')
+            ->where('status', 1)
+            ->pluck('id', 'code');
+
+        if ($modules->isEmpty()) {
+            return [];
+        }
+
+        $roleAccess = DB::table('auth.role_module_access as rma')
+            ->join('auth.user_roles as ur', 'ur.role_id', '=', 'rma.role_id')
+            ->where('ur.user_id', $userId)
+            ->whereIn('rma.module_id', $modules->values())
+            ->selectRaw('rma.module_id')
+            ->selectRaw('COALESCE(bool_or(rma.can_view), false) as can_view')
+            ->selectRaw('COALESCE(bool_or(rma.can_create), false) as can_create')
+            ->selectRaw('COALESCE(bool_or(rma.can_update), false) as can_update')
+            ->selectRaw('COALESCE(bool_or(rma.can_delete), false) as can_delete')
+            ->selectRaw('COALESCE(bool_or(rma.can_export), false) as can_export')
+            ->selectRaw('COALESCE(bool_or(rma.can_approve), false) as can_approve')
+            ->groupBy('rma.module_id')
+            ->get()
+            ->keyBy('module_id');
+
+        $overrides = DB::table('auth.user_module_overrides')
+            ->where('user_id', $userId)
+            ->whereIn('module_id', $modules->values())
+            ->get()
+            ->keyBy('module_id');
+
+        $columns = ['can_view', 'can_create', 'can_update', 'can_delete', 'can_export', 'can_approve'];
+        $permissions = [];
+
+        foreach ($modules as $code => $moduleId) {
+            $role     = $roleAccess->get($moduleId);
+            $override = $overrides->get($moduleId);
+            $perm     = [];
+
+            foreach ($columns as $col) {
+                if ($override && $override->{$col} !== null) {
+                    $perm[$col] = (bool) $override->{$col};
+                } elseif ($role && $role->{$col} !== null) {
+                    $perm[$col] = (bool) $role->{$col};
+                } else {
+                    $perm[$col] = false;
+                }
+            }
+
+            $permissions[$code] = $perm;
+        }
+
+        return $permissions;
     }
 
     private function resolvePrimaryRoleContext(int $userId, int $companyId): array

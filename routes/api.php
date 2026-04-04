@@ -29,6 +29,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
+        Route::get('/appcfg/igv-settings', 'Api\\AppConfigController@igvSettings');
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/cash/sessions', 'Api\\CashController@sessions');
         Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
@@ -45,6 +46,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/masters/cash-registers', 'Api\\MasterDataController@cashRegisters');
         Route::get('/masters/payment-methods', 'Api\\MasterDataController@paymentMethods');
         Route::get('/masters/series', 'Api\\MasterDataController@series');
+        Route::get('/masters/price-tiers', 'Api\\MasterDataController@priceTiers');
         Route::get('/masters/lots', 'Api\\MasterDataController@lots');
         Route::get('/masters/inventory-settings', 'Api\\MasterDataController@inventorySettings');
         Route::get('/masters/document-kinds', 'Api\\MasterDataController@documentKinds');
@@ -53,6 +55,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     Route::middleware('rbac.module:APPCFG,update')->group(function () {
         Route::put('/appcfg/operational-limits', 'Api\\AppConfigController@updateOperationalLimits');
         Route::put('/appcfg/commerce-settings', 'Api\\AppConfigController@updateCommerceSettings')->middleware('admin.only');
+        Route::put('/appcfg/igv-settings', 'Api\\AppConfigController@updateIgvSettings');
     Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
     Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
     Route::post('/appcfg/company-cert', 'Api\\AppConfigController@uploadCompanyCert');
@@ -73,6 +76,9 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::post('/masters/series', 'Api\\MasterDataController@createSeries');
         Route::put('/masters/series/{id}', 'Api\\MasterDataController@updateSeries');
 
+        Route::post('/masters/price-tiers', 'Api\\MasterDataController@createPriceTier');
+        Route::put('/masters/price-tiers/{id}', 'Api\\MasterDataController@updatePriceTier');
+
         Route::post('/masters/lots', 'Api\\MasterDataController@createLot');
         Route::put('/masters/inventory-settings', 'Api\\MasterDataController@updateInventorySettings');
         Route::put('/masters/document-kinds', 'Api\\MasterDataController@updateDocumentKinds');
@@ -85,17 +91,27 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
 
     Route::middleware('rbac.module:SALES,view')->group(function () {
         Route::get('/sales/lookups', 'Api\\SalesController@lookups');
+        Route::get('/sales/price-tiers', 'Api\\SalesController@priceTiers');
+        Route::get('/sales/customer-types', 'Api\\SalesController@customerTypes');
         Route::get('/sales/customers', 'Api\\SalesController@customers');
         Route::get('/sales/customers/autocomplete', 'Api\\SalesController@customerAutocomplete');
+        Route::get('/sales/reference-documents', 'Api\\SalesController@referenceDocuments');
         Route::get('/sales/series-numbers', 'Api\\SalesController@seriesNumbers');
         Route::get('/sales/commercial-documents', 'Api\\SalesController@commercialDocuments');
         Route::get('/sales/commercial-documents/export', 'Api\\SalesController@exportCommercialDocuments');
         Route::get('/sales/commercial-documents/{id}', 'Api\\SalesController@showCommercialDocument');
+        Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesController@previewTaxBridgePayload');
+        Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesController@downloadSunatXml');
+        Route::get('/sales/commercial-documents/{id}/download-cdr', 'Api\\SalesController@downloadSunatCdr');
     });
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
         Route::post('/sales/commercial-documents', 'Api\\SalesController@createCommercialDocument');
         Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesController@convertCommercialDocument');
+        Route::put('/sales/commercial-documents/{id}', 'Api\\SalesController@updateCommercialDocument');
+        Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesController@voidCommercialDocument');
+        Route::put('/sales/commercial-documents/{id}/retry-tax-bridge', 'Api\\SalesController@retryTaxBridgeSend');
+        Route::put('/sales/commercial-documents/{id}/sunat-void', 'Api\\SalesController@sunatVoidCommunication');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
     });
@@ -111,6 +127,9 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/inventory/products', 'Api\\InventoryController@products');
         Route::get('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@productCommercialConfig');
         Route::get('/inventory/product-masters', 'Api\\InventoryController@productMasters');
+        Route::post('/inventory/products', 'Api\\InventoryController@createProduct');
+        Route::put('/inventory/products/{id}', 'Api\\InventoryController@updateProduct');
+        Route::put('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@updateProductCommercialConfig');
         Route::get('/inventory/current-stock', 'Api\\InventoryController@currentStock');
         Route::get('/inventory/lots', 'Api\\InventoryController@lots');
         Route::get('/inventory/stock-entries', 'Api\\InventoryController@stockEntries');
@@ -118,12 +137,12 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     });
 
     Route::middleware('rbac.module:INVENTORY,update')->group(function () {
-        Route::post('/inventory/products', 'Api\\InventoryController@createProduct');
-        Route::put('/inventory/products/{id}', 'Api\\InventoryController@updateProduct');
-        Route::put('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@updateProductCommercialConfig');
+        Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
+    });
+
+    Route::middleware('rbac.module:INVENTORY,create')->group(function () {
         Route::post('/inventory/product-masters', 'Api\\InventoryController@createProductMaster');
         Route::put('/inventory/product-masters/{id}', 'Api\\InventoryController@updateProductMaster');
-        Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
     });
 
     Route::middleware(['rbac.module:INVENTORY,view', 'throttle:1200,1'])->prefix('inventory-pro')->group(function () {

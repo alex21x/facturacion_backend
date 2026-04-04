@@ -2,11 +2,28 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Application\Commands\Purchases\ExportPurchasesStockEntriesCommand;
+use App\Application\Commands\Purchases\ListPurchasesStockEntriesCommand;
+use App\Application\UseCases\Purchases\ExportPurchasesStockEntriesUseCase;
+use App\Application\UseCases\Purchases\GetPurchasesLookupsUseCase;
+use App\Application\UseCases\Purchases\ListPurchasesStockEntriesUseCase;
+use App\Services\AppConfig\CommerceFeatureToggleService;
+use App\Services\AppConfig\CompanyIgvRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PurchasesController
 {
+    public function __construct(
+        private CommerceFeatureToggleService $featureToggles,
+        private CompanyIgvRateService $companyIgvRateService,
+        private GetPurchasesLookupsUseCase $getPurchasesLookupsUseCase,
+        private ListPurchasesStockEntriesUseCase $listPurchasesStockEntriesUseCase,
+        private ExportPurchasesStockEntriesUseCase $exportPurchasesStockEntriesUseCase
+    )
+    {
+    }
+
     /**
      * Get lookups for purchases (payment methods, etc.)
      */
@@ -14,6 +31,7 @@ class PurchasesController
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchId = $request->query('branch_id', $authUser->branch_id);
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json([
@@ -21,16 +39,52 @@ class PurchasesController
             ], 403);
         }
 
-        $paymentMethods = DB::table('core.payment_methods')
-            ->select('id', 'code', 'name')
-            ->where('status', 1)
-            ->orderBy('name')
-            ->get();
+        if ($branchId !== null && $branchId !== '') {
+            $branchId = (int) $branchId;
+        } else {
+            $branchId = null;
+        }
+
+        $baseLookups = $this->getPurchasesLookupsUseCase->execute($companyId);
+
+        $detraccionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_DETRACCION_ENABLED');
+        $retencionCompradorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED');
+        $retencionProveedorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED');
+        $percepcionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_PERCEPCION_ENABLED');
+
+        $retencionFeatureCode = $retencionCompradorEnabled
+            ? 'PURCHASES_RETENCION_COMPRADOR_ENABLED'
+            : ($retencionProveedorEnabled ? 'PURCHASES_RETENCION_PROVEEDOR_ENABLED' : null);
 
         return response()->json([
-            'payment_methods' => $paymentMethods,
-            'tax_categories' => $this->resolveTaxCategories($companyId),
-            'inventory_settings' => $this->inventorySettingsForCompany($companyId),
+            'payment_methods' => $baseLookups['payment_methods'],
+            'tax_categories' => $baseLookups['tax_categories'],
+            'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
+            'inventory_settings' => $baseLookups['inventory_settings'],
+            'detraccion_service_codes' => $detraccionEnabled ? $this->resolveDetractionServiceCodes() : [],
+            'detraccion_min_amount' => $detraccionEnabled ? $this->getDetractionMinAmount($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED') : null,
+            'detraccion_account' => $detraccionEnabled ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED', 'DETRACCION') : null,
+            'retencion_comprador_enabled' => $retencionCompradorEnabled,
+            'retencion_proveedor_enabled' => $retencionProveedorEnabled,
+            'retencion_types' => ($retencionCompradorEnabled || $retencionProveedorEnabled)
+                ? $this->resolveRetencionTypes($companyId, $branchId, $retencionCompradorEnabled, $retencionProveedorEnabled)
+                : [],
+            'retencion_account' => $retencionFeatureCode
+                ? $this->resolveFeatureAccountInfo($companyId, $branchId, $retencionFeatureCode, 'RETENCION')
+                : null,
+            'retencion_percentage' => 3.00,
+            'percepcion_enabled' => $percepcionEnabled,
+            'percepcion_types' => $percepcionEnabled ? $this->resolvePercepcionTypes($companyId, $branchId) : [],
+            'percepcion_account' => $percepcionEnabled
+                ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED', 'PERCEPCION')
+                : null,
+            'sunat_operation_types' => ($detraccionEnabled || $retencionCompradorEnabled || $retencionProveedorEnabled || $percepcionEnabled)
+                ? $this->resolveSunatOperationTypes($companyId, $branchId)
+                : [],
         ]);
     }
 
@@ -61,92 +115,27 @@ class PurchasesController
         $page = max(1, (int) $request->query('page', 1));
         $offset = ($page - 1) * $perPage;
 
-        $stockEntryColumns = $this->tableColumns('inventory.stock_entries');
-        $hasPaymentMethodId = in_array('payment_method_id', $stockEntryColumns, true);
-
-        $summarySubquery = DB::table('inventory.stock_entry_items as sei')
-            ->selectRaw('sei.entry_id, COUNT(*) as total_items, COALESCE(SUM(sei.qty), 0) as total_qty, COALESCE(SUM(sei.qty * sei.unit_cost), 0) as total_amount')
-            ->groupBy('sei.entry_id');
-
-        $query = DB::table('inventory.stock_entries as se')
-            ->leftJoin('inventory.warehouses as w', 'se.warehouse_id', '=', 'w.id')
-            ->leftJoinSub($summarySubquery, 's', function ($join) {
-                $join->on('s.entry_id', '=', 'se.id');
-            })
-            ->select(
-                'se.id',
-                'se.entry_type',
-                'se.reference_no',
-                'se.supplier_reference',
-                'se.issue_at',
-                'se.notes',
-                DB::raw('COALESCE(s.total_items, 0) as total_items'),
-                DB::raw('COALESCE(s.total_qty, 0) as total_qty'),
-                DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
-                'w.code as warehouse_code',
-                'w.name as warehouse_name'
+        $result = $this->listPurchasesStockEntriesUseCase->execute(
+            ListPurchasesStockEntriesCommand::fromInput(
+                $companyId,
+                $branchId,
+                $entryType,
+                $reference,
+                $dateFrom,
+                $dateTo,
+                $warehouseId,
+                $page,
+                $perPage
             )
-            ->where('se.company_id', $companyId)
-            ->where('se.status', 'APPLIED');
-
-        if ($hasPaymentMethodId) {
-            $query->leftJoin('core.payment_methods as pm', 'se.payment_method_id', '=', 'pm.id')
-                ->addSelect(DB::raw('COALESCE(pm.name, \'No especificado\') as payment_method'));
-        } else {
-            $query->addSelect(DB::raw('\'No especificado\' as payment_method'));
-        }
-
-        // Apply optional filters
-        if ($branchId !== null) {
-            $query->where(function ($q) use ($branchId) {
-                $q->where('se.branch_id', (int) $branchId)
-                    ->orWhereNull('se.branch_id');
-            });
-        }
-
-        if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT'])) {
-            $query->where('se.entry_type', $entryType);
-        }
-
-        if ($reference) {
-            $searchTerm = '%' . $reference . '%';
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('se.reference_no', 'ilike', $searchTerm)
-                    ->orWhere('se.supplier_reference', 'ilike', $searchTerm);
-            });
-        }
-
-        if ($dateFrom) {
-            $query->whereDate('se.issue_at', '>=', $dateFrom);
-        }
-
-        if ($dateTo) {
-            $query->whereDate('se.issue_at', '<=', $dateTo);
-        }
-
-        if ($warehouseId) {
-            $query->where('se.warehouse_id', (int) $warehouseId);
-        }
-
-        // Count total records before pagination
-        $total = $query->count();
-
-        // Get paginated results
-        $entries = $query->orderBy('se.issue_at', 'desc')
-            ->orderBy('se.id', 'desc')
-            ->offset($offset)
-            ->limit($perPage)
-            ->get();
-
-        $entries = $this->attachEntryItems($entries, $companyId);
+        );
 
         return response()->json([
-            'data' => $entries,
+            'data' => $result['data'],
             'pagination' => [
                 'current_page' => $page,
                 'per_page' => $perPage,
-                'total' => $total,
-                'total_pages' => ceil($total / $perPage),
+                'total' => $result['total'],
+                'total_pages' => ceil($result['total'] / $perPage),
             ],
         ]);
     }
@@ -174,80 +163,20 @@ class PurchasesController
         $warehouseId = $request->query('warehouse_id');
         $format = strtolower($request->query('format', 'csv')); // csv or xlsx
 
-        $stockEntryColumns = $this->tableColumns('inventory.stock_entries');
-        $hasPaymentMethodId = in_array('payment_method_id', $stockEntryColumns, true);
-
-        $summarySubquery = DB::table('inventory.stock_entry_items as sei')
-            ->selectRaw('sei.entry_id, COUNT(*) as total_items, COALESCE(SUM(sei.qty), 0) as total_qty, COALESCE(SUM(sei.qty * sei.unit_cost), 0) as total_amount')
-            ->groupBy('sei.entry_id');
-
-        $query = DB::table('inventory.stock_entries as se')
-            ->leftJoin('inventory.warehouses as w', 'se.warehouse_id', '=', 'w.id')
-            ->leftJoinSub($summarySubquery, 's', function ($join) {
-                $join->on('s.entry_id', '=', 'se.id');
-            })
-            ->select(
-                'se.id',
-                'se.entry_type',
-                'se.reference_no',
-                'se.supplier_reference',
-                'se.issue_at',
-                'se.notes',
-                DB::raw('COALESCE(s.total_items, 0) as total_items'),
-                DB::raw('COALESCE(s.total_qty, 0) as total_qty'),
-                DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
-                'w.code as warehouse_code',
-                'w.name as warehouse_name'
+        $entries = $this->exportPurchasesStockEntriesUseCase->execute(
+            ExportPurchasesStockEntriesCommand::fromInput(
+                $companyId,
+                $branchId,
+                $entryType,
+                $reference,
+                $dateFrom,
+                $dateTo,
+                $warehouseId,
+                $format === 'json'
             )
-            ->where('se.company_id', $companyId)
-            ->where('se.status', 'APPLIED');
-
-        if ($hasPaymentMethodId) {
-            $query->leftJoin('core.payment_methods as pm', 'se.payment_method_id', '=', 'pm.id')
-                ->addSelect(DB::raw('COALESCE(pm.name, \'No especificado\') as payment_method'));
-        } else {
-            $query->addSelect(DB::raw('\'No especificado\' as payment_method'));
-        }
-
-        // Apply same filters
-        if ($branchId !== null) {
-            $query->where(function ($q) use ($branchId) {
-                $q->where('se.branch_id', (int) $branchId)
-                    ->orWhereNull('se.branch_id');
-            });
-        }
-
-        if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT'])) {
-            $query->where('se.entry_type', $entryType);
-        }
-
-        if ($reference) {
-            $searchTerm = '%' . $reference . '%';
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('se.reference_no', 'ilike', $searchTerm)
-                    ->orWhere('se.supplier_reference', 'ilike', $searchTerm);
-            });
-        }
-
-        if ($dateFrom) {
-            $query->whereDate('se.issue_at', '>=', $dateFrom);
-        }
-
-        if ($dateTo) {
-            $query->whereDate('se.issue_at', '<=', $dateTo);
-        }
-
-        if ($warehouseId) {
-            $query->where('se.warehouse_id', (int) $warehouseId);
-        }
-
-        $entries = $query->orderBy('se.issue_at', 'desc')
-            ->orderBy('se.id', 'desc')
-            ->get();
+        );
 
         if ($format === 'json') {
-            $entries = $this->attachEntryItems($entries, $companyId);
-
             return response()->json([
                 'data' => $entries,
             ]);
@@ -515,5 +444,316 @@ class PurchasesController
         }
 
         return ['public', $qualifiedTable];
+    }
+
+    private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
+    {
+        return $this->featureToggles->isFeatureEnabledForContext($companyId, $branchId, $featureCode);
+    }
+
+    private function isCommerceFeatureEnabled(int $companyId, string $featureCode): bool
+    {
+        return $this->featureToggles->isCompanyFeatureEnabled($companyId, $featureCode);
+    }
+
+    private function getDetractionMinAmount(int $companyId, $branchId, string $featureCode): float
+    {
+        $row = $this->resolveFeatureToggleRow($companyId, $branchId, $featureCode);
+        if ($row) {
+            $config = $this->decodeFeatureConfig($row->config ?? null);
+            if (isset($config['min_amount']) && is_numeric($config['min_amount'])) {
+                return (float) $config['min_amount'];
+            }
+        }
+
+        return 700.00;
+    }
+
+    private function resolveRetencionTypes(int $companyId, $branchId, bool $retencionCompradorEnabled, bool $retencionProveedorEnabled): array
+    {
+        $defaultRate = 3.00;
+        $defaultType = [
+            'code' => 'RET_IGV_3',
+            'name' => 'Retencion IGV',
+            'rate_percent' => $defaultRate,
+        ];
+
+        $configuredTypes = [];
+        if ($retencionCompradorEnabled) {
+            $row = $this->resolveFeatureToggleRow($companyId, $branchId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED');
+            $config = $this->decodeFeatureConfig($row ? $row->config : null);
+            if (isset($config['retencion_types']) && is_array($config['retencion_types'])) {
+                $configuredTypes = array_merge($configuredTypes, $config['retencion_types']);
+            }
+        }
+        if ($retencionProveedorEnabled) {
+            $row = $this->resolveFeatureToggleRow($companyId, $branchId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED');
+            $config = $this->decodeFeatureConfig($row ? $row->config : null);
+            if (isset($config['retencion_types']) && is_array($config['retencion_types'])) {
+                $configuredTypes = array_merge($configuredTypes, $config['retencion_types']);
+            }
+        }
+
+        $rows = collect($configuredTypes)
+            ->map(function ($item) use ($defaultRate) {
+                if (!is_array($item)) {
+                    return null;
+                }
+
+                $code = strtoupper(trim((string) ($item['code'] ?? '')));
+                $name = trim((string) ($item['name'] ?? ''));
+                $rate = isset($item['rate_percent']) && is_numeric($item['rate_percent'])
+                    ? (float) $item['rate_percent']
+                    : $defaultRate;
+
+                return [
+                    'code' => $code,
+                    'name' => $name,
+                    'rate_percent' => $rate,
+                ];
+            })
+            ->filter(function ($row) {
+                return is_array($row) && $row['code'] !== '' && $row['name'] !== '';
+            })
+            ->unique('code')
+            ->values()
+            ->all();
+
+        return count($rows) > 0 ? $rows : [$defaultType];
+    }
+
+    private function resolvePercepcionTypes(int $companyId, $branchId): array
+    {
+        $defaultRate = 2.00;
+        $defaultType = [
+            'code' => 'PERC_IGV_2',
+            'name' => 'Percepcion IGV',
+            'rate_percent' => $defaultRate,
+        ];
+
+        $featureRow = $this->resolveFeatureToggleRow($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED');
+        $config = $this->decodeFeatureConfig($featureRow ? $featureRow->config : null);
+        $configuredTypes = isset($config['percepcion_types']) && is_array($config['percepcion_types'])
+            ? $config['percepcion_types']
+            : [];
+
+        $rows = collect($configuredTypes)
+            ->map(function ($item) use ($defaultRate) {
+                if (!is_array($item)) {
+                    return null;
+                }
+
+                $code = strtoupper(trim((string) ($item['code'] ?? '')));
+                $name = trim((string) ($item['name'] ?? ''));
+                $rate = isset($item['rate_percent']) && is_numeric($item['rate_percent'])
+                    ? (float) $item['rate_percent']
+                    : $defaultRate;
+
+                return [
+                    'code' => $code,
+                    'name' => $name,
+                    'rate_percent' => $rate,
+                ];
+            })
+            ->filter(function ($row) {
+                return is_array($row) && $row['code'] !== '' && $row['name'] !== '';
+            })
+            ->values()
+            ->all();
+
+        return count($rows) > 0 ? $rows : [$defaultType];
+    }
+
+    private function resolveSunatOperationTypes(int $companyId, $branchId): array
+    {
+        $defaultRows = [
+            ['code' => '0101', 'name' => 'Compra interna', 'regime' => 'NONE'],
+            ['code' => '1001', 'name' => 'Operacion sujeta a detraccion', 'regime' => 'DETRACCION'],
+            ['code' => '2001', 'name' => 'Operacion sujeta a retencion', 'regime' => 'RETENCION'],
+            ['code' => '3001', 'name' => 'Operacion sujeta a percepcion', 'regime' => 'PERCEPCION'],
+        ];
+
+        $featureCodes = [
+            'PURCHASES_DETRACCION_ENABLED',
+            'PURCHASES_RETENCION_COMPRADOR_ENABLED',
+            'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
+            'PURCHASES_PERCEPCION_ENABLED',
+        ];
+
+        $configuredRows = [];
+        foreach ($featureCodes as $featureCode) {
+            $featureRow = $this->resolveFeatureToggleRow($companyId, $branchId, $featureCode);
+            $config = $this->decodeFeatureConfig($featureRow ? $featureRow->config : null);
+            if (isset($config['sunat_operation_types']) && is_array($config['sunat_operation_types'])) {
+                $configuredRows = array_merge($configuredRows, $config['sunat_operation_types']);
+            }
+        }
+
+        $rows = collect($configuredRows)
+            ->map(function ($item) {
+                if (!is_array($item)) {
+                    return null;
+                }
+
+                $code = strtoupper(trim((string) ($item['code'] ?? '')));
+                $name = trim((string) ($item['name'] ?? ''));
+                $regime = strtoupper(trim((string) ($item['regime'] ?? 'NONE')));
+                if (!in_array($regime, ['NONE', 'DETRACCION', 'RETENCION', 'PERCEPCION'], true)) {
+                    $regime = 'NONE';
+                }
+
+                return [
+                    'code' => $code,
+                    'name' => $name,
+                    'regime' => $regime,
+                ];
+            })
+            ->filter(function ($row) {
+                return is_array($row) && $row['code'] !== '' && $row['name'] !== '';
+            })
+            ->unique('code')
+            ->values()
+            ->all();
+
+        return count($rows) > 0 ? $rows : $defaultRows;
+    }
+
+    private function resolveFeatureAccountInfo(int $companyId, $branchId, string $featureCode, string $fallbackKeyword): ?array
+    {
+        $featureRow = $this->resolveFeatureToggleRow($companyId, $branchId, $featureCode);
+        $config = $this->decodeFeatureConfig($featureRow ? $featureRow->config : null);
+
+        $accountNumber = trim((string) ($config['account_number'] ?? ''));
+        if ($accountNumber !== '') {
+            return [
+                'bank_name' => trim((string) ($config['bank_name'] ?? '')),
+                'account_number' => $accountNumber,
+                'account_holder' => trim((string) ($config['account_holder'] ?? '')),
+            ];
+        }
+
+        $bankAccounts = $this->resolveCompanyBankAccounts($companyId);
+        $keyword = strtoupper(trim($fallbackKeyword));
+        foreach ($bankAccounts as $account) {
+            if (!is_array($account)) {
+                continue;
+            }
+
+            $accountType = strtoupper(trim((string) ($account['account_type'] ?? '')));
+            $number = trim((string) ($account['account_number'] ?? ''));
+            if ($number === '') {
+                continue;
+            }
+            if ($keyword !== '' && strpos($accountType, $keyword) === false) {
+                continue;
+            }
+
+            return [
+                'bank_name' => trim((string) ($account['bank_name'] ?? '')),
+                'account_number' => $number,
+                'account_holder' => trim((string) ($account['account_holder'] ?? '')),
+            ];
+        }
+
+        return null;
+    }
+
+    private function resolveCompanyBankAccounts(int $companyId): array
+    {
+        if (!$this->tableExists('core.company_settings')) {
+            return [];
+        }
+
+        $row = DB::table('core.company_settings')
+            ->where('company_id', $companyId)
+            ->select('bank_accounts')
+            ->first();
+
+        if (!$row || $row->bank_accounts === null) {
+            return [];
+        }
+
+        $decoded = is_string($row->bank_accounts)
+            ? json_decode($row->bank_accounts, true)
+            : (array) $row->bank_accounts;
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        return array_values(array_filter($decoded, function ($item) {
+            return is_array($item);
+        }));
+    }
+
+    private function resolveFeatureToggleRow(int $companyId, $branchId, string $featureCode)
+    {
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->first();
+
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->first();
+
+            if ($branchRow && (bool) ($branchRow->is_enabled ?? false)) {
+                return $branchRow;
+            }
+
+            if ($companyRow && (bool) ($companyRow->is_enabled ?? false)) {
+                return $companyRow;
+            }
+
+            if ($branchRow) {
+                return $branchRow;
+            }
+        }
+
+        return $companyRow;
+    }
+
+    private function decodeFeatureConfig($rawConfig): array
+    {
+        if ($rawConfig === null) {
+            return [];
+        }
+
+        if (is_string($rawConfig)) {
+            $decoded = json_decode($rawConfig, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        if (is_array($rawConfig)) {
+            return $rawConfig;
+        }
+
+        return [];
+    }
+
+    private function resolveDetractionServiceCodes(): array
+    {
+        if (!$this->tableExists('master.detraccion_service_codes')) {
+            return [];
+        }
+
+        return DB::table('master.detraccion_service_codes')
+            ->select('id', 'code', 'name', 'rate_percent')
+            ->where('is_active', 1)
+            ->orderBy('code')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'id'           => (int) $row->id,
+                    'code'         => (string) $row->code,
+                    'name'         => (string) $row->name,
+                    'rate_percent' => (float) $row->rate_percent,
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

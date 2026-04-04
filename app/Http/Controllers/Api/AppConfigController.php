@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AppConfig\CompanyIgvRateService;
+use App\Services\Sales\TaxBridge\TaxBridgeException;
+use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -15,7 +18,20 @@ class AppConfigController extends Controller
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',
+        'INVENTORY_PRODUCTS_BY_PROFILE',
+        'INVENTORY_PRODUCT_MASTERS_BY_PROFILE',
+        'SALES_CUSTOMER_PRICE_PROFILE',
         'SALES_SELLER_TO_CASHIER',
+        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
+        'SALES_ANTICIPO_ENABLED',
+        'SALES_TAX_BRIDGE',
+        'SALES_DETRACCION_ENABLED',
+        'SALES_RETENCION_ENABLED',
+        'SALES_PERCEPCION_ENABLED',
+        'PURCHASES_DETRACCION_ENABLED',
+        'PURCHASES_RETENCION_COMPRADOR_ENABLED',
+        'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
+        'PURCHASES_PERCEPCION_ENABLED',
     ];
 
     public function operationalContext(Request $request)
@@ -326,6 +342,13 @@ class AppConfigController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchId = $request->query('branch_id');
+
+        if ($branchId !== null && $branchId !== '') {
+            $branchId = (int) $branchId;
+        } else {
+            $branchId = null;
+        }
 
         if ($companyId !== (int) $authUser->company_id) {
             return response()->json([
@@ -333,24 +356,55 @@ class AppConfigController extends Controller
             ], 403);
         }
 
-        $rows = DB::table('appcfg.company_feature_toggles')
+        if ($branchId !== null) {
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json([
+                    'message' => 'Invalid branch scope',
+                ], 403);
+            }
+        }
+
+        $companyRows = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->whereIn('feature_code', self::COMMERCE_FEATURE_CODES)
             ->get()
             ->keyBy('feature_code');
 
-        $features = collect(self::COMMERCE_FEATURE_CODES)->map(function ($code) use ($rows) {
-            $row = $rows->get($code);
+        $branchRows = collect();
+        if ($branchId !== null) {
+            $branchRows = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->whereIn('feature_code', self::COMMERCE_FEATURE_CODES)
+                ->get()
+                ->keyBy('feature_code');
+        }
+
+        $features = collect(self::COMMERCE_FEATURE_CODES)->map(function ($code) use ($companyRows, $branchRows) {
+            $companyRow = $companyRows->get($code);
+            $branchRow = $branchRows->get($code);
+            $companyConfig = $companyRow ? $this->decodeJsonConfig($companyRow->config) : null;
+            $branchConfig = $branchRow ? $this->decodeJsonConfig($branchRow->config) : null;
 
             return [
                 'feature_code' => $code,
-                'is_enabled' => $row ? (bool) $row->is_enabled : false,
-                'config' => $row ? $this->decodeJsonConfig($row->config) : null,
+                'is_enabled' => $branchRow && $branchRow->is_enabled !== null
+                    ? (bool) $branchRow->is_enabled
+                    : ($companyRow ? (bool) $companyRow->is_enabled : false),
+                'config' => is_array($companyConfig) || is_array($branchConfig)
+                    ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
+                    : ($branchConfig ?? $companyConfig),
             ];
         })->values();
 
         return response()->json([
             'company_id' => $companyId,
+            'branch_id' => $branchId,
             'features' => $features,
         ]);
     }
@@ -361,8 +415,9 @@ class AppConfigController extends Controller
 
         $validator = Validator::make($request->all(), [
             'company_id' => 'nullable|integer|min:1',
+            'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,SALES_SELLER_TO_CASHIER',
+            'features.*.feature_code' => 'required|string|in:PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);
@@ -376,6 +431,7 @@ class AppConfigController extends Controller
 
         $payload = $validator->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
+        $branchId = isset($payload['branch_id']) ? (int) $payload['branch_id'] : null;
 
         if ($companyId !== (int) $authUser->company_id) {
             return response()->json([
@@ -383,12 +439,41 @@ class AppConfigController extends Controller
             ], 403);
         }
 
+        if ($branchId !== null) {
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json([
+                    'message' => 'Invalid branch scope',
+                ], 403);
+            }
+        }
+
         foreach ($payload['features'] as $feature) {
+            $match = [
+                'company_id' => $companyId,
+                'feature_code' => $feature['feature_code'],
+            ];
+
+            if ($branchId !== null) {
+                $match['branch_id'] = $branchId;
+                DB::table('appcfg.branch_feature_toggles')->updateOrInsert(
+                    $match,
+                    [
+                        'is_enabled' => (bool) $feature['is_enabled'],
+                        'config' => array_key_exists('config', $feature) ? $this->encodeJsonConfig($feature['config']) : null,
+                        'updated_by' => $authUser->id,
+                        'updated_at' => now(),
+                    ]
+                );
+                continue;
+            }
+
             DB::table('appcfg.company_feature_toggles')->updateOrInsert(
-                [
-                    'company_id' => $companyId,
-                    'feature_code' => $feature['feature_code'],
-                ],
+                $match,
                 [
                     'is_enabled' => (bool) $feature['is_enabled'],
                     'config' => array_key_exists('config', $feature) ? $this->encodeJsonConfig($feature['config']) : null,
@@ -522,7 +607,7 @@ class AppConfigController extends Controller
     // Perfil de empresa
     // ─────────────────────────────────────────────────────────
 
-    public function companyProfile(Request $request)
+    public function companyProfile(Request $request, CompanyIgvRateService $companyIgvRateService)
     {
         $authUser  = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
@@ -554,25 +639,39 @@ class AppConfigController extends Controller
                 : null;
         }
 
+        // Extract location fields from extra_data
+        $extraData = $settings
+            ? json_decode((string) ($settings->extra_data ?? '{}'), true) ?? []
+            : [];
+
         return response()->json([
-            'company_id'  => $companyId,
-            'tax_id'      => $company->tax_id,
-            'legal_name'  => $company->legal_name,
-            'trade_name'  => $company->trade_name,
-            'status'      => (int) $company->status,
-            'address'     => $settings->address    ?? null,
-            'phone'       => $settings->phone       ?? null,
-            'email'       => $settings->email       ?? null,
-            'website'     => $settings->website     ?? null,
-            'logo_url'    => $logoUrl,
-            'has_cert'    => $settings && !empty($settings->cert_path),
-            'bank_accounts' => $settings
+            'company_id'      => $companyId,
+            'tax_id'          => $company->tax_id,
+            'legal_name'      => $company->legal_name,
+            'trade_name'      => $company->trade_name,
+            'status'          => (int) $company->status,
+            'address'         => $settings->address    ?? null,
+            'phone'           => $settings->phone       ?? null,
+            'telefono_movil'  => $extraData['telefono_movil'] ?? null,
+            'telefono_fijo'   => $extraData['telefono_fijo'] ?? null,
+            'email'           => $settings->email       ?? null,
+            'website'         => $settings->website     ?? null,
+            'ubigeo'          => $extraData['ubigeo'] ?? null,
+            'departamento'    => $extraData['departamento'] ?? null,
+            'provincia'       => $extraData['provincia'] ?? null,
+            'distrito'        => $extraData['distrito'] ?? null,
+            'urbanizacion'    => $extraData['urbanizacion'] ?? null,
+            'sunat_secondary_user' => $extraData['sunat_secondary_user'] ?? null,
+            'sunat_secondary_pass' => $extraData['sunat_secondary_pass'] ?? null,
+            'logo_url'        => $logoUrl,
+            'has_cert'        => $settings && !empty($settings->cert_path),
+            'bank_accounts'   => $settings
                 ? json_decode((string) $settings->bank_accounts, true) ?? []
                 : [],
         ]);
     }
 
-    public function updateCompanyProfile(Request $request)
+    public function updateCompanyProfile(Request $request, CompanyIgvRateService $companyIgvRateService)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -583,8 +682,17 @@ class AppConfigController extends Controller
             'trade_name'    => 'nullable|string|max:200',
             'address'       => 'nullable|string|max:500',
             'phone'         => 'nullable|string|max:60',
+            'telefono_movil'=> 'nullable|string|max:60',
+            'telefono_fijo' => 'nullable|string|max:60',
             'email'         => 'nullable|email|max:200',
             'website'       => 'nullable|url|max:300',
+            'ubigeo'        => 'nullable|string|max:6',
+            'departamento'  => 'nullable|string|max:100',
+            'provincia'     => 'nullable|string|max:100',
+            'distrito'      => 'nullable|string|max:100',
+            'urbanizacion'  => 'nullable|string|max:100',
+            'sunat_secondary_user' => 'nullable|string|max:100',
+            'sunat_secondary_pass' => 'nullable|string|max:100',
             'bank_accounts' => 'nullable|array',
             'bank_accounts.*.bank_name'     => 'required_with:bank_accounts.*|string|max:100',
             'bank_accounts.*.account_number'=> 'required_with:bank_accounts.*|string|max:50',
@@ -637,13 +745,87 @@ class AppConfigController extends Controller
                 $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
             }
 
+            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass'];
+            $hasExtraDataUpdates = false;
+            foreach ($extraDataFields as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $hasExtraDataUpdates = true;
+                    break;
+                }
+            }
+
+            if ($hasExtraDataUpdates) {
+                $currentSettings = DB::table('core.company_settings')
+                    ->where('company_id', $companyId)
+                    ->first();
+
+                $currentExtra = $currentSettings
+                    ? json_decode((string) ($currentSettings->extra_data ?? '{}'), true) ?? []
+                    : [];
+
+                foreach ($extraDataFields as $field) {
+                    if (array_key_exists($field, $payload)) {
+                        if ($payload[$field] === null || $payload[$field] === '') {
+                            unset($currentExtra[$field]);
+                        } else {
+                            $currentExtra[$field] = $payload[$field];
+                        }
+                    }
+                }
+
+                $settingsUpdates['extra_data'] = json_encode($currentExtra);
+            }
+
             DB::table('core.company_settings')->updateOrInsert(
                 ['company_id' => $companyId],
                 $settingsUpdates
             );
         }
 
-        return $this->companyProfile($request);
+        return $this->companyProfile($request, $companyIgvRateService);
+    }
+
+    public function igvSettings(Request $request, CompanyIgvRateService $companyIgvRateService)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        return response()->json([
+            'company_id' => $companyId,
+            'active_rate' => $companyIgvRateService->resolveActiveRate($companyId),
+        ]);
+    }
+
+    public function updateIgvSettings(Request $request, CompanyIgvRateService $companyIgvRateService)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'nullable|integer|min:1',
+            'active_igv_rate_percent' => 'required|numeric|min:0|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $activeRate = $companyIgvRateService->setActiveRatePercent($companyId, (float) $payload['active_igv_rate_percent']);
+
+        return response()->json([
+            'company_id' => $companyId,
+            'active_rate' => $activeRate,
+        ]);
     }
 
     public function uploadCompanyLogo(Request $request)
@@ -688,7 +870,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function uploadCompanyCert(Request $request)
+    public function uploadCompanyCert(Request $request, TaxBridgeService $taxBridgeService)
     {
         $authUser  = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id', $authUser->company_id));
@@ -735,9 +917,103 @@ class AppConfigController extends Controller
             );
         }
 
+        $company = DB::table('core.companies')
+            ->where('id', $companyId)
+            ->select('tax_id', 'legal_name', 'trade_name')
+            ->first();
+
+        $settings = null;
+        if ($this->tableExists('core', 'company_settings')) {
+            $settings = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->select('address', 'phone', 'email', 'extra_data')
+                ->first();
+        }
+
+        $extraData = $settings && $settings->extra_data
+            ? (json_decode((string) $settings->extra_data, true) ?: [])
+            : [];
+
+        $companyPhone = (string) ($settings->phone ?? '');
+        $companyMobilePhone = (string) (($extraData['telefono_movil'] ?? $extraData['mobile_phone'] ?? '') ?: $companyPhone);
+        $companyLandlinePhone = (string) (($extraData['telefono_fijo'] ?? $extraData['landline_phone'] ?? '') ?: $companyPhone);
+
+        $bridgePayload = [
+            'empresa' => (string) ($company->legal_name ?? ''),
+            'nomcom' => (string) ($company->trade_name ?? ''),
+            'ruc' => (string) ($company->tax_id ?? ''),
+            'domicilio_fiscal' => (string) ($settings->address ?? ''),
+            'dep' => (string) ($extraData['departamento'] ?? ''),
+            'pro' => (string) ($extraData['provincia'] ?? ''),
+            'dis' => (string) ($extraData['distrito'] ?? ''),
+            'urb' => (string) ($extraData['urbanizacion'] ?? ''),
+            'ubigeo' => (string) ($extraData['ubigeo'] ?? ''),
+            'correo' => (string) ($settings->email ?? ''),
+            'telefono_movil' => $companyMobilePhone,
+            'telefono_fijo' => $companyLandlinePhone,
+            'user' => (string) ($extraData['sunat_secondary_user'] ?? ''),
+            'pass' => (string) ($extraData['sunat_secondary_pass'] ?? ''),
+            'pass_certificado' => $certPassword,
+        ];
+
+        try {
+            $bridgeResult = $taxBridgeService->registerCertificate(
+                $companyId,
+                null,
+                $bridgePayload,
+                $file->getRealPath(),
+                $file->getClientOriginalName()
+            );
+        } catch (TaxBridgeException $e) {
+            return response()->json([
+                'message' => 'Certificado guardado localmente, pero no se pudo registrar en el puente: ' . $e->getMessage(),
+                'has_cert' => true,
+            ], 422);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Certificado guardado localmente, pero ocurrio un error al registrar en el puente',
+                'has_cert' => true,
+                'bridge_error' => substr($e->getMessage(), 0, 500),
+            ], 500);
+        }
+
+        $legacyCode = $bridgeResult['legacy_code'] ?? null;
+
+        if ($legacyCode === 0) {
+            return response()->json([
+                'message' => 'Clave del certificado incorrecta',
+                'has_cert' => true,
+                'bridge_debug' => [
+                    'endpoint' => $bridgeResult['endpoint'] ?? '',
+                    'method' => 'POST',
+                    'payload' => $bridgeResult['payload'] ?? [],
+                ],
+                'bridge_response' => $bridgeResult['json_response'] ?? ($bridgeResult['raw_response'] ?? null),
+            ], 422);
+        }
+
+        if ($legacyCode !== 1 && $legacyCode !== 3) {
+            return response()->json([
+                'message' => 'Certificado guardado localmente, pero el puente devolvio una respuesta no esperada',
+                'has_cert' => true,
+                'bridge_debug' => [
+                    'endpoint' => $bridgeResult['endpoint'] ?? '',
+                    'method' => 'POST',
+                    'payload' => $bridgeResult['payload'] ?? [],
+                ],
+                'bridge_response' => $bridgeResult['json_response'] ?? ($bridgeResult['raw_response'] ?? null),
+            ], 502);
+        }
+
         return response()->json([
-            'message'  => 'Certificado digital actualizado',
+            'message'  => 'Certificado digital actualizado y registrado en puente',
             'has_cert' => true,
+            'bridge_debug' => [
+                'endpoint' => $bridgeResult['endpoint'] ?? '',
+                'method' => 'POST',
+                'payload' => $bridgeResult['payload'] ?? [],
+            ],
+            'bridge_response' => $bridgeResult['json_response'] ?? ($bridgeResult['raw_response'] ?? null),
         ]);
     }
 }

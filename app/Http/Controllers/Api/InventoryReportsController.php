@@ -483,14 +483,11 @@ class InventoryReportsController extends Controller
         $runAsync = (bool) ($payload['run_async'] ?? true);
         $queueConnection = (string) config('queue.default', 'sync');
 
-        if ($runAsync) {
-            if ($queueConnection !== 'sync') {
-                GenerateInventoryReportJob::dispatch((int) $requestId)->onQueue('inventory-reports');
-                $mode = 'async';
-            } else {
-                $mode = 'deferred';
-            }
+        if ($runAsync && $queueConnection !== 'sync') {
+            GenerateInventoryReportJob::dispatch((int) $requestId)->onQueue('inventory-reports');
+            $mode = 'async';
         } else {
+            // Cola sync o ejecucion en linea: procesar de inmediato
             ReportEngine::process((int) $requestId);
             $mode = 'inline';
         }

@@ -170,6 +170,9 @@ return [
          * Application Service Providers...
          */
         App\Providers\AppServiceProvider::class,
+        App\Providers\SalesRepositoryServiceProvider::class,
+        App\Providers\PurchasesInventoryRepositoryServiceProvider::class,
+        App\Providers\MasterDataRepositoryServiceProvider::class,
         App\Providers\AuthServiceProvider::class,
         // App\Providers\BroadcastServiceProvider::class,
         App\Providers\EventServiceProvider::class,

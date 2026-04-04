@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Application\UseCases\Masters\GetMasterDataOptionsUseCase;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -22,38 +23,19 @@ class MasterDataController extends Controller
         ['code' => 'DEBIT_NOTE', 'label' => 'Nota de Debito'],
     ];
 
+    public function __construct(private GetMasterDataOptionsUseCase $getMasterDataOptionsUseCase)
+    {
+    }
+
     public function options(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-
-        $branches = DB::table('core.branches')
-            ->select('id', 'code', 'name')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->orderByDesc('is_main')
-            ->orderBy('name')
-            ->get();
-
-        $warehouses = DB::table('inventory.warehouses')
-            ->select('id', 'branch_id', 'code', 'name')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->orderBy('name')
-            ->get();
-
-        $products = DB::table('inventory.products')
-            ->select('id', 'sku', 'name')
-            ->where('company_id', $companyId)
-            ->whereNull('deleted_at')
-            ->where('status', 1)
-            ->orderBy('name')
-            ->limit(200)
-            ->get();
+        $options = $this->getMasterDataOptionsUseCase->execute($companyId);
 
         return response()->json([
-            'branches' => $branches,
-            'warehouses' => $warehouses,
-            'products' => $products,
+            'branches' => $options['branches'],
+            'warehouses' => $options['warehouses'],
+            'products' => $options['products'],
         ]);
     }
 
@@ -61,30 +43,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
         $units = $this->companyUnits($companyId);
-
-        $options = [
-            'branches' => DB::table('core.branches')
-                ->select('id', 'code', 'name')
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->orderByDesc('is_main')
-                ->orderBy('name')
-                ->get(),
-            'warehouses' => DB::table('inventory.warehouses')
-                ->select('id', 'branch_id', 'code', 'name')
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->orderBy('name')
-                ->get(),
-            'products' => DB::table('inventory.products')
-                ->select('id', 'sku', 'name')
-                ->where('company_id', $companyId)
-                ->whereNull('deleted_at')
-                ->where('status', 1)
-                ->orderBy('name')
-                ->limit(200)
-                ->get(),
-        ];
+        $options = $this->getMasterDataOptionsUseCase->execute($companyId);
 
         $warehouses = DB::table('inventory.warehouses')
             ->select('id', 'company_id', 'branch_id', 'code', 'name', 'address', 'status')
@@ -119,6 +78,13 @@ class MasterDataController extends Controller
             ->where('company_id', $companyId)
             ->orderBy('document_kind')
             ->orderBy('series')
+            ->get();
+
+        $priceTiers = DB::table('sales.price_tiers')
+            ->select('id', 'company_id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('priority')
+            ->orderBy('min_qty')
             ->get();
 
         $lots = DB::table('inventory.product_lots as pl')
@@ -200,6 +166,7 @@ class MasterDataController extends Controller
             'cash_registers' => $cashRegisters,
             'payment_methods' => $paymentMethods,
             'series' => $series,
+            'price_tiers' => $priceTiers,
             'lots' => $lots,
             'units' => $units,
             'inventory_settings' => $inventorySettings,
@@ -209,6 +176,7 @@ class MasterDataController extends Controller
                 'cash_registers_total' => $cashRegisters->count(),
                 'payment_methods_total' => $paymentMethods->count(),
                 'series_total' => $series->count(),
+                'price_tiers_total' => $priceTiers->count(),
                 'lots_total' => $lots->count(),
                 'units_enabled_total' => $units->where('is_enabled', true)->count(),
             ],
@@ -880,6 +848,20 @@ class MasterDataController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    public function priceTiers(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        $rows = DB::table('sales.price_tiers')
+            ->select('id', 'company_id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
+            ->where('company_id', $companyId)
+            ->orderBy('priority')
+            ->orderBy('min_qty')
+            ->get();
+
+        return response()->json(['data' => $rows]);
+    }
+
     public function createSeries(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -968,6 +950,134 @@ class MasterDataController extends Controller
         DB::table('sales.series_numbers')->where('id', $id)->update($updates);
 
         return response()->json(['message' => 'Series updated']);
+    }
+
+    public function createPriceTier(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'code' => 'required|string|max:30',
+            'name' => 'required|string|max:120',
+            'min_qty' => 'required|numeric|gt:0',
+            'max_qty' => 'nullable|numeric|gt:0',
+            'priority' => 'nullable|integer|min:1',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $minQty = (float) $payload['min_qty'];
+        $maxQty = array_key_exists('max_qty', $payload) && $payload['max_qty'] !== null ? (float) $payload['max_qty'] : null;
+
+        if ($maxQty !== null && $maxQty < $minQty) {
+            return response()->json(['message' => 'Max qty must be greater than or equal to min qty'], 422);
+        }
+
+        $code = strtoupper(trim($payload['code']));
+        $existsCode = DB::table('sales.price_tiers')
+            ->where('company_id', $companyId)
+            ->where('code', $code)
+            ->exists();
+
+        if ($existsCode) {
+            return response()->json(['message' => 'Price tier code already exists'], 422);
+        }
+
+        $id = DB::table('sales.price_tiers')->insertGetId([
+            'company_id' => $companyId,
+            'code' => $code,
+            'name' => trim($payload['name']),
+            'min_qty' => $minQty,
+            'max_qty' => $maxQty,
+            'priority' => (int) ($payload['priority'] ?? 1),
+            'status' => (int) ($payload['status'] ?? 1),
+        ]);
+
+        return response()->json(['message' => 'Price tier created', 'id' => (int) $id], 201);
+    }
+
+    public function updatePriceTier(Request $request, int $id)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        $validator = Validator::make($request->all(), [
+            'code' => 'nullable|string|max:30',
+            'name' => 'nullable|string|max:120',
+            'min_qty' => 'nullable|numeric|gt:0',
+            'max_qty' => 'nullable|numeric|gt:0',
+            'priority' => 'nullable|integer|min:1',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $exists = DB::table('sales.price_tiers')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$exists) {
+            return response()->json(['message' => 'Price tier not found'], 404);
+        }
+
+        $payload = $validator->validated();
+
+        $current = DB::table('sales.price_tiers')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->first();
+
+        $minQty = array_key_exists('min_qty', $payload) ? (float) $payload['min_qty'] : (float) ($current->min_qty ?? 0);
+        $maxQty = array_key_exists('max_qty', $payload)
+            ? ($payload['max_qty'] !== null ? (float) $payload['max_qty'] : null)
+            : ($current->max_qty !== null ? (float) $current->max_qty : null);
+
+        if ($maxQty !== null && $maxQty < $minQty) {
+            return response()->json(['message' => 'Max qty must be greater than or equal to min qty'], 422);
+        }
+
+        $updates = [];
+        if (array_key_exists('code', $payload) && trim((string) $payload['code']) !== '') {
+            $nextCode = strtoupper(trim((string) $payload['code']));
+            $existsCode = DB::table('sales.price_tiers')
+                ->where('company_id', $companyId)
+                ->where('code', $nextCode)
+                ->where('id', '!=', $id)
+                ->exists();
+
+            if ($existsCode) {
+                return response()->json(['message' => 'Price tier code already exists'], 422);
+            }
+
+            $updates['code'] = $nextCode;
+        }
+        if (array_key_exists('name', $payload) && trim((string) $payload['name']) !== '') {
+            $updates['name'] = trim((string) $payload['name']);
+        }
+        if (array_key_exists('min_qty', $payload)) {
+            $updates['min_qty'] = (float) $payload['min_qty'];
+        }
+        if (array_key_exists('max_qty', $payload)) {
+            $updates['max_qty'] = $payload['max_qty'] !== null ? (float) $payload['max_qty'] : null;
+        }
+        if (array_key_exists('priority', $payload)) {
+            $updates['priority'] = (int) $payload['priority'];
+        }
+        if (array_key_exists('status', $payload)) {
+            $updates['status'] = (int) $payload['status'];
+        }
+
+        if (!empty($updates)) {
+            DB::table('sales.price_tiers')->where('id', $id)->update($updates);
+        }
+
+        return response()->json(['message' => 'Price tier updated']);
     }
 
     public function inventorySettings(Request $request)

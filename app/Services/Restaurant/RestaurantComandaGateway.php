@@ -334,8 +334,61 @@ class RestaurantComandaGateway
             ->forPage($page, $perPage)
             ->get();
 
+        $documentIds = collect($rows)
+            ->pluck('id')
+            ->map(function ($id) {
+                return (int) $id;
+            })
+            ->values();
+
+        $itemsByDocument = [];
+
+        if ($documentIds->isNotEmpty()) {
+            $itemRows = DB::table('sales.commercial_document_items')
+                ->whereIn('document_id', $documentIds->all())
+                ->orderBy('id')
+                ->get([
+                    'document_id',
+                    DB::raw("COALESCE(description, '') as description"),
+                    DB::raw('COALESCE(qty, 0) as qty'),
+                ]);
+
+            foreach ($itemRows as $itemRow) {
+                $documentId = (int) ($itemRow->document_id ?? 0);
+                if ($documentId <= 0) {
+                    continue;
+                }
+
+                $itemsByDocument[$documentId][] = [
+                    'description' => (string) ($itemRow->description ?? ''),
+                    'qty' => round((float) ($itemRow->qty ?? 0), 3),
+                ];
+            }
+        }
+
+        $data = collect($rows)
+            ->map(function ($row) use ($itemsByDocument) {
+                $documentId = (int) $row->id;
+
+                return [
+                    'id' => $documentId,
+                    'branch_id' => $row->branch_id,
+                    'series' => $row->series,
+                    'number' => $row->number,
+                    'issue_at' => $row->issue_at,
+                    'status' => $row->status,
+                    'total' => $row->total,
+                    'customer_name' => $row->customer_name,
+                    'kitchen_status' => $row->kitchen_status,
+                    'table_label' => $row->table_label,
+                    'items_preview' => $itemsByDocument[$documentId] ?? [],
+                ];
+            })
+            ->values()
+            ->all();
+
         return [
-            'data' => $rows,
+            'data' => $data,
             'meta' => [
                 'page' => $page,
                 'per_page' => $perPage,

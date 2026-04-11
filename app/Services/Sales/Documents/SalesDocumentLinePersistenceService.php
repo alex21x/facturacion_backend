@@ -58,7 +58,7 @@ class SalesDocumentLinePersistenceService
                 'tax_total' => round($itemTax, 2),
                 'subtotal' => round($itemSubtotal, 2),
                 'total' => round($itemTotal, 2),
-                'metadata' => isset($item['metadata']) ? json_encode($item['metadata']) : null,
+                'metadata' => $item['metadata'] ?? null,
             ]);
 
             if (!empty($processedItem['lots'])) {

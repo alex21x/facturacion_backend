@@ -52,7 +52,7 @@ class MasterDataController extends Controller
             ->get();
 
         $cashRegisters = DB::table('sales.cash_registers')
-            ->select('id', 'company_id', 'branch_id', 'code', 'name', 'status')
+            ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
             ->where('company_id', $companyId)
             ->orderBy('name')
             ->get();
@@ -554,6 +554,7 @@ class MasterDataController extends Controller
     public function createWarehouse(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $limits = $this->resolveCompanyOperationalLimits($companyId);
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
@@ -578,6 +579,18 @@ class MasterDataController extends Controller
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
             }
+        }
+
+        $enabledWarehouses = (int) DB::table('inventory.warehouses')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->count();
+
+        if ($enabledWarehouses >= $limits['max_warehouses_enabled']) {
+            return response()->json([
+                'message' => 'Se alcanzo el maximo de almacenes habilitados para esta empresa',
+                'max_warehouses_enabled' => $limits['max_warehouses_enabled'],
+            ], 422);
         }
 
         $id = DB::table('inventory.warehouses')->insertGetId([
@@ -658,7 +671,7 @@ class MasterDataController extends Controller
         $companyId = $this->resolveCompanyId($request);
 
         $rows = DB::table('sales.cash_registers')
-            ->select('id', 'company_id', 'branch_id', 'code', 'name', 'status')
+            ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
             ->where('company_id', $companyId)
             ->orderBy('name')
             ->get();
@@ -669,9 +682,11 @@ class MasterDataController extends Controller
     public function createCashRegister(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $limits = $this->resolveCompanyOperationalLimits($companyId);
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
+            'warehouse_id' => 'nullable|integer|min:1',
             'code' => 'required|string|max:30',
             'name' => 'required|string|max:120',
             'status' => 'nullable|integer|in:0,1',
@@ -694,9 +709,57 @@ class MasterDataController extends Controller
             }
         }
 
+        if (!empty($payload['warehouse_id'])) {
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('id', (int) $payload['warehouse_id'])
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$warehouseExists) {
+                return response()->json(['message' => 'Invalid warehouse scope'], 422);
+            }
+        }
+
+        $enabledCashRegisters = (int) DB::table('sales.cash_registers')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->count();
+
+        if ($enabledCashRegisters >= $limits['max_cash_registers_enabled']) {
+            return response()->json([
+                'message' => 'Se alcanzo el maximo de cajas habilitadas para esta empresa',
+                'max_cash_registers_enabled' => $limits['max_cash_registers_enabled'],
+            ], 422);
+        }
+
+        $warehouseId = array_key_exists('warehouse_id', $payload) && $payload['warehouse_id'] !== null
+            ? (int) $payload['warehouse_id']
+            : null;
+
+        if ($warehouseId !== null) {
+            $enabledCashRegistersForWarehouse = (int) DB::table('sales.cash_registers')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('status', 1)
+                ->count();
+
+            if ($enabledCashRegistersForWarehouse >= $limits['max_cash_registers_per_warehouse']) {
+                return response()->json([
+                    'message' => 'Se alcanzo el maximo de cajas por almacen definido para esta empresa',
+                    'max_cash_registers_per_warehouse' => $limits['max_cash_registers_per_warehouse'],
+                ], 422);
+            }
+        } else {
+            return response()->json([
+                'message' => 'Debe seleccionar un almacen para registrar la caja y aplicar el limite por almacen',
+            ], 422);
+        }
+
         $id = DB::table('sales.cash_registers')->insertGetId([
             'company_id' => $companyId,
             'branch_id' => $payload['branch_id'] ?? null,
+            'warehouse_id' => $warehouseId,
             'code' => strtoupper(trim($payload['code'])),
             'name' => trim($payload['name']),
             'status' => (int) ($payload['status'] ?? 1),
@@ -712,6 +775,7 @@ class MasterDataController extends Controller
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
+            'warehouse_id' => 'nullable|integer|min:1',
             'code' => 'nullable|string|max:30',
             'name' => 'nullable|string|max:120',
             'status' => 'nullable|integer|in:0,1',
@@ -733,8 +797,23 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
         $updates = [];
 
+        if (array_key_exists('warehouse_id', $payload) && $payload['warehouse_id'] !== null) {
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('id', (int) $payload['warehouse_id'])
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$warehouseExists) {
+                return response()->json(['message' => 'Invalid warehouse scope'], 422);
+            }
+        }
+
         if (array_key_exists('branch_id', $payload)) {
             $updates['branch_id'] = $payload['branch_id'];
+        }
+        if (array_key_exists('warehouse_id', $payload)) {
+            $updates['warehouse_id'] = $payload['warehouse_id'];
         }
         if (!empty($payload['code'])) {
             $updates['code'] = strtoupper(trim($payload['code']));
@@ -1453,6 +1532,43 @@ class MasterDataController extends Controller
                 PRIMARY KEY (company_id, unit_id)
             )'
         );
+    }
+
+    private function resolveCompanyOperationalLimits(int $companyId): array
+    {
+        if (!DB::table('information_schema.tables')->where('table_schema', 'appcfg')->where('table_name', 'company_operational_limits')->exists()) {
+            return [
+                'max_branches_enabled' => 1,
+                'max_warehouses_enabled' => 1,
+                'max_cash_registers_enabled' => 1,
+                'max_cash_registers_per_warehouse' => 1,
+            ];
+        }
+
+        $row = DB::table('appcfg.company_operational_limits')
+            ->where('company_id', $companyId)
+            ->first([
+                'max_branches_enabled',
+                'max_warehouses_enabled',
+                'max_cash_registers_enabled',
+                'max_cash_registers_per_warehouse',
+            ]);
+
+        if (!$row) {
+            return [
+                'max_branches_enabled' => 1,
+                'max_warehouses_enabled' => 1,
+                'max_cash_registers_enabled' => 1,
+                'max_cash_registers_per_warehouse' => 1,
+            ];
+        }
+
+        return [
+            'max_branches_enabled' => max(1, (int) ($row->max_branches_enabled ?? 1)),
+            'max_warehouses_enabled' => max(1, (int) ($row->max_warehouses_enabled ?? 1)),
+            'max_cash_registers_enabled' => max(1, (int) ($row->max_cash_registers_enabled ?? 1)),
+            'max_cash_registers_per_warehouse' => max(1, (int) ($row->max_cash_registers_per_warehouse ?? 1)),
+        ];
     }
 
     private function ensureCompanyRoleProfilesTable(): void

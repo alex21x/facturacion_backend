@@ -18,6 +18,7 @@ class AuthController extends Controller
             'password' => 'required|string|max:255',
             'device_id' => 'required|string|max:120',
             'device_name' => 'nullable|string|max:120',
+            'company_access_slug' => 'nullable|string|max:120',
         ]);
 
         if ($validator->fails()) {
@@ -27,11 +28,29 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $user = DB::table('auth.users')
-            ->select('id', 'company_id', 'branch_id', 'username', 'password_hash', 'first_name', 'last_name', 'email', 'status')
-            ->where('username', $request->input('username'))
-            ->where('status', 1)
-            ->first();
+        $deviceId = trim((string) $request->input('device_id'));
+        $requestedAccessSlug = strtolower(trim((string) $request->input('company_access_slug', '')));
+
+        if ($requestedAccessSlug !== '' && !$this->tableExists('appcfg', 'company_access_links')) {
+            return response()->json([
+                'message' => 'No fue posible iniciar sesion en este momento. Intenta nuevamente o contacta a soporte.',
+            ], 401);
+        }
+
+        $userQuery = DB::table('auth.users as u')
+            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
+            ->select('u.id', 'u.company_id', 'u.branch_id', 'u.username', 'u.password_hash', 'u.first_name', 'u.last_name', 'u.email', 'u.status', DB::raw('c.status as company_status'))
+            ->where('u.username', $request->input('username'))
+            ->where('u.status', 1);
+
+        if ($requestedAccessSlug !== '') {
+            $userQuery
+                ->join('appcfg.company_access_links as cal', 'cal.company_id', '=', 'u.company_id')
+                ->whereRaw('LOWER(cal.access_slug) = ?', [$requestedAccessSlug])
+                ->where('cal.is_active', 1);
+        }
+
+        $user = $userQuery->first();
 
         if (!$user || !Hash::check($request->input('password'), $user->password_hash)) {
             return response()->json([
@@ -39,9 +58,20 @@ class AuthController extends Controller
             ], 401);
         }
 
+        if ((int) ($user->company_status ?? 0) !== 1) {
+            return response()->json([
+                'message' => 'No fue posible iniciar sesion en este momento. Intenta nuevamente o contacta a soporte.',
+            ], 401);
+        }
+
+        if ($this->isAdminPortalDevice($deviceId) && !$this->isAdminPortalUser((int) $user->id)) {
+            return response()->json([
+                'message' => 'No fue posible iniciar sesion en este momento. Intenta nuevamente o contacta a soporte.',
+            ], 401);
+        }
+
         $roleContext = $this->resolvePrimaryRoleContext((int) $user->id, (int) $user->company_id);
 
-        $deviceId = trim((string) $request->input('device_id'));
         $refreshToken = ApiToken::makeRefreshToken();
         $refreshTokenHash = ApiToken::hashRefreshToken($refreshToken, $deviceId);
         $refreshExpiresAt = now()->addDays((int) env('REFRESH_TOKEN_TTL_DAYS', 30));
@@ -126,6 +156,7 @@ class AuthController extends Controller
 
         $session = DB::table('auth.refresh_tokens as rt')
             ->join('auth.users as u', 'u.id', '=', 'rt.user_id')
+            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
             ->select([
                 'rt.id as session_id',
                 'rt.user_id',
@@ -139,6 +170,7 @@ class AuthController extends Controller
                 'u.last_name',
                 'u.email',
                 'u.status',
+                DB::raw('c.status as company_status'),
             ])
             ->where('rt.token_hash', $refreshTokenHash)
             ->whereNull('rt.revoked_at')
@@ -149,6 +181,18 @@ class AuthController extends Controller
         if (!$session) {
             return response()->json([
                 'message' => 'Invalid refresh token',
+            ], 401);
+        }
+
+        if ((int) ($session->company_status ?? 0) !== 1) {
+            return response()->json([
+                'message' => 'Sesion no disponible temporalmente. Inicia sesion nuevamente.',
+            ], 401);
+        }
+
+        if ($this->isAdminPortalDevice($deviceId) && !$this->isAdminPortalUser((int) $session->user_id)) {
+            return response()->json([
+                'message' => 'Sesion no disponible temporalmente. Inicia sesion nuevamente.',
             ], 401);
         }
 
@@ -318,6 +362,41 @@ class AuthController extends Controller
                 PRIMARY KEY (company_id, role_id)
             )'
         );
+    }
+
+    private function ensureAdminPortalUsersTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.admin_portal_users (
+                user_id BIGINT PRIMARY KEY,
+                status SMALLINT NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NULL,
+                updated_at TIMESTAMP NULL
+            )'
+        );
+    }
+
+    private function tableExists(string $schema, string $table): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->exists();
+    }
+
+    private function isAdminPortalDevice(string $deviceId): bool
+    {
+        return strtoupper(trim($deviceId)) === 'ADMIN-PORTAL';
+    }
+
+    private function isAdminPortalUser(int $userId): bool
+    {
+        $this->ensureAdminPortalUsersTable();
+
+        return DB::table('appcfg.admin_portal_users')
+            ->where('user_id', $userId)
+            ->where('status', 1)
+            ->exists();
     }
 
     public function logout(Request $request)

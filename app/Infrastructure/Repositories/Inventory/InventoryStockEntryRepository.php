@@ -41,6 +41,10 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
         $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
         $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
         $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
+        $taxCategoriesTable = $hasItemTaxCategoryColumn ? $this->resolveTaxCategoriesTable() : null;
+        $taxCategoryColumns = $taxCategoriesTable ? $this->tableColumns($taxCategoriesTable) : [];
+        $taxCategoryStatusColumn = $this->firstExistingColumn($taxCategoryColumns, ['status', 'is_enabled', 'enabled', 'active']);
+        $taxCategoryCompanyColumn = $this->firstExistingColumn($taxCategoryColumns, ['company_id']);
 
         $productIds = collect($payload['items'])
             ->pluck('product_id')
@@ -72,9 +76,15 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             $hasMetadataColumn,
             $hasItemTaxCategoryColumn,
             $hasItemTaxRateColumn,
-            $hasLedgerTaxRateColumn
+            $hasLedgerTaxRateColumn,
+            $taxCategoriesTable,
+            $taxCategoryStatusColumn,
+            $taxCategoryCompanyColumn
         ) {
             $entryType = strtoupper((string) $payload['entry_type']);
+            $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true);
+            $isPurchaseOrder = $entryType === 'PURCHASE_ORDER';
+            $entryStatus = $isPurchaseOrder ? 'OPEN' : 'APPLIED';
             $inventoryProEnabled = (bool) ($settings['enable_inventory_pro'] ?? false);
             $lotTrackingEnabled = $inventoryProEnabled && (bool) ($settings['enable_lot_tracking'] ?? false);
             $expiryTrackingEnabled = $lotTrackingEnabled && (bool) ($settings['enable_expiry_tracking'] ?? false);
@@ -97,7 +107,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 'reference_no' => $payload['reference_no'] ?? null,
                 'supplier_reference' => $payload['supplier_reference'] ?? null,
                 'issue_at' => $payload['issue_at'] ?? now(),
-                'status' => 'APPLIED',
+                'status' => $entryStatus,
                 'notes' => $payload['notes'] ?? null,
                 'created_by' => $authUser->id,
                 'updated_by' => $authUser->id,
@@ -140,6 +150,10 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                     throw new \RuntimeException('Adjustment line quantity cannot be zero for line ' . ($index + 1));
                 }
 
+                if ($entryType === 'PURCHASE_ORDER' && $qty <= 0) {
+                    throw new \RuntimeException('Purchase order line quantity must be positive for line ' . ($index + 1));
+                }
+
                 $lotId = $lotTrackingEnabled && isset($item['lot_id']) ? (int) $item['lot_id'] : null;
                 $lotCode = $lotTrackingEnabled && isset($item['lot_code']) ? trim((string) $item['lot_code']) : null;
                 $manufactureAt = $expiryTrackingEnabled ? ($item['manufacture_at'] ?? null) : null;
@@ -147,26 +161,41 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 $taxCategoryId = isset($item['tax_category_id']) ? (int) $item['tax_category_id'] : null;
                 $taxRate = isset($item['tax_rate']) ? round((float) $item['tax_rate'], 2) : 0.0;
 
-                if ($lotTrackingEnabled && (bool) $product->lot_tracking && (bool) $settings['enforce_lot_for_tracked'] && !$lotId && !$lotCode) {
+                if ($appliesStock && $lotTrackingEnabled && (bool) $product->lot_tracking && (bool) $settings['enforce_lot_for_tracked'] && !$lotId && !$lotCode) {
                     throw new \RuntimeException('Lot is required for tracked product line ' . ($index + 1));
                 }
 
-                if ($expiryTrackingEnabled && (bool) $product->has_expiration && !$expiresAt) {
-                    throw new \RuntimeException('Expiration date is required for expirable product line ' . ($index + 1));
-                }
-
                 if ($taxCategoryId && $hasItemTaxCategoryColumn) {
-                    $taxCategoryExists = DB::table('appcfg.tax_categories')
-                        ->where('id', $taxCategoryId)
-                        ->where('status', 1)
-                        ->exists();
+                    if (!$taxCategoriesTable) {
+                        throw new \RuntimeException('Tax categories table not found for line ' . ($index + 1));
+                    }
+
+                    $taxCategoryQuery = DB::table($taxCategoriesTable)
+                        ->where('id', $taxCategoryId);
+
+                    if ($taxCategoryStatusColumn) {
+                        if ($taxCategoryStatusColumn === 'status') {
+                            $taxCategoryQuery->where($taxCategoryStatusColumn, 1);
+                        } else {
+                            $taxCategoryQuery->where($taxCategoryStatusColumn, true);
+                        }
+                    }
+
+                    if ($taxCategoryCompanyColumn) {
+                        $taxCategoryQuery->where(function ($nested) use ($taxCategoryCompanyColumn, $companyId) {
+                            $nested->where($taxCategoryCompanyColumn, $companyId)
+                                ->orWhereNull($taxCategoryCompanyColumn);
+                        });
+                    }
+
+                    $taxCategoryExists = $taxCategoryQuery->exists();
 
                     if (!$taxCategoryExists) {
                         throw new \RuntimeException('Tax category not found for line ' . ($index + 1));
                     }
                 }
 
-                if ($lotId) {
+                if ($appliesStock && $lotId) {
                     $lotExists = DB::table('inventory.product_lots')
                         ->where('id', $lotId)
                         ->where('company_id', $companyId)
@@ -180,7 +209,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                     }
                 }
 
-                if (!$lotId && $lotCode !== null && $lotCode !== '') {
+                if ($appliesStock && !$lotId && $lotCode !== null && $lotCode !== '') {
                     $lotId = DB::table('inventory.product_lots')->insertGetId([
                         'company_id' => $companyId,
                         'warehouse_id' => $warehouseId,
@@ -198,23 +227,25 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 $movementType = $entryType === 'PURCHASE' ? 'IN' : ($qty >= 0 ? 'IN' : 'OUT');
                 $unitCost = isset($item['unit_cost']) ? (float) $item['unit_cost'] : 0.0;
 
-                $this->applyCurrentStockDelta(
-                    $companyId,
-                    $warehouseId,
-                    $productId,
-                    $qty,
-                    (bool) $settings['allow_negative_stock']
-                );
-
-                if ($lotId) {
-                    $this->applyLotStockDelta(
+                if ($appliesStock) {
+                    $this->applyCurrentStockDelta(
                         $companyId,
                         $warehouseId,
                         $productId,
-                        (int) $lotId,
                         $qty,
                         (bool) $settings['allow_negative_stock']
                     );
+
+                    if ($lotId) {
+                        $this->applyLotStockDelta(
+                            $companyId,
+                            $warehouseId,
+                            $productId,
+                            (int) $lotId,
+                            $qty,
+                            (bool) $settings['allow_negative_stock']
+                        );
+                    }
                 }
 
                 $entryItemInsert = [
@@ -237,51 +268,53 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
 
                 DB::table('inventory.stock_entry_items')->insert($entryItemInsert);
 
-                $ledgerInsert = [
-                    'company_id' => $companyId,
-                    'warehouse_id' => $warehouseId,
-                    'product_id' => $productId,
-                    'lot_id' => $lotId,
-                    'movement_type' => $movementType,
-                    'quantity' => round(abs($qty), 8),
-                    'unit_cost' => $unitCost,
-                    'ref_type' => 'STOCK_ENTRY',
-                    'ref_id' => $entryId,
-                    'notes' => $payload['notes'] ?? null,
-                    'moved_at' => $payload['issue_at'] ?? now(),
-                    'created_by' => $authUser->id,
-                ];
-
-                if ($hasLedgerTaxRateColumn) {
-                    $ledgerInsert['tax_rate'] = $taxRate;
-                }
-
-                DB::table('inventory.inventory_ledger')->insert($ledgerInsert);
-
-                OutboxEngine::enqueue(
-                    $companyId,
-                    'STOCK_ENTRY',
-                    (string) $entryId,
-                    'INVENTORY_MOVEMENT_APPLIED',
-                    [
+                if ($appliesStock) {
+                    $ledgerInsert = [
                         'company_id' => $companyId,
-                        'branch_id' => $branchId,
                         'warehouse_id' => $warehouseId,
-                        'entry_id' => (int) $entryId,
-                        'entry_type' => $entryType,
-                        'line_no' => $index + 1,
                         'product_id' => $productId,
                         'lot_id' => $lotId,
                         'movement_type' => $movementType,
                         'quantity' => round(abs($qty), 8),
                         'unit_cost' => $unitCost,
-                        'tax_rate' => $taxRate,
                         'ref_type' => 'STOCK_ENTRY',
-                        'ref_id' => (int) $entryId,
+                        'ref_id' => $entryId,
+                        'notes' => $payload['notes'] ?? null,
                         'moved_at' => $payload['issue_at'] ?? now(),
                         'created_by' => $authUser->id,
-                    ]
-                );
+                    ];
+
+                    if ($hasLedgerTaxRateColumn) {
+                        $ledgerInsert['tax_rate'] = $taxRate;
+                    }
+
+                    DB::table('inventory.inventory_ledger')->insert($ledgerInsert);
+
+                    OutboxEngine::enqueue(
+                        $companyId,
+                        'STOCK_ENTRY',
+                        (string) $entryId,
+                        'INVENTORY_MOVEMENT_APPLIED',
+                        [
+                            'company_id' => $companyId,
+                            'branch_id' => $branchId,
+                            'warehouse_id' => $warehouseId,
+                            'entry_id' => (int) $entryId,
+                            'entry_type' => $entryType,
+                            'line_no' => $index + 1,
+                            'product_id' => $productId,
+                            'lot_id' => $lotId,
+                            'movement_type' => $movementType,
+                            'quantity' => round(abs($qty), 8),
+                            'unit_cost' => $unitCost,
+                            'tax_rate' => $taxRate,
+                            'ref_type' => 'STOCK_ENTRY',
+                            'ref_id' => (int) $entryId,
+                            'moved_at' => $payload['issue_at'] ?? now(),
+                            'created_by' => $authUser->id,
+                        ]
+                    );
+                }
 
                 if ($entryType === 'PURCHASE' && $unitCost > 0) {
                     DB::table('inventory.products')
@@ -297,7 +330,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 'id' => (int) $entryId,
                 'entry_type' => $entryType,
                 'warehouse_id' => $warehouseId,
-                'status' => 'APPLIED',
+                'status' => $entryStatus,
                 'items' => count($payload['items']),
                 'metadata' => $purchaseTaxMetadata,
             ];
@@ -926,5 +959,27 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
         }
 
         return ['public', $qualifiedTable];
+    }
+
+    private function resolveTaxCategoriesTable(): ?string
+    {
+        foreach (['core.tax_categories', 'sales.tax_categories', 'appcfg.tax_categories'] as $candidate) {
+            if ($this->tableExists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function firstExistingColumn(array $columns, array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            if (in_array($candidate, $columns, true)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 }

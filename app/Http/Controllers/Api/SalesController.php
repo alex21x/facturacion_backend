@@ -18,6 +18,9 @@ class SalesController extends Controller
 {    
     private $stockProjection = [];
     private $lotStockProjection = [];
+    private array $activeVerticalCache = [];
+    private array $verticalFeaturePreferenceCache = [];
+    private array $featureContextResolutionCache = [];
 
     public function __construct(
         private CompanyIgvRateService $companyIgvRateService,
@@ -117,47 +120,26 @@ class SalesController extends Controller
         ];
         $commerceFeatureCodes = array_keys($commerceFeatureDefaults);
 
-        $companyFeatureRows = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', $commerceFeatureCodes)
-            ->pluck('is_enabled', 'feature_code');
-
-        $branchFeatureRows = collect();
-        if ($branchId !== null) {
-            $branchFeatureRows = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->whereIn('feature_code', $commerceFeatureCodes)
-                ->pluck('is_enabled', 'feature_code');
-        }
-
-        $commerceFeatures = collect($commerceFeatureCodes)->map(function ($featureCode) use ($companyFeatureRows, $branchFeatureRows, $commerceFeatureDefaults) {
-            $branchEnabled = $branchFeatureRows->has($featureCode)
-                ? (bool) $branchFeatureRows->get($featureCode)
-                : null;
-            $companyEnabled = $companyFeatureRows->has($featureCode)
-                ? (bool) $companyFeatureRows->get($featureCode)
-                : null;
-            $defaultEnabled = (bool) ($commerceFeatureDefaults[$featureCode] ?? false);
-
-            $isEnabled = $branchEnabled !== null
-                ? $branchEnabled
-                : ($companyEnabled ?? $defaultEnabled);
+        $commerceFeatures = collect($commerceFeatureCodes)->map(function ($featureCode) use ($companyId, $branchId, $commerceFeatureDefaults) {
+            $resolved = $this->resolveFeatureResolutionForContext(
+                $companyId,
+                $branchId,
+                (string) $featureCode,
+                (bool) ($commerceFeatureDefaults[$featureCode] ?? false)
+            );
 
             return [
                 'feature_code' => $featureCode,
-                'is_enabled' => $isEnabled,
-                'company_enabled' => $companyEnabled,
-                'branch_enabled' => $branchEnabled,
+                'is_enabled' => $resolved['is_enabled'],
+                'company_enabled' => $resolved['company_enabled'],
+                'branch_enabled' => $resolved['branch_enabled'],
+                'vertical_source' => $resolved['vertical_source'],
             ];
         })->values();
 
-        $salesDetraccionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'SALES_DETRACCION_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'SALES_DETRACCION_ENABLED');
-        $salesRetencionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'SALES_RETENCION_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'SALES_RETENCION_ENABLED');
-        $salesPercepcionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'SALES_PERCEPCION_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'SALES_PERCEPCION_ENABLED');
+        $salesDetraccionEnabled = $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_DETRACCION_ENABLED', false);
+        $salesRetencionEnabled = $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_RETENCION_ENABLED', false);
+        $salesPercepcionEnabled = $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_PERCEPCION_ENABLED', false);
 
         $taxCategories = $this->companyIgvRateService->applyActiveRateToTaxCategories(
             $companyId,
@@ -189,28 +171,10 @@ class SalesController extends Controller
 
     private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
     {
-        $branchEnabled = null;
-        if ($branchId !== null) {
-            $branchToggle = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', $featureCode)
-                ->first();
-            if ($branchToggle) {
-                $branchEnabled = (bool) $branchToggle->is_enabled;
-            }
-        }
+        $resolvedBranchId = $branchId !== null ? (int) $branchId : null;
+        $resolved = $this->resolveFeatureResolutionForContext($companyId, $resolvedBranchId, $featureCode, false);
 
-        if ($branchEnabled !== null) {
-            return $branchEnabled;
-        }
-
-        $companyToggle = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->first();
-
-        return $companyToggle ? (bool) $companyToggle->is_enabled : false;
+        return (bool) $resolved['is_enabled'];
     }
 
     public function referenceDocuments(Request $request)
@@ -1231,6 +1195,23 @@ class SalesController extends Controller
                     ELSE d.status END as status_label"),
                 'd.external_status',
                 DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
+                DB::raw("NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT as sunat_summary_id"),
+                DB::raw("NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT as sunat_void_summary_id"),
+                                DB::raw("(
+                                        SELECT ds.status
+                                        FROM sales.daily_summaries ds
+                                        WHERE ds.company_id = d.company_id
+                                            AND ds.id = NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT
+                                        LIMIT 1
+                                ) as declaration_summary_status"),
+                                DB::raw("(
+                                        SELECT ds.status
+                                        FROM sales.daily_summaries ds
+                                        WHERE ds.company_id = d.company_id
+                                            AND ds.id = NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT
+                                        LIMIT 1
+                                ) as cancellation_summary_status"),
                 'd.total',
                 'd.balance_due',
                                 DB::raw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) as source_document_id"),
@@ -2113,20 +2094,8 @@ class SalesController extends Controller
     private function getDetractionMinAmount(int $companyId, $branchId): float
     {
         // Read min_amount from toggle config JSON; fallback to SUNAT default 700 PEN
-        $row = null;
-        if ($branchId !== null) {
-            $row = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', 'SALES_DETRACCION_ENABLED')
-                ->first();
-        }
-        if (!$row) {
-            $row = DB::table('appcfg.company_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('feature_code', 'SALES_DETRACCION_ENABLED')
-                ->first();
-        }
+        $resolvedBranchId = $branchId !== null ? (int) $branchId : null;
+        $row = $this->resolveFeatureToggleRow($companyId, $resolvedBranchId, 'SALES_DETRACCION_ENABLED');
         if ($row && !empty($row->config)) {
             $config = is_string($row->config) ? json_decode($row->config, true) : (array) $row->config;
             if (isset($config['min_amount']) && is_numeric($config['min_amount'])) {
@@ -2348,32 +2317,19 @@ class SalesController extends Controller
 
     private function resolveFeatureToggleRow(int $companyId, $branchId, string $featureCode)
     {
-        $companyRow = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->first();
+        $resolvedBranchId = $branchId !== null ? (int) $branchId : null;
+        $resolved = $this->resolveFeatureResolutionForContext($companyId, $resolvedBranchId, $featureCode, false);
 
-        if ($branchId !== null) {
-            $branchRow = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', $featureCode)
-                ->first();
-
-            if ($branchRow && (bool) ($branchRow->is_enabled ?? false)) {
-                return $branchRow;
-            }
-
-            if ($companyRow && (bool) ($companyRow->is_enabled ?? false)) {
-                return $companyRow;
-            }
-
-            if ($branchRow) {
-                return $branchRow;
-            }
+        if (!$resolved['is_enabled'] && $resolved['config'] === null) {
+            return null;
         }
 
-        return $companyRow;
+        return (object) [
+            'feature_code' => $featureCode,
+            'is_enabled' => (bool) $resolved['is_enabled'],
+            'config' => $resolved['config'],
+            'vertical_source' => $resolved['vertical_source'],
+        ];
     }
 
     private function decodeFeatureConfig($rawConfig): array
@@ -2392,6 +2348,163 @@ class SalesController extends Controller
         }
 
         return [];
+    }
+
+    private function resolveFeatureResolutionForContext(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled = false): array
+    {
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+        $cacheKey = $companyId . ':' . ($branchId ?? 'null') . ':' . $normalizedFeatureCode . ':' . ($defaultEnabled ? '1' : '0');
+
+        if (array_key_exists($cacheKey, $this->featureContextResolutionCache)) {
+            return $this->featureContextResolutionCache[$cacheKey];
+        }
+
+        $branchRow = null;
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+                ->first(['is_enabled', 'config']);
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+            ->first(['is_enabled', 'config']);
+
+        $branchEnabled = $branchRow && $branchRow->is_enabled !== null ? (bool) $branchRow->is_enabled : null;
+        $companyEnabled = $companyRow && $companyRow->is_enabled !== null ? (bool) $companyRow->is_enabled : null;
+
+        $isEnabled = $branchEnabled !== null
+            ? $branchEnabled
+            : ($companyEnabled !== null ? $companyEnabled : $defaultEnabled);
+
+        $companyConfig = $companyRow ? $this->decodeFeatureConfig($companyRow->config) : [];
+        $branchConfig = $branchRow ? $this->decodeFeatureConfig($branchRow->config) : [];
+        $resolvedConfig = array_merge($companyConfig, $branchConfig);
+
+        $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, $normalizedFeatureCode);
+        if ($verticalPreference['resolved']) {
+            if ($verticalPreference['is_enabled'] !== null) {
+                $isEnabled = (bool) $verticalPreference['is_enabled'];
+            }
+            if ($verticalPreference['config'] !== null) {
+                $resolvedConfig = $this->decodeFeatureConfig($verticalPreference['config']);
+            }
+        }
+
+        $result = [
+            'is_enabled' => (bool) $isEnabled,
+            'config' => !empty($resolvedConfig) ? $resolvedConfig : null,
+            'company_enabled' => $companyEnabled,
+            'branch_enabled' => $branchEnabled,
+            'vertical_source' => $verticalPreference['source'],
+        ];
+
+        $this->featureContextResolutionCache[$cacheKey] = $result;
+        return $result;
+    }
+
+    private function resolveVerticalFeaturePreference(int $companyId, string $featureCode): array
+    {
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+        $cacheKey = $companyId . ':' . $normalizedFeatureCode;
+        if (array_key_exists($cacheKey, $this->verticalFeaturePreferenceCache)) {
+            return $this->verticalFeaturePreferenceCache[$cacheKey];
+        }
+
+        $default = [
+            'resolved' => false,
+            'is_enabled' => null,
+            'config' => null,
+            'source' => null,
+        ];
+
+        if (!$this->tableExists('appcfg.verticals')
+            || !$this->tableExists('appcfg.company_verticals')
+            || !$this->tableExists('appcfg.vertical_feature_templates')
+            || !$this->tableExists('appcfg.company_vertical_feature_overrides')) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
+
+        $activeVertical = $this->resolveActiveCompanyVertical($companyId);
+        if ($activeVertical === null) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
+
+        $override = DB::table('appcfg.company_vertical_feature_overrides')
+            ->where('company_id', $companyId)
+            ->where('vertical_id', (int) $activeVertical['id'])
+            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+            ->first(['is_enabled', 'config']);
+
+        if ($override && ($override->is_enabled !== null || $override->config !== null)) {
+            $resolved = [
+                'resolved' => true,
+                'is_enabled' => $override->is_enabled !== null ? (bool) $override->is_enabled : null,
+                'config' => $override->config,
+                'source' => 'COMPANY_VERTICAL_OVERRIDE',
+            ];
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $resolved;
+            return $resolved;
+        }
+
+        $template = DB::table('appcfg.vertical_feature_templates')
+            ->where('vertical_id', (int) $activeVertical['id'])
+            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+            ->first(['is_enabled', 'config']);
+
+        if ($template) {
+            $resolved = [
+                'resolved' => true,
+                'is_enabled' => $template->is_enabled !== null ? (bool) $template->is_enabled : null,
+                'config' => $template->config,
+                'source' => 'VERTICAL_TEMPLATE',
+            ];
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $resolved;
+            return $resolved;
+        }
+
+        $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+        return $default;
+    }
+
+    private function resolveActiveCompanyVertical(int $companyId): ?array
+    {
+        if (array_key_exists($companyId, $this->activeVerticalCache)) {
+            return $this->activeVerticalCache[$companyId];
+        }
+
+        if (!$this->tableExists('appcfg.verticals') || !$this->tableExists('appcfg.company_verticals')) {
+            $this->activeVerticalCache[$companyId] = null;
+            return null;
+        }
+
+        $row = DB::table('appcfg.company_verticals as cv')
+            ->join('appcfg.verticals as v', 'v.id', '=', 'cv.vertical_id')
+            ->where('cv.company_id', $companyId)
+            ->where('cv.status', 1)
+            ->where('v.status', 1)
+            ->where('cv.is_primary', true)
+            ->select('v.id', 'v.code', 'v.name')
+            ->first();
+
+        if (!$row) {
+            $this->activeVerticalCache[$companyId] = null;
+            return null;
+        }
+
+        $resolved = [
+            'id' => (int) $row->id,
+            'code' => (string) $row->code,
+            'name' => (string) $row->name,
+        ];
+
+        $this->activeVerticalCache[$companyId] = $resolved;
+        return $resolved;
     }
 
     private function resolveDetractionServiceCodes(): array
@@ -2761,11 +2874,7 @@ class SalesController extends Controller
 
     private function isCommerceFeatureEnabled(int $companyId, string $featureCode): bool
     {
-        return DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->where('is_enabled', true)
-            ->exists();
+        return $this->isCommerceFeatureEnabledForContextWithDefault($companyId, null, $featureCode, false);
     }
 
     private function isCommerceFeatureEnabledForContext(int $companyId, ?int $branchId, string $featureCode): bool
@@ -2775,30 +2884,9 @@ class SalesController extends Controller
 
     private function isCommerceFeatureEnabledForContextWithDefault(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
     {
-        if ($branchId !== null) {
-            $branchRow = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', $featureCode)
-                ->select('is_enabled')
-                ->first();
+        $resolved = $this->resolveFeatureResolutionForContext($companyId, $branchId, $featureCode, $defaultEnabled);
 
-            if ($branchRow && $branchRow->is_enabled !== null) {
-                return (bool) $branchRow->is_enabled;
-            }
-        }
-
-        $companyRow = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->select('is_enabled')
-            ->first();
-
-        if ($companyRow && $companyRow->is_enabled !== null) {
-            return (bool) $companyRow->is_enabled;
-        }
-
-        return $defaultEnabled;
+        return (bool) $resolved['is_enabled'];
     }
 
     private function isSellerActor(string $roleProfile, string $roleCode): bool
@@ -3145,6 +3233,7 @@ class SalesController extends Controller
 
         try {
             $result = $this->taxBridgeService->retry($companyId, $id);
+            $diagnostic = $this->taxBridgeService->summarizeBridgeDiagnostic($result['response'] ?? null);
 
             return response()->json([
                 'message' => 'Tax bridge retry sent successfully',
@@ -3153,6 +3242,8 @@ class SalesController extends Controller
                 'sunat_status_label' => $result['label'],
                 'bridge_http_code' => $result['bridge_http_code'] ?? null,
                 'bridge_response' => $result['response'] ?? null,
+                'sunat_error_code' => $diagnostic['code'] ?? null,
+                'sunat_error_message' => $diagnostic['message'] ?? null,
                 'debug' => $result['debug'] ?? null,
             ], 200);
         } catch (TaxBridgeException $e) {
@@ -3191,6 +3282,7 @@ class SalesController extends Controller
 
         try {
             $result = $this->taxBridgeService->sendVoidCommunication($companyId, $id, $payload['reason'] ?? null);
+            $diagnostic = $this->taxBridgeService->summarizeBridgeDiagnostic($result['response'] ?? null);
 
             if (($result['status'] ?? '') === 'ACCEPTED') {
                 $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $id, [
@@ -3208,6 +3300,8 @@ class SalesController extends Controller
                 'sunat_void_label' => $result['label'] ?? '',
                 'bridge_http_code' => $result['bridge_http_code'] ?? null,
                 'bridge_response' => $result['response'] ?? null,
+                'sunat_error_code' => $diagnostic['code'] ?? null,
+                'sunat_error_message' => $diagnostic['message'] ?? null,
                 'void_number' => $result['void_number'] ?? null,
                 'debug' => $result['debug'] ?? null,
             ], 200);

@@ -41,9 +41,11 @@ class AuthenticateApiToken
         }
 
         $user = DB::table('auth.users as u')
+            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
             ->select('u.id', 'u.company_id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.status')
             ->where('u.id', (int) $claims['uid'])
             ->where('u.status', 1)
+            ->where('c.status', 1)
             ->first();
 
         if (!$user) {

@@ -62,6 +62,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 			->select(
 				'se.id',
 				'se.entry_type',
+				'se.status',
 				'se.reference_no',
 				'se.supplier_reference',
 				'se.issue_at',
@@ -74,7 +75,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 				'w.name as warehouse_name'
 			)
 			->where('se.company_id', $companyId)
-			->where('se.status', 'APPLIED');
+			->whereIn('se.status', ['APPLIED', 'OPEN', 'PARTIAL', 'CLOSED']);
 
 		if ($hasPaymentMethodId) {
 			$query->leftJoin('core.payment_methods as pm', 'se.payment_method_id', '=', 'pm.id')
@@ -96,7 +97,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		$dateTo = $filters['date_to'] ?? null;
 		$warehouseId = $filters['warehouse_id'] ?? null;
 
-		if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true)) {
+		if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER'], true)) {
 			$query->where('se.entry_type', $entryType);
 		}
 

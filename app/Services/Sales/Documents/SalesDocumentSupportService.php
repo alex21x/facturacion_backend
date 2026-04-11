@@ -60,7 +60,7 @@ class SalesDocumentSupportService
 
     public function resolveLineConversion(int $companyId, $product, array $item, ?int $itemUnitId): array
     {
-        $qty = (float) ($item['qty'] ?? 0);
+        $qty = (float) ($item['qty'] ?? ($item['quantity'] ?? 0));
 
         if (!$product || !$product->unit_id) {
             $factor = isset($item['conversion_factor']) ? (float) $item['conversion_factor'] : 1.0;

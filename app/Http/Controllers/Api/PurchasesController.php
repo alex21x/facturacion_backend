@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Application\Commands\Inventory\CreateInventoryStockEntryCommand;
 use App\Application\Commands\Purchases\ExportPurchasesStockEntriesCommand;
 use App\Application\Commands\Purchases\ListPurchasesStockEntriesCommand;
+use App\Application\UseCases\Inventory\CreateInventoryStockEntryUseCase;
 use App\Application\UseCases\Purchases\ExportPurchasesStockEntriesUseCase;
 use App\Application\UseCases\Purchases\GetPurchasesLookupsUseCase;
 use App\Application\UseCases\Purchases\ListPurchasesStockEntriesUseCase;
@@ -11,6 +13,7 @@ use App\Services\AppConfig\CommerceFeatureToggleService;
 use App\Services\AppConfig\CompanyIgvRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 class PurchasesController
 {
@@ -19,9 +22,262 @@ class PurchasesController
         private CompanyIgvRateService $companyIgvRateService,
         private GetPurchasesLookupsUseCase $getPurchasesLookupsUseCase,
         private ListPurchasesStockEntriesUseCase $listPurchasesStockEntriesUseCase,
-        private ExportPurchasesStockEntriesUseCase $exportPurchasesStockEntriesUseCase
+        private ExportPurchasesStockEntriesUseCase $exportPurchasesStockEntriesUseCase,
+        private CreateInventoryStockEntryUseCase $createInventoryStockEntryUseCase
     )
     {
+    }
+
+    /**
+     * Receive a purchase order and convert it into an applied purchase entry.
+     */
+    public function receivePurchaseOrder(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'nullable|integer|min:1',
+            'issue_at' => 'nullable|date',
+            'reference_no' => 'nullable|string|max:60',
+            'supplier_reference' => 'nullable|string|max:120',
+            'payment_method_id' => 'nullable|integer|min:1',
+            'notes' => 'nullable|string|max:300',
+            'items' => 'nullable|array|min:1',
+            'items.*.product_id' => 'required_with:items|integer|min:1',
+            'items.*.qty' => 'required_with:items|numeric|gt:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+
+        $source = DB::table('inventory.stock_entries')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->where('entry_type', 'PURCHASE_ORDER')
+            ->first();
+
+        if (!$source) {
+            return response()->json(['message' => 'Orden de compra no encontrada'], 404);
+        }
+
+        if (in_array((string) $source->status, ['CLOSED', 'VOID', 'CANCELED'], true)) {
+            return response()->json(['message' => 'La orden de compra ya no puede recepcionarse'], 422);
+        }
+
+        $sourceItems = DB::table('inventory.stock_entry_items')
+            ->where('entry_id', (int) $source->id)
+            ->orderBy('id')
+            ->get();
+
+        if ($sourceItems->isEmpty()) {
+            return response()->json(['message' => 'La orden de compra no tiene items para recepcion'], 422);
+        }
+
+        $orderedByProduct = [];
+        foreach ($sourceItems as $item) {
+            $productId = (int) $item->product_id;
+            $orderedByProduct[$productId] = ($orderedByProduct[$productId] ?? 0.0) + (float) $item->qty;
+        }
+
+        $receivedByProduct = DB::table('inventory.stock_entries as se')
+            ->join('inventory.stock_entry_items as sei', 'sei.entry_id', '=', 'se.id')
+            ->where('se.company_id', $companyId)
+            ->where('se.entry_type', 'PURCHASE')
+            ->where('se.status', 'APPLIED')
+            ->whereRaw("COALESCE((se.metadata->>'source_purchase_order_id')::BIGINT, 0) = ?", [(int) $source->id])
+            ->groupBy('sei.product_id')
+            ->selectRaw('sei.product_id, COALESCE(SUM(sei.qty), 0) as received_qty')
+            ->get()
+            ->reduce(function ($carry, $row) {
+                $carry[(int) $row->product_id] = (float) $row->received_qty;
+                return $carry;
+            }, []);
+
+        $remainingByProduct = [];
+        foreach ($orderedByProduct as $productId => $orderedQty) {
+            $alreadyReceived = (float) ($receivedByProduct[$productId] ?? 0.0);
+            $remainingByProduct[$productId] = max($orderedQty - $alreadyReceived, 0.0);
+        }
+
+        $hasPending = false;
+        foreach ($remainingByProduct as $remainingQty) {
+            if ($remainingQty > 0.00000001) {
+                $hasPending = true;
+                break;
+            }
+        }
+
+        if (!$hasPending) {
+            return response()->json(['message' => 'La orden de compra no tiene saldo pendiente por recepcionar'], 422);
+        }
+
+        $requestedByProduct = [];
+        if (!empty($payload['items']) && is_array($payload['items'])) {
+            foreach ($orderedByProduct as $productId => $_) {
+                $requestedByProduct[$productId] = 0.0;
+            }
+
+            foreach ($payload['items'] as $line) {
+                $productId = (int) ($line['product_id'] ?? 0);
+                $qty = (float) ($line['qty'] ?? 0);
+
+                if (!array_key_exists($productId, $orderedByProduct)) {
+                    return response()->json(['message' => 'Producto no pertenece a la orden de compra'], 422);
+                }
+
+                if ($qty <= 0.00000001) {
+                    return response()->json(['message' => 'Cantidad parcial invalida para recepcion'], 422);
+                }
+
+                $requestedByProduct[$productId] += $qty;
+            }
+
+            foreach ($requestedByProduct as $productId => $requestedQty) {
+                $remainingQty = (float) ($remainingByProduct[$productId] ?? 0.0);
+                if ($requestedQty - $remainingQty > 0.00000001) {
+                    return response()->json(['message' => 'La cantidad parcial excede el saldo pendiente del producto #' . $productId], 422);
+                }
+            }
+        } else {
+            foreach ($remainingByProduct as $productId => $remainingQty) {
+                $requestedByProduct[$productId] = (float) $remainingQty;
+            }
+        }
+
+        $itemsForReception = [];
+        $receivedInThisActionByProduct = [];
+        foreach ($sourceItems as $item) {
+            $productId = (int) $item->product_id;
+            $requestedQty = (float) ($requestedByProduct[$productId] ?? 0.0);
+
+            if ($requestedQty <= 0.00000001) {
+                continue;
+            }
+
+            $lineQty = min((float) $item->qty, $requestedQty);
+            if ($lineQty <= 0.00000001) {
+                continue;
+            }
+
+            $itemsForReception[] = [
+                'product_id' => $productId,
+                'qty' => $lineQty,
+                'unit_cost' => (float) ($item->unit_cost ?? 0),
+                'tax_category_id' => $item->tax_category_id !== null ? (int) $item->tax_category_id : null,
+                'tax_rate' => $item->tax_rate !== null ? (float) $item->tax_rate : 0,
+                'notes' => $item->notes,
+            ];
+
+            $requestedByProduct[$productId] = max($requestedQty - $lineQty, 0.0);
+            $receivedInThisActionByProduct[$productId] = ($receivedInThisActionByProduct[$productId] ?? 0.0) + $lineQty;
+        }
+
+        if (count($itemsForReception) === 0) {
+            return response()->json(['message' => 'No se encontraron cantidades validas para recepcion parcial'], 422);
+        }
+
+        $sourceMetadata = [];
+        if (isset($source->metadata) && $source->metadata !== null) {
+            if (is_string($source->metadata)) {
+                $decoded = json_decode($source->metadata, true);
+                if (is_array($decoded)) {
+                    $sourceMetadata = $decoded;
+                }
+            } elseif (is_array($source->metadata)) {
+                $sourceMetadata = $source->metadata;
+            }
+        }
+
+        $receivePayload = [
+            'warehouse_id' => (int) $source->warehouse_id,
+            'entry_type' => 'PURCHASE',
+            'reference_no' => trim((string) ($payload['reference_no'] ?? ($source->reference_no ?? ''))),
+            'supplier_reference' => trim((string) ($payload['supplier_reference'] ?? ($source->supplier_reference ?? ''))),
+            'payment_method_id' => array_key_exists('payment_method_id', $payload)
+                ? ($payload['payment_method_id'] !== null ? (int) $payload['payment_method_id'] : null)
+                : ($source->payment_method_id !== null ? (int) $source->payment_method_id : null),
+            'issue_at' => $payload['issue_at'] ?? now(),
+            'notes' => trim((string) ($payload['notes'] ?? 'Recepcion OC #' . (int) $source->id)),
+            'metadata' => array_merge($sourceMetadata, [
+                'source_purchase_order_id' => (int) $source->id,
+                'source_entry_type' => 'PURCHASE_ORDER',
+                'reception_origin' => 'PURCHASE_ORDER',
+            ]),
+            'items' => $itemsForReception,
+        ];
+
+        try {
+            $created = $this->createInventoryStockEntryUseCase->execute(
+                CreateInventoryStockEntryCommand::fromInput(
+                    $authUser,
+                    $receivePayload,
+                    $companyId,
+                    $source->branch_id,
+                    (int) $source->warehouse_id
+                )
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $remainingAfter = [];
+        foreach ($orderedByProduct as $productId => $orderedQty) {
+            $alreadyReceived = (float) ($receivedByProduct[$productId] ?? 0.0);
+            $justReceived = (float) ($receivedInThisActionByProduct[$productId] ?? 0.0);
+            $remainingAfter[$productId] = max($orderedQty - ($alreadyReceived + $justReceived), 0.0);
+        }
+
+        $nextStatus = 'CLOSED';
+        foreach ($remainingAfter as $remainingQty) {
+            if ($remainingQty > 0.00000001) {
+                $nextStatus = 'PARTIAL';
+                break;
+            }
+        }
+
+        $receivedEntryIds = [];
+        if (isset($sourceMetadata['received_entry_ids']) && is_array($sourceMetadata['received_entry_ids'])) {
+            $receivedEntryIds = array_values(array_map(fn ($entryId) => (int) $entryId, $sourceMetadata['received_entry_ids']));
+        }
+
+        $newReceivedEntryId = (int) ($created['id'] ?? 0);
+        if ($newReceivedEntryId > 0) {
+            $receivedEntryIds[] = $newReceivedEntryId;
+        }
+
+        $updatedMetadata = array_merge($sourceMetadata, [
+            'received_entry_id' => $newReceivedEntryId,
+            'received_entry_ids' => array_values(array_unique($receivedEntryIds)),
+            'received_at' => now()->toIso8601String(),
+            'remaining_by_product' => $remainingAfter,
+        ]);
+
+        DB::table('inventory.stock_entries')
+            ->where('id', (int) $source->id)
+            ->where('company_id', $companyId)
+            ->update([
+                'status' => $nextStatus,
+                'metadata' => json_encode($updatedMetadata),
+                'updated_by' => $authUser->id,
+                'updated_at' => now(),
+            ]);
+
+        return response()->json([
+            'message' => 'Orden de compra recepcionada correctamente',
+            'data' => [
+                'purchase_order_id' => (int) $source->id,
+                'received_entry_id' => (int) ($created['id'] ?? 0),
+                'status' => $nextStatus,
+            ],
+        ]);
     }
 
     /**
@@ -271,7 +527,9 @@ class PurchasesController
         foreach ($entries as $entry) {
             $row = [
                 $entry->id,
-                $entry->entry_type === 'PURCHASE' ? 'Compra' : 'Ajuste',
+                $entry->entry_type === 'PURCHASE'
+                    ? 'Compra'
+                    : ($entry->entry_type === 'PURCHASE_ORDER' ? 'Orden de compra' : 'Ajuste'),
                 '"' . str_replace('"', '""', $entry->reference_no ?? '') . '"',
                 '"' . str_replace('"', '""', $entry->supplier_reference ?? '') . '"',
                 substr($entry->issue_at, 0, 10),

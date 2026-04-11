@@ -94,9 +94,111 @@ class ReportEngine
                 return self::lotExpiry($companyId, $filters);
             case 'INVENTORY_CUT':
                 return self::inventoryCut($companyId, $filters);
+            case 'SALES_DOCUMENTS_SUMMARY':
+                return self::salesDocumentsSummary($companyId, $filters);
+            case 'SALES_SUNAT_MONITOR':
+                return self::salesSunatMonitor($companyId, $filters);
             default:
                 throw new \RuntimeException('Unsupported report type');
         }
+    }
+
+    private static function salesDocumentsSummary(int $companyId, array $filters): array
+    {
+        $query = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->select([
+                'd.id',
+                'd.branch_id',
+                'd.document_kind',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.status',
+                DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
+                DB::raw("NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT as sunat_summary_id"),
+                DB::raw("NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT as sunat_void_summary_id"),
+                'd.total',
+                'd.balance_due',
+                DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+            ])
+            ->where('d.company_id', $companyId)
+            ->orderByDesc('d.issue_at')
+            ->orderByDesc('d.id')
+            ->limit(50000);
+
+        self::applySalesFilters($query, $filters);
+
+        $rows = $query->get();
+
+        return [
+            'type' => 'SALES_DOCUMENTS_SUMMARY',
+            'generated_at' => now()->toIso8601String(),
+            'rows' => $rows,
+            'summary' => [
+                'total_rows' => $rows->count(),
+                'total_amount' => (float) $rows->sum('total'),
+                'issued_count' => (int) $rows->where('status', 'ISSUED')->count(),
+                'void_count' => (int) $rows->where('status', 'VOID')->count(),
+                'accepted_count' => (int) $rows->where('sunat_status', 'ACCEPTED')->count(),
+                'pending_confirmation_count' => (int) $rows->where('sunat_status', 'PENDING_CONFIRMATION')->count(),
+                'rejected_count' => (int) $rows->where('sunat_status', 'REJECTED')->count(),
+            ],
+        ];
+    }
+
+    private static function salesSunatMonitor(int $companyId, array $filters): array
+    {
+        $query = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->select([
+                'd.id',
+                'd.document_kind',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.status',
+                DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_status_label'), '') as sunat_status_label"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_label'), '') as sunat_void_label"),
+                DB::raw("COALESCE((d.metadata->>'sunat_ticket'), '') as sunat_ticket"),
+                DB::raw("COALESCE((d.metadata->>'sunat_reconcile_attempts'), '0')::INT as reconcile_attempts"),
+                DB::raw("COALESCE((d.metadata->>'sunat_reconcile_next_at'), '') as reconcile_next_at"),
+                DB::raw("COALESCE((d.metadata->>'sunat_needs_manual_confirmation'), 'false') as needs_manual_confirmation"),
+                'd.total',
+                DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+            ])
+            ->where('d.company_id', $companyId)
+            ->whereIn('d.document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->where('d.status', 'ISSUED')
+            ->where(function ($q) {
+                $q->whereRaw("UPPER(COALESCE(d.metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR', 'REJECTED', 'EXPIRED_WINDOW')")
+                  ->orWhereRaw("UPPER(COALESCE(d.metadata->>'sunat_void_status','')) IN ('PENDING_SUMMARY', 'SENT_BY_SUMMARY', 'REJECTED')");
+            })
+            ->orderByDesc('d.issue_at')
+            ->orderByDesc('d.id')
+            ->limit(50000);
+
+        self::applySalesFilters($query, $filters);
+
+        $rows = $query->get();
+
+        return [
+            'type' => 'SALES_SUNAT_MONITOR',
+            'generated_at' => now()->toIso8601String(),
+            'rows' => $rows,
+            'summary' => [
+                'total_rows' => $rows->count(),
+                'pending_confirmation_count' => (int) $rows->where('sunat_status', 'PENDING_CONFIRMATION')->count(),
+                'rejected_count' => (int) $rows->where('sunat_status', 'REJECTED')->count(),
+                'expired_window_count' => (int) $rows->where('sunat_status', 'EXPIRED_WINDOW')->count(),
+                'manual_confirmation_required' => (int) $rows->filter(function ($row) {
+                    return strtolower((string) ($row->needs_manual_confirmation ?? 'false')) === 'true';
+                })->count(),
+            ],
+        ];
     }
 
     private static function stockSnapshot(int $companyId, array $filters): array
@@ -329,6 +431,29 @@ class ReportEngine
         }
         if (!empty($filters['date_to'])) {
             $query->where('il.moved_at', '<=', (string) $filters['date_to'] . ' 23:59:59');
+        }
+    }
+
+    private static function applySalesFilters($query, array $filters): void
+    {
+        if (!empty($filters['branch_id'])) {
+            $query->where('d.branch_id', (int) $filters['branch_id']);
+        }
+        if (!empty($filters['document_kind'])) {
+            $query->where('d.document_kind', strtoupper((string) $filters['document_kind']));
+        }
+        if (!empty($filters['status'])) {
+            $query->where('d.status', strtoupper((string) $filters['status']));
+        }
+        if (!empty($filters['issue_date_from'])) {
+            $query->whereDate('d.issue_at', '>=', (string) $filters['issue_date_from']);
+        }
+        if (!empty($filters['issue_date_to'])) {
+            $query->whereDate('d.issue_at', '<=', (string) $filters['issue_date_to']);
+        }
+        if (!empty($filters['customer'])) {
+            $text = '%' . mb_strtolower((string) $filters['customer']) . '%';
+            $query->whereRaw("LOWER(COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')))) LIKE ?", [$text]);
         }
     }
 }

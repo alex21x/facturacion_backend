@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 9JSkeOOxkmjKSL6ULtKrXcd8xnapn94i3S8e55mYnFYMmS0HrGi6dzKYwmxkr6b
+\restrict ByBnKZXteh3229f7fnPedipBDyMCJiK4m3pDOmMBqsucjospuMl34IcMg2GP6TE
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -20,60 +20,74 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: appcfg; Type: SCHEMA; Schema: -; Owner: -
+-- Name: appcfg; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA appcfg;
 
 
+ALTER SCHEMA appcfg OWNER TO postgres;
+
 --
--- Name: auth; Type: SCHEMA; Schema: -; Owner: -
+-- Name: auth; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA auth;
 
 
+ALTER SCHEMA auth OWNER TO postgres;
+
 --
--- Name: billing; Type: SCHEMA; Schema: -; Owner: -
+-- Name: billing; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA billing;
 
 
+ALTER SCHEMA billing OWNER TO postgres;
+
 --
--- Name: core; Type: SCHEMA; Schema: -; Owner: -
+-- Name: core; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA core;
 
 
+ALTER SCHEMA core OWNER TO postgres;
+
 --
--- Name: inventory; Type: SCHEMA; Schema: -; Owner: -
+-- Name: inventory; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA inventory;
 
 
+ALTER SCHEMA inventory OWNER TO postgres;
+
 --
--- Name: master; Type: SCHEMA; Schema: -; Owner: -
+-- Name: master; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA master;
 
 
+ALTER SCHEMA master OWNER TO postgres;
+
 --
--- Name: sales; Type: SCHEMA; Schema: -; Owner: -
+-- Name: sales; Type: SCHEMA; Schema: -; Owner: postgres
 --
 
 CREATE SCHEMA sales;
 
+
+ALTER SCHEMA sales OWNER TO postgres;
 
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
 
 --
--- Name: branch_feature_toggles; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: branch_feature_toggles; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.branch_feature_toggles (
@@ -87,8 +101,10 @@ CREATE TABLE appcfg.branch_feature_toggles (
 );
 
 
+ALTER TABLE appcfg.branch_feature_toggles OWNER TO postgres;
+
 --
--- Name: branch_modules; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: branch_modules; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.branch_modules (
@@ -102,8 +118,10 @@ CREATE TABLE appcfg.branch_modules (
 );
 
 
+ALTER TABLE appcfg.branch_modules OWNER TO postgres;
+
 --
--- Name: company_feature_toggles; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: company_feature_toggles; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.company_feature_toggles (
@@ -116,8 +134,10 @@ CREATE TABLE appcfg.company_feature_toggles (
 );
 
 
+ALTER TABLE appcfg.company_feature_toggles OWNER TO postgres;
+
 --
--- Name: company_modules; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: company_modules; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.company_modules (
@@ -131,8 +151,10 @@ CREATE TABLE appcfg.company_modules (
 );
 
 
+ALTER TABLE appcfg.company_modules OWNER TO postgres;
+
 --
--- Name: company_role_profiles; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: company_role_profiles; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.company_role_profiles (
@@ -144,8 +166,10 @@ CREATE TABLE appcfg.company_role_profiles (
 );
 
 
+ALTER TABLE appcfg.company_role_profiles OWNER TO postgres;
+
 --
--- Name: company_ui_field_settings; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: company_ui_field_settings; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.company_ui_field_settings (
@@ -162,8 +186,10 @@ CREATE TABLE appcfg.company_ui_field_settings (
 );
 
 
+ALTER TABLE appcfg.company_ui_field_settings OWNER TO postgres;
+
 --
--- Name: company_units; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: company_units; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.company_units (
@@ -175,8 +201,10 @@ CREATE TABLE appcfg.company_units (
 );
 
 
+ALTER TABLE appcfg.company_units OWNER TO postgres;
+
 --
--- Name: modules; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: modules; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.modules (
@@ -191,8 +219,10 @@ CREATE TABLE appcfg.modules (
 );
 
 
+ALTER TABLE appcfg.modules OWNER TO postgres;
+
 --
--- Name: modules_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: -
+-- Name: modules_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: postgres
 --
 
 CREATE SEQUENCE appcfg.modules_id_seq
@@ -203,15 +233,17 @@ CREATE SEQUENCE appcfg.modules_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE appcfg.modules_id_seq OWNER TO postgres;
+
 --
--- Name: modules_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: -
+-- Name: modules_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: postgres
 --
 
 ALTER SEQUENCE appcfg.modules_id_seq OWNED BY appcfg.modules.id;
 
 
 --
--- Name: saved_filters; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: saved_filters; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.saved_filters (
@@ -229,8 +261,10 @@ CREATE TABLE appcfg.saved_filters (
 );
 
 
+ALTER TABLE appcfg.saved_filters OWNER TO postgres;
+
 --
--- Name: saved_filters_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: -
+-- Name: saved_filters_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: postgres
 --
 
 CREATE SEQUENCE appcfg.saved_filters_id_seq
@@ -241,15 +275,17 @@ CREATE SEQUENCE appcfg.saved_filters_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE appcfg.saved_filters_id_seq OWNER TO postgres;
+
 --
--- Name: saved_filters_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: -
+-- Name: saved_filters_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: postgres
 --
 
 ALTER SEQUENCE appcfg.saved_filters_id_seq OWNED BY appcfg.saved_filters.id;
 
 
 --
--- Name: ui_entities; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: ui_entities; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.ui_entities (
@@ -262,8 +298,10 @@ CREATE TABLE appcfg.ui_entities (
 );
 
 
+ALTER TABLE appcfg.ui_entities OWNER TO postgres;
+
 --
--- Name: ui_entities_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: -
+-- Name: ui_entities_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: postgres
 --
 
 CREATE SEQUENCE appcfg.ui_entities_id_seq
@@ -274,15 +312,17 @@ CREATE SEQUENCE appcfg.ui_entities_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE appcfg.ui_entities_id_seq OWNER TO postgres;
+
 --
--- Name: ui_entities_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: -
+-- Name: ui_entities_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: postgres
 --
 
 ALTER SEQUENCE appcfg.ui_entities_id_seq OWNED BY appcfg.ui_entities.id;
 
 
 --
--- Name: ui_fields; Type: TABLE; Schema: appcfg; Owner: -
+-- Name: ui_fields; Type: TABLE; Schema: appcfg; Owner: postgres
 --
 
 CREATE TABLE appcfg.ui_fields (
@@ -300,8 +340,10 @@ CREATE TABLE appcfg.ui_fields (
 );
 
 
+ALTER TABLE appcfg.ui_fields OWNER TO postgres;
+
 --
--- Name: ui_fields_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: -
+-- Name: ui_fields_id_seq; Type: SEQUENCE; Schema: appcfg; Owner: postgres
 --
 
 CREATE SEQUENCE appcfg.ui_fields_id_seq
@@ -312,15 +354,17 @@ CREATE SEQUENCE appcfg.ui_fields_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE appcfg.ui_fields_id_seq OWNER TO postgres;
+
 --
--- Name: ui_fields_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: -
+-- Name: ui_fields_id_seq; Type: SEQUENCE OWNED BY; Schema: appcfg; Owner: postgres
 --
 
 ALTER SEQUENCE appcfg.ui_fields_id_seq OWNED BY appcfg.ui_fields.id;
 
 
 --
--- Name: permissions; Type: TABLE; Schema: auth; Owner: -
+-- Name: permissions; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.permissions (
@@ -330,8 +374,10 @@ CREATE TABLE auth.permissions (
 );
 
 
+ALTER TABLE auth.permissions OWNER TO postgres;
+
 --
--- Name: permissions_id_seq; Type: SEQUENCE; Schema: auth; Owner: -
+-- Name: permissions_id_seq; Type: SEQUENCE; Schema: auth; Owner: postgres
 --
 
 CREATE SEQUENCE auth.permissions_id_seq
@@ -342,15 +388,17 @@ CREATE SEQUENCE auth.permissions_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE auth.permissions_id_seq OWNER TO postgres;
+
 --
--- Name: permissions_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: -
+-- Name: permissions_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: postgres
 --
 
 ALTER SEQUENCE auth.permissions_id_seq OWNED BY auth.permissions.id;
 
 
 --
--- Name: refresh_tokens; Type: TABLE; Schema: auth; Owner: -
+-- Name: refresh_tokens; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.refresh_tokens (
@@ -363,8 +411,10 @@ CREATE TABLE auth.refresh_tokens (
 );
 
 
+ALTER TABLE auth.refresh_tokens OWNER TO postgres;
+
 --
--- Name: refresh_tokens_id_seq; Type: SEQUENCE; Schema: auth; Owner: -
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE; Schema: auth; Owner: postgres
 --
 
 CREATE SEQUENCE auth.refresh_tokens_id_seq
@@ -375,15 +425,17 @@ CREATE SEQUENCE auth.refresh_tokens_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE auth.refresh_tokens_id_seq OWNER TO postgres;
+
 --
--- Name: refresh_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: -
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: postgres
 --
 
 ALTER SEQUENCE auth.refresh_tokens_id_seq OWNED BY auth.refresh_tokens.id;
 
 
 --
--- Name: role_module_access; Type: TABLE; Schema: auth; Owner: -
+-- Name: role_module_access; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.role_module_access (
@@ -401,8 +453,10 @@ CREATE TABLE auth.role_module_access (
 );
 
 
+ALTER TABLE auth.role_module_access OWNER TO postgres;
+
 --
--- Name: role_permissions; Type: TABLE; Schema: auth; Owner: -
+-- Name: role_permissions; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.role_permissions (
@@ -411,8 +465,10 @@ CREATE TABLE auth.role_permissions (
 );
 
 
+ALTER TABLE auth.role_permissions OWNER TO postgres;
+
 --
--- Name: role_ui_field_access; Type: TABLE; Schema: auth; Owner: -
+-- Name: role_ui_field_access; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.role_ui_field_access (
@@ -424,8 +480,10 @@ CREATE TABLE auth.role_ui_field_access (
 );
 
 
+ALTER TABLE auth.role_ui_field_access OWNER TO postgres;
+
 --
--- Name: roles; Type: TABLE; Schema: auth; Owner: -
+-- Name: roles; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.roles (
@@ -437,8 +495,10 @@ CREATE TABLE auth.roles (
 );
 
 
+ALTER TABLE auth.roles OWNER TO postgres;
+
 --
--- Name: roles_id_seq; Type: SEQUENCE; Schema: auth; Owner: -
+-- Name: roles_id_seq; Type: SEQUENCE; Schema: auth; Owner: postgres
 --
 
 CREATE SEQUENCE auth.roles_id_seq
@@ -449,15 +509,17 @@ CREATE SEQUENCE auth.roles_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE auth.roles_id_seq OWNER TO postgres;
+
 --
--- Name: roles_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: -
+-- Name: roles_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: postgres
 --
 
 ALTER SEQUENCE auth.roles_id_seq OWNED BY auth.roles.id;
 
 
 --
--- Name: user_module_overrides; Type: TABLE; Schema: auth; Owner: -
+-- Name: user_module_overrides; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.user_module_overrides (
@@ -475,8 +537,10 @@ CREATE TABLE auth.user_module_overrides (
 );
 
 
+ALTER TABLE auth.user_module_overrides OWNER TO postgres;
+
 --
--- Name: user_roles; Type: TABLE; Schema: auth; Owner: -
+-- Name: user_roles; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.user_roles (
@@ -485,8 +549,10 @@ CREATE TABLE auth.user_roles (
 );
 
 
+ALTER TABLE auth.user_roles OWNER TO postgres;
+
 --
--- Name: user_ui_field_access; Type: TABLE; Schema: auth; Owner: -
+-- Name: user_ui_field_access; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.user_ui_field_access (
@@ -498,8 +564,10 @@ CREATE TABLE auth.user_ui_field_access (
 );
 
 
+ALTER TABLE auth.user_ui_field_access OWNER TO postgres;
+
 --
--- Name: users; Type: TABLE; Schema: auth; Owner: -
+-- Name: users; Type: TABLE; Schema: auth; Owner: postgres
 --
 
 CREATE TABLE auth.users (
@@ -520,8 +588,10 @@ CREATE TABLE auth.users (
 );
 
 
+ALTER TABLE auth.users OWNER TO postgres;
+
 --
--- Name: users_id_seq; Type: SEQUENCE; Schema: auth; Owner: -
+-- Name: users_id_seq; Type: SEQUENCE; Schema: auth; Owner: postgres
 --
 
 CREATE SEQUENCE auth.users_id_seq
@@ -532,15 +602,17 @@ CREATE SEQUENCE auth.users_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE auth.users_id_seq OWNER TO postgres;
+
 --
--- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: -
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: postgres
 --
 
 ALTER SEQUENCE auth.users_id_seq OWNED BY auth.users.id;
 
 
 --
--- Name: documents; Type: TABLE; Schema: billing; Owner: -
+-- Name: documents; Type: TABLE; Schema: billing; Owner: postgres
 --
 
 CREATE TABLE billing.documents (
@@ -561,8 +633,10 @@ CREATE TABLE billing.documents (
 );
 
 
+ALTER TABLE billing.documents OWNER TO postgres;
+
 --
--- Name: documents_id_seq; Type: SEQUENCE; Schema: billing; Owner: -
+-- Name: documents_id_seq; Type: SEQUENCE; Schema: billing; Owner: postgres
 --
 
 CREATE SEQUENCE billing.documents_id_seq
@@ -573,15 +647,17 @@ CREATE SEQUENCE billing.documents_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE billing.documents_id_seq OWNER TO postgres;
+
 --
--- Name: documents_id_seq; Type: SEQUENCE OWNED BY; Schema: billing; Owner: -
+-- Name: documents_id_seq; Type: SEQUENCE OWNED BY; Schema: billing; Owner: postgres
 --
 
 ALTER SEQUENCE billing.documents_id_seq OWNED BY billing.documents.id;
 
 
 --
--- Name: branches; Type: TABLE; Schema: core; Owner: -
+-- Name: branches; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.branches (
@@ -597,8 +673,10 @@ CREATE TABLE core.branches (
 );
 
 
+ALTER TABLE core.branches OWNER TO postgres;
+
 --
--- Name: branches_id_seq; Type: SEQUENCE; Schema: core; Owner: -
+-- Name: branches_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
 --
 
 CREATE SEQUENCE core.branches_id_seq
@@ -609,15 +687,17 @@ CREATE SEQUENCE core.branches_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE core.branches_id_seq OWNER TO postgres;
+
 --
--- Name: branches_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: -
+-- Name: branches_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
 --
 
 ALTER SEQUENCE core.branches_id_seq OWNED BY core.branches.id;
 
 
 --
--- Name: companies; Type: TABLE; Schema: core; Owner: -
+-- Name: companies; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.companies (
@@ -634,8 +714,10 @@ CREATE TABLE core.companies (
 );
 
 
+ALTER TABLE core.companies OWNER TO postgres;
+
 --
--- Name: companies_id_seq; Type: SEQUENCE; Schema: core; Owner: -
+-- Name: companies_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
 --
 
 CREATE SEQUENCE core.companies_id_seq
@@ -646,15 +728,56 @@ CREATE SEQUENCE core.companies_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE core.companies_id_seq OWNER TO postgres;
+
 --
--- Name: companies_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: -
+-- Name: companies_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
 --
 
 ALTER SEQUENCE core.companies_id_seq OWNED BY core.companies.id;
 
 
 --
--- Name: company_settings; Type: TABLE; Schema: core; Owner: -
+-- Name: company_igv_rates; Type: TABLE; Schema: core; Owner: postgres
+--
+
+CREATE TABLE core.company_igv_rates (
+    id bigint NOT NULL,
+    company_id bigint NOT NULL,
+    name character varying(120) NOT NULL,
+    rate_percent numeric(8,4) NOT NULL,
+    is_active boolean DEFAULT false NOT NULL,
+    effective_from date,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE core.company_igv_rates OWNER TO postgres;
+
+--
+-- Name: company_igv_rates_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
+--
+
+CREATE SEQUENCE core.company_igv_rates_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE core.company_igv_rates_id_seq OWNER TO postgres;
+
+--
+-- Name: company_igv_rates_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
+--
+
+ALTER SEQUENCE core.company_igv_rates_id_seq OWNED BY core.company_igv_rates.id;
+
+
+--
+-- Name: company_settings; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.company_settings (
@@ -672,29 +795,31 @@ CREATE TABLE core.company_settings (
 );
 
 
+ALTER TABLE core.company_settings OWNER TO postgres;
+
 --
--- Name: TABLE company_settings; Type: COMMENT; Schema: core; Owner: -
+-- Name: TABLE company_settings; Type: COMMENT; Schema: core; Owner: postgres
 --
 
 COMMENT ON TABLE core.company_settings IS 'Configuracion extendida de empresa: contacto, logo, certificado digital, cuentas bancarias';
 
 
 --
--- Name: COLUMN company_settings.cert_path; Type: COMMENT; Schema: core; Owner: -
+-- Name: COLUMN company_settings.cert_path; Type: COMMENT; Schema: core; Owner: postgres
 --
 
 COMMENT ON COLUMN core.company_settings.cert_path IS 'Ruta del certificado .p12/.pfx en disco privado (no publico)';
 
 
 --
--- Name: COLUMN company_settings.cert_password_enc; Type: COMMENT; Schema: core; Owner: -
+-- Name: COLUMN company_settings.cert_password_enc; Type: COMMENT; Schema: core; Owner: postgres
 --
 
 COMMENT ON COLUMN core.company_settings.cert_password_enc IS 'Password del certificado cifrado con Illuminate\Support\Facades\Crypt';
 
 
 --
--- Name: currencies; Type: TABLE; Schema: core; Owner: -
+-- Name: currencies; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.currencies (
@@ -707,8 +832,10 @@ CREATE TABLE core.currencies (
 );
 
 
+ALTER TABLE core.currencies OWNER TO postgres;
+
 --
--- Name: currencies_id_seq; Type: SEQUENCE; Schema: core; Owner: -
+-- Name: currencies_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
 --
 
 CREATE SEQUENCE core.currencies_id_seq
@@ -719,15 +846,17 @@ CREATE SEQUENCE core.currencies_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE core.currencies_id_seq OWNER TO postgres;
+
 --
--- Name: currencies_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: -
+-- Name: currencies_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
 --
 
 ALTER SEQUENCE core.currencies_id_seq OWNED BY core.currencies.id;
 
 
 --
--- Name: payment_methods; Type: TABLE; Schema: core; Owner: -
+-- Name: payment_methods; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.payment_methods (
@@ -738,8 +867,10 @@ CREATE TABLE core.payment_methods (
 );
 
 
+ALTER TABLE core.payment_methods OWNER TO postgres;
+
 --
--- Name: payment_methods_id_seq; Type: SEQUENCE; Schema: core; Owner: -
+-- Name: payment_methods_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
 --
 
 CREATE SEQUENCE core.payment_methods_id_seq
@@ -750,15 +881,17 @@ CREATE SEQUENCE core.payment_methods_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE core.payment_methods_id_seq OWNER TO postgres;
+
 --
--- Name: payment_methods_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: -
+-- Name: payment_methods_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
 --
 
 ALTER SEQUENCE core.payment_methods_id_seq OWNED BY core.payment_methods.id;
 
 
 --
--- Name: tax_categories; Type: TABLE; Schema: core; Owner: -
+-- Name: tax_categories; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.tax_categories (
@@ -774,8 +907,10 @@ CREATE TABLE core.tax_categories (
 );
 
 
+ALTER TABLE core.tax_categories OWNER TO postgres;
+
 --
--- Name: units; Type: TABLE; Schema: core; Owner: -
+-- Name: units; Type: TABLE; Schema: core; Owner: postgres
 --
 
 CREATE TABLE core.units (
@@ -787,8 +922,10 @@ CREATE TABLE core.units (
 );
 
 
+ALTER TABLE core.units OWNER TO postgres;
+
 --
--- Name: units_id_seq; Type: SEQUENCE; Schema: core; Owner: -
+-- Name: units_id_seq; Type: SEQUENCE; Schema: core; Owner: postgres
 --
 
 CREATE SEQUENCE core.units_id_seq
@@ -799,15 +936,17 @@ CREATE SEQUENCE core.units_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE core.units_id_seq OWNER TO postgres;
+
 --
--- Name: units_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: -
+-- Name: units_id_seq; Type: SEQUENCE OWNED BY; Schema: core; Owner: postgres
 --
 
 ALTER SEQUENCE core.units_id_seq OWNED BY core.units.id;
 
 
 --
--- Name: categories; Type: TABLE; Schema: inventory; Owner: -
+-- Name: categories; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.categories (
@@ -818,8 +957,10 @@ CREATE TABLE inventory.categories (
 );
 
 
+ALTER TABLE inventory.categories OWNER TO postgres;
+
 --
--- Name: categories_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: categories_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.categories_id_seq
@@ -830,15 +971,17 @@ CREATE SEQUENCE inventory.categories_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.categories_id_seq OWNER TO postgres;
+
 --
--- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.categories_id_seq OWNED BY inventory.categories.id;
 
 
 --
--- Name: inventory_ledger; Type: TABLE; Schema: inventory; Owner: -
+-- Name: inventory_ledger; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.inventory_ledger (
@@ -855,13 +998,15 @@ CREATE TABLE inventory.inventory_ledger (
     notes character varying(300),
     moved_at timestamp with time zone DEFAULT now() NOT NULL,
     created_by bigint,
-    CONSTRAINT inventory_ledger_movement_type_check CHECK (((movement_type)::text = ANY ((ARRAY['IN'::character varying, 'OUT'::character varying, 'ADJUST'::character varying])::text[]))),
+    CONSTRAINT inventory_ledger_movement_type_check CHECK (((movement_type)::text = ANY (ARRAY[('IN'::character varying)::text, ('OUT'::character varying)::text, ('ADJUST'::character varying)::text]))),
     CONSTRAINT inventory_ledger_quantity_check CHECK ((quantity > (0)::numeric))
 );
 
 
+ALTER TABLE inventory.inventory_ledger OWNER TO postgres;
+
 --
--- Name: current_stock; Type: VIEW; Schema: inventory; Owner: -
+-- Name: current_stock; Type: VIEW; Schema: inventory; Owner: postgres
 --
 
 CREATE VIEW inventory.current_stock AS
@@ -879,8 +1024,10 @@ CREATE VIEW inventory.current_stock AS
   GROUP BY company_id, warehouse_id, product_id;
 
 
+ALTER VIEW inventory.current_stock OWNER TO postgres;
+
 --
--- Name: current_stock_by_lot; Type: VIEW; Schema: inventory; Owner: -
+-- Name: current_stock_by_lot; Type: VIEW; Schema: inventory; Owner: postgres
 --
 
 CREATE VIEW inventory.current_stock_by_lot AS
@@ -900,8 +1047,10 @@ CREATE VIEW inventory.current_stock_by_lot AS
   GROUP BY company_id, warehouse_id, product_id, lot_id;
 
 
+ALTER VIEW inventory.current_stock_by_lot OWNER TO postgres;
+
 --
--- Name: inventory_ledger_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: inventory_ledger_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.inventory_ledger_id_seq
@@ -912,15 +1061,17 @@ CREATE SEQUENCE inventory.inventory_ledger_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.inventory_ledger_id_seq OWNER TO postgres;
+
 --
--- Name: inventory_ledger_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: inventory_ledger_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.inventory_ledger_id_seq OWNED BY inventory.inventory_ledger.id;
 
 
 --
--- Name: inventory_settings; Type: TABLE; Schema: inventory; Owner: -
+-- Name: inventory_settings; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.inventory_settings (
@@ -937,13 +1088,15 @@ CREATE TABLE inventory.inventory_settings (
     enable_advanced_reporting boolean DEFAULT false NOT NULL,
     enable_graphical_dashboard boolean DEFAULT false NOT NULL,
     enable_location_control boolean DEFAULT false NOT NULL,
-    CONSTRAINT inventory_settings_inventory_mode_check CHECK (((inventory_mode)::text = ANY ((ARRAY['KARDEX_SIMPLE'::character varying, 'LOT_TRACKING'::character varying])::text[]))),
-    CONSTRAINT inventory_settings_lot_outflow_strategy_check CHECK (((lot_outflow_strategy)::text = ANY ((ARRAY['MANUAL'::character varying, 'FIFO'::character varying, 'FEFO'::character varying])::text[])))
+    CONSTRAINT inventory_settings_inventory_mode_check CHECK (((inventory_mode)::text = ANY (ARRAY[('KARDEX_SIMPLE'::character varying)::text, ('LOT_TRACKING'::character varying)::text]))),
+    CONSTRAINT inventory_settings_lot_outflow_strategy_check CHECK (((lot_outflow_strategy)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('FIFO'::character varying)::text, ('FEFO'::character varying)::text])))
 );
 
 
+ALTER TABLE inventory.inventory_settings OWNER TO postgres;
+
 --
--- Name: lot_expiry_projection; Type: TABLE; Schema: inventory; Owner: -
+-- Name: lot_expiry_projection; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.lot_expiry_projection (
@@ -964,8 +1117,10 @@ CREATE TABLE inventory.lot_expiry_projection (
 );
 
 
+ALTER TABLE inventory.lot_expiry_projection OWNER TO postgres;
+
 --
--- Name: outbox_events; Type: TABLE; Schema: inventory; Owner: -
+-- Name: outbox_events; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.outbox_events (
@@ -985,8 +1140,10 @@ CREATE TABLE inventory.outbox_events (
 );
 
 
+ALTER TABLE inventory.outbox_events OWNER TO postgres;
+
 --
--- Name: outbox_events_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: outbox_events_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.outbox_events_id_seq
@@ -997,15 +1154,17 @@ CREATE SEQUENCE inventory.outbox_events_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.outbox_events_id_seq OWNER TO postgres;
+
 --
--- Name: outbox_events_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: outbox_events_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.outbox_events_id_seq OWNED BY inventory.outbox_events.id;
 
 
 --
--- Name: product_brands; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_brands; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_brands (
@@ -1019,8 +1178,10 @@ CREATE TABLE inventory.product_brands (
 );
 
 
+ALTER TABLE inventory.product_brands OWNER TO postgres;
+
 --
--- Name: product_brands_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_brands_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_brands_id_seq
@@ -1031,15 +1192,17 @@ CREATE SEQUENCE inventory.product_brands_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_brands_id_seq OWNER TO postgres;
+
 --
--- Name: product_brands_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_brands_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_brands_id_seq OWNED BY inventory.product_brands.id;
 
 
 --
--- Name: product_lines; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_lines; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_lines (
@@ -1053,8 +1216,10 @@ CREATE TABLE inventory.product_lines (
 );
 
 
+ALTER TABLE inventory.product_lines OWNER TO postgres;
+
 --
--- Name: product_lines_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_lines_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_lines_id_seq
@@ -1065,15 +1230,17 @@ CREATE SEQUENCE inventory.product_lines_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_lines_id_seq OWNER TO postgres;
+
 --
--- Name: product_lines_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_lines_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_lines_id_seq OWNED BY inventory.product_lines.id;
 
 
 --
--- Name: product_locations; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_locations; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_locations (
@@ -1087,8 +1254,10 @@ CREATE TABLE inventory.product_locations (
 );
 
 
+ALTER TABLE inventory.product_locations OWNER TO postgres;
+
 --
--- Name: product_locations_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_locations_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_locations_id_seq
@@ -1099,15 +1268,17 @@ CREATE SEQUENCE inventory.product_locations_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_locations_id_seq OWNER TO postgres;
+
 --
--- Name: product_locations_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_locations_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_locations_id_seq OWNED BY inventory.product_locations.id;
 
 
 --
--- Name: product_lots; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_lots; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_lots (
@@ -1127,8 +1298,10 @@ CREATE TABLE inventory.product_lots (
 );
 
 
+ALTER TABLE inventory.product_lots OWNER TO postgres;
+
 --
--- Name: product_lots_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_lots_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_lots_id_seq
@@ -1139,15 +1312,17 @@ CREATE SEQUENCE inventory.product_lots_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_lots_id_seq OWNER TO postgres;
+
 --
--- Name: product_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_lots_id_seq OWNED BY inventory.product_lots.id;
 
 
 --
--- Name: product_recipe_items; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_recipe_items; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_recipe_items (
@@ -1162,8 +1337,10 @@ CREATE TABLE inventory.product_recipe_items (
 );
 
 
+ALTER TABLE inventory.product_recipe_items OWNER TO postgres;
+
 --
--- Name: product_recipe_items_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_recipe_items_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_recipe_items_id_seq
@@ -1174,15 +1351,17 @@ CREATE SEQUENCE inventory.product_recipe_items_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_recipe_items_id_seq OWNER TO postgres;
+
 --
--- Name: product_recipe_items_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_recipe_items_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_recipe_items_id_seq OWNED BY inventory.product_recipe_items.id;
 
 
 --
--- Name: product_recipes; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_recipes; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_recipes (
@@ -1200,8 +1379,10 @@ CREATE TABLE inventory.product_recipes (
 );
 
 
+ALTER TABLE inventory.product_recipes OWNER TO postgres;
+
 --
--- Name: product_recipes_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_recipes_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_recipes_id_seq
@@ -1212,15 +1393,17 @@ CREATE SEQUENCE inventory.product_recipes_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_recipes_id_seq OWNER TO postgres;
+
 --
--- Name: product_recipes_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_recipes_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_recipes_id_seq OWNED BY inventory.product_recipes.id;
 
 
 --
--- Name: product_sale_units; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_sale_units; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_sale_units (
@@ -1234,8 +1417,10 @@ CREATE TABLE inventory.product_sale_units (
 );
 
 
+ALTER TABLE inventory.product_sale_units OWNER TO postgres;
+
 --
--- Name: product_uom_conversions; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_uom_conversions; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_uom_conversions (
@@ -1252,8 +1437,10 @@ CREATE TABLE inventory.product_uom_conversions (
 );
 
 
+ALTER TABLE inventory.product_uom_conversions OWNER TO postgres;
+
 --
--- Name: product_uom_conversions_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_uom_conversions_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_uom_conversions_id_seq
@@ -1264,15 +1451,17 @@ CREATE SEQUENCE inventory.product_uom_conversions_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_uom_conversions_id_seq OWNER TO postgres;
+
 --
--- Name: product_uom_conversions_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_uom_conversions_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_uom_conversions_id_seq OWNED BY inventory.product_uom_conversions.id;
 
 
 --
--- Name: product_warranties; Type: TABLE; Schema: inventory; Owner: -
+-- Name: product_warranties; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.product_warranties (
@@ -1286,8 +1475,10 @@ CREATE TABLE inventory.product_warranties (
 );
 
 
+ALTER TABLE inventory.product_warranties OWNER TO postgres;
+
 --
--- Name: product_warranties_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: product_warranties_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.product_warranties_id_seq
@@ -1298,15 +1489,17 @@ CREATE SEQUENCE inventory.product_warranties_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.product_warranties_id_seq OWNER TO postgres;
+
 --
--- Name: product_warranties_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: product_warranties_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.product_warranties_id_seq OWNED BY inventory.product_warranties.id;
 
 
 --
--- Name: products; Type: TABLE; Schema: inventory; Owner: -
+-- Name: products; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.products (
@@ -1339,8 +1532,10 @@ CREATE TABLE inventory.products (
 );
 
 
+ALTER TABLE inventory.products OWNER TO postgres;
+
 --
--- Name: products_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: products_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.products_id_seq
@@ -1351,15 +1546,17 @@ CREATE SEQUENCE inventory.products_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.products_id_seq OWNER TO postgres;
+
 --
--- Name: products_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: products_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.products_id_seq OWNED BY inventory.products.id;
 
 
 --
--- Name: report_requests; Type: TABLE; Schema: inventory; Owner: -
+-- Name: report_requests; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.report_requests (
@@ -1380,8 +1577,10 @@ CREATE TABLE inventory.report_requests (
 );
 
 
+ALTER TABLE inventory.report_requests OWNER TO postgres;
+
 --
--- Name: report_requests_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: report_requests_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.report_requests_id_seq
@@ -1392,15 +1591,17 @@ CREATE SEQUENCE inventory.report_requests_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.report_requests_id_seq OWNER TO postgres;
+
 --
--- Name: report_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: report_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.report_requests_id_seq OWNED BY inventory.report_requests.id;
 
 
 --
--- Name: stock_daily_snapshot; Type: TABLE; Schema: inventory; Owner: -
+-- Name: stock_daily_snapshot; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.stock_daily_snapshot (
@@ -1423,8 +1624,10 @@ CREATE TABLE inventory.stock_daily_snapshot (
 );
 
 
+ALTER TABLE inventory.stock_daily_snapshot OWNER TO postgres;
+
 --
--- Name: stock_entries; Type: TABLE; Schema: inventory; Owner: -
+-- Name: stock_entries; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.stock_entries (
@@ -1446,8 +1649,10 @@ CREATE TABLE inventory.stock_entries (
 );
 
 
+ALTER TABLE inventory.stock_entries OWNER TO postgres;
+
 --
--- Name: stock_entries_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: stock_entries_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.stock_entries_id_seq
@@ -1458,15 +1663,17 @@ CREATE SEQUENCE inventory.stock_entries_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.stock_entries_id_seq OWNER TO postgres;
+
 --
--- Name: stock_entries_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: stock_entries_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.stock_entries_id_seq OWNED BY inventory.stock_entries.id;
 
 
 --
--- Name: stock_entry_items; Type: TABLE; Schema: inventory; Owner: -
+-- Name: stock_entry_items; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.stock_entry_items (
@@ -1483,8 +1690,10 @@ CREATE TABLE inventory.stock_entry_items (
 );
 
 
+ALTER TABLE inventory.stock_entry_items OWNER TO postgres;
+
 --
--- Name: stock_entry_items_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: stock_entry_items_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.stock_entry_items_id_seq
@@ -1495,15 +1704,17 @@ CREATE SEQUENCE inventory.stock_entry_items_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.stock_entry_items_id_seq OWNER TO postgres;
+
 --
--- Name: stock_entry_items_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: stock_entry_items_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.stock_entry_items_id_seq OWNED BY inventory.stock_entry_items.id;
 
 
 --
--- Name: stock_transformation_lines; Type: TABLE; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.stock_transformation_lines (
@@ -1519,13 +1730,15 @@ CREATE TABLE inventory.stock_transformation_lines (
     unit_cost numeric(14,4),
     notes character varying(300),
     CONSTRAINT stock_transformation_lines_conversion_factor_check CHECK ((conversion_factor > (0)::numeric)),
-    CONSTRAINT stock_transformation_lines_line_type_check CHECK (((line_type)::text = ANY ((ARRAY['INPUT'::character varying, 'OUTPUT'::character varying])::text[]))),
+    CONSTRAINT stock_transformation_lines_line_type_check CHECK (((line_type)::text = ANY (ARRAY[('INPUT'::character varying)::text, ('OUTPUT'::character varying)::text]))),
     CONSTRAINT stock_transformation_lines_qty_check CHECK ((qty > (0)::numeric))
 );
 
 
+ALTER TABLE inventory.stock_transformation_lines OWNER TO postgres;
+
 --
--- Name: stock_transformation_lines_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.stock_transformation_lines_id_seq
@@ -1536,15 +1749,17 @@ CREATE SEQUENCE inventory.stock_transformation_lines_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.stock_transformation_lines_id_seq OWNER TO postgres;
+
 --
--- Name: stock_transformation_lines_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.stock_transformation_lines_id_seq OWNED BY inventory.stock_transformation_lines.id;
 
 
 --
--- Name: stock_transformations; Type: TABLE; Schema: inventory; Owner: -
+-- Name: stock_transformations; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.stock_transformations (
@@ -1559,12 +1774,14 @@ CREATE TABLE inventory.stock_transformations (
     notes character varying(300),
     created_by bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT stock_transformations_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'CONFIRMED'::character varying, 'CANCELED'::character varying])::text[])))
+    CONSTRAINT stock_transformations_status_check CHECK (((status)::text = ANY (ARRAY[('DRAFT'::character varying)::text, ('CONFIRMED'::character varying)::text, ('CANCELED'::character varying)::text])))
 );
 
 
+ALTER TABLE inventory.stock_transformations OWNER TO postgres;
+
 --
--- Name: stock_transformations_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: stock_transformations_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.stock_transformations_id_seq
@@ -1575,15 +1792,17 @@ CREATE SEQUENCE inventory.stock_transformations_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.stock_transformations_id_seq OWNER TO postgres;
+
 --
--- Name: stock_transformations_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: stock_transformations_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.stock_transformations_id_seq OWNED BY inventory.stock_transformations.id;
 
 
 --
--- Name: transformation_settings; Type: TABLE; Schema: inventory; Owner: -
+-- Name: transformation_settings; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.transformation_settings (
@@ -1595,8 +1814,10 @@ CREATE TABLE inventory.transformation_settings (
 );
 
 
+ALTER TABLE inventory.transformation_settings OWNER TO postgres;
+
 --
--- Name: warehouses; Type: TABLE; Schema: inventory; Owner: -
+-- Name: warehouses; Type: TABLE; Schema: inventory; Owner: postgres
 --
 
 CREATE TABLE inventory.warehouses (
@@ -1610,8 +1831,10 @@ CREATE TABLE inventory.warehouses (
 );
 
 
+ALTER TABLE inventory.warehouses OWNER TO postgres;
+
 --
--- Name: warehouses_id_seq; Type: SEQUENCE; Schema: inventory; Owner: -
+-- Name: warehouses_id_seq; Type: SEQUENCE; Schema: inventory; Owner: postgres
 --
 
 CREATE SEQUENCE inventory.warehouses_id_seq
@@ -1622,15 +1845,17 @@ CREATE SEQUENCE inventory.warehouses_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE inventory.warehouses_id_seq OWNER TO postgres;
+
 --
--- Name: warehouses_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: -
+-- Name: warehouses_id_seq; Type: SEQUENCE OWNED BY; Schema: inventory; Owner: postgres
 --
 
 ALTER SEQUENCE inventory.warehouses_id_seq OWNED BY inventory.warehouses.id;
 
 
 --
--- Name: additional_legends; Type: TABLE; Schema: master; Owner: -
+-- Name: additional_legends; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.additional_legends (
@@ -1641,8 +1866,10 @@ CREATE TABLE master.additional_legends (
 );
 
 
+ALTER TABLE master.additional_legends OWNER TO postgres;
+
 --
--- Name: credit_note_reasons; Type: TABLE; Schema: master; Owner: -
+-- Name: credit_note_reasons; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.credit_note_reasons (
@@ -1653,8 +1880,10 @@ CREATE TABLE master.credit_note_reasons (
 );
 
 
+ALTER TABLE master.credit_note_reasons OWNER TO postgres;
+
 --
--- Name: debit_note_reasons; Type: TABLE; Schema: master; Owner: -
+-- Name: debit_note_reasons; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.debit_note_reasons (
@@ -1665,8 +1894,47 @@ CREATE TABLE master.debit_note_reasons (
 );
 
 
+ALTER TABLE master.debit_note_reasons OWNER TO postgres;
+
 --
--- Name: employee_roles; Type: TABLE; Schema: master; Owner: -
+-- Name: detraccion_service_codes; Type: TABLE; Schema: master; Owner: postgres
+--
+
+CREATE TABLE master.detraccion_service_codes (
+    id integer NOT NULL,
+    code character varying(4) NOT NULL,
+    name character varying(300) NOT NULL,
+    rate_percent numeric(5,2) DEFAULT 10.00 NOT NULL,
+    is_active smallint DEFAULT 1 NOT NULL
+);
+
+
+ALTER TABLE master.detraccion_service_codes OWNER TO postgres;
+
+--
+-- Name: detraccion_service_codes_id_seq; Type: SEQUENCE; Schema: master; Owner: postgres
+--
+
+CREATE SEQUENCE master.detraccion_service_codes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE master.detraccion_service_codes_id_seq OWNER TO postgres;
+
+--
+-- Name: detraccion_service_codes_id_seq; Type: SEQUENCE OWNED BY; Schema: master; Owner: postgres
+--
+
+ALTER SEQUENCE master.detraccion_service_codes_id_seq OWNED BY master.detraccion_service_codes.id;
+
+
+--
+-- Name: employee_roles; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.employee_roles (
@@ -1677,8 +1945,10 @@ CREATE TABLE master.employee_roles (
 );
 
 
+ALTER TABLE master.employee_roles OWNER TO postgres;
+
 --
--- Name: geo_ubigeo; Type: TABLE; Schema: master; Owner: -
+-- Name: geo_ubigeo; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.geo_ubigeo (
@@ -1693,8 +1963,10 @@ CREATE TABLE master.geo_ubigeo (
 );
 
 
+ALTER TABLE master.geo_ubigeo OWNER TO postgres;
+
 --
--- Name: item_types; Type: TABLE; Schema: master; Owner: -
+-- Name: item_types; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.item_types (
@@ -1704,8 +1976,10 @@ CREATE TABLE master.item_types (
 );
 
 
+ALTER TABLE master.item_types OWNER TO postgres;
+
 --
--- Name: payment_types; Type: TABLE; Schema: master; Owner: -
+-- Name: payment_types; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.payment_types (
@@ -1717,8 +1991,10 @@ CREATE TABLE master.payment_types (
 );
 
 
+ALTER TABLE master.payment_types OWNER TO postgres;
+
 --
--- Name: shipment_transfer_reasons; Type: TABLE; Schema: master; Owner: -
+-- Name: shipment_transfer_reasons; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.shipment_transfer_reasons (
@@ -1729,8 +2005,10 @@ CREATE TABLE master.shipment_transfer_reasons (
 );
 
 
+ALTER TABLE master.shipment_transfer_reasons OWNER TO postgres;
+
 --
--- Name: shipment_transport_modes; Type: TABLE; Schema: master; Owner: -
+-- Name: shipment_transport_modes; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.shipment_transport_modes (
@@ -1741,8 +2019,10 @@ CREATE TABLE master.shipment_transport_modes (
 );
 
 
+ALTER TABLE master.shipment_transport_modes OWNER TO postgres;
+
 --
--- Name: sunat_uom; Type: TABLE; Schema: master; Owner: -
+-- Name: sunat_uom; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.sunat_uom (
@@ -1753,8 +2033,10 @@ CREATE TABLE master.sunat_uom (
 );
 
 
+ALTER TABLE master.sunat_uom OWNER TO postgres;
+
 --
--- Name: tax_codes; Type: TABLE; Schema: master; Owner: -
+-- Name: tax_codes; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.tax_codes (
@@ -1765,8 +2047,10 @@ CREATE TABLE master.tax_codes (
 );
 
 
+ALTER TABLE master.tax_codes OWNER TO postgres;
+
 --
--- Name: vat_categories; Type: TABLE; Schema: master; Owner: -
+-- Name: vat_categories; Type: TABLE; Schema: master; Owner: postgres
 --
 
 CREATE TABLE master.vat_categories (
@@ -1778,8 +2062,134 @@ CREATE TABLE master.vat_categories (
 );
 
 
+ALTER TABLE master.vat_categories OWNER TO postgres;
+
 --
--- Name: cash_movements; Type: TABLE; Schema: sales; Owner: -
+-- Name: failed_jobs; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.failed_jobs (
+    id bigint NOT NULL,
+    connection text NOT NULL,
+    queue text NOT NULL,
+    payload text NOT NULL,
+    exception text NOT NULL,
+    failed_at timestamp(0) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+ALTER TABLE public.failed_jobs OWNER TO postgres;
+
+--
+-- Name: failed_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.failed_jobs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.failed_jobs_id_seq OWNER TO postgres;
+
+--
+-- Name: failed_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.failed_jobs_id_seq OWNED BY public.failed_jobs.id;
+
+
+--
+-- Name: migrations; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.migrations (
+    id integer NOT NULL,
+    migration character varying(255) NOT NULL,
+    batch integer NOT NULL
+);
+
+
+ALTER TABLE public.migrations OWNER TO postgres;
+
+--
+-- Name: migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.migrations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.migrations_id_seq OWNER TO postgres;
+
+--
+-- Name: migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.migrations_id_seq OWNED BY public.migrations.id;
+
+
+--
+-- Name: password_resets; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.password_resets (
+    email character varying(255) NOT NULL,
+    token character varying(255) NOT NULL,
+    created_at timestamp(0) without time zone
+);
+
+
+ALTER TABLE public.password_resets OWNER TO postgres;
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.users (
+    id bigint NOT NULL,
+    name character varying(255) NOT NULL,
+    email character varying(255) NOT NULL,
+    email_verified_at timestamp(0) without time zone,
+    password character varying(255) NOT NULL,
+    remember_token character varying(100),
+    created_at timestamp(0) without time zone,
+    updated_at timestamp(0) without time zone
+);
+
+
+ALTER TABLE public.users OWNER TO postgres;
+
+--
+-- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.users_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.users_id_seq OWNER TO postgres;
+
+--
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- Name: cash_movements; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.cash_movements (
@@ -1800,19 +2210,21 @@ CREATE TABLE sales.cash_movements (
     user_id bigint,
     movement_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT cash_movements_amount_check CHECK ((amount > (0)::numeric)),
-    CONSTRAINT cash_movements_movement_type_check CHECK (((movement_type)::text = ANY ((ARRAY['INCOME'::character varying, 'EXPENSE'::character varying, 'ADJUSTMENT'::character varying])::text[])))
+    CONSTRAINT cash_movements_movement_type_check CHECK (((movement_type)::text = ANY (ARRAY[('INCOME'::character varying)::text, ('EXPENSE'::character varying)::text, ('ADJUSTMENT'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.cash_movements OWNER TO postgres;
+
 --
--- Name: TABLE cash_movements; Type: COMMENT; Schema: sales; Owner: -
+-- Name: TABLE cash_movements; Type: COMMENT; Schema: sales; Owner: postgres
 --
 
 COMMENT ON TABLE sales.cash_movements IS 'Ingresos y egresos de caja (manuales y automaticos)';
 
 
 --
--- Name: cash_movements_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: cash_movements_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.cash_movements_id_seq
@@ -1823,15 +2235,17 @@ CREATE SEQUENCE sales.cash_movements_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.cash_movements_id_seq OWNER TO postgres;
+
 --
--- Name: cash_movements_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: cash_movements_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.cash_movements_id_seq OWNED BY sales.cash_movements.id;
 
 
 --
--- Name: cash_registers; Type: TABLE; Schema: sales; Owner: -
+-- Name: cash_registers; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.cash_registers (
@@ -1845,8 +2259,10 @@ CREATE TABLE sales.cash_registers (
 );
 
 
+ALTER TABLE sales.cash_registers OWNER TO postgres;
+
 --
--- Name: cash_registers_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: cash_registers_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.cash_registers_id_seq
@@ -1857,15 +2273,17 @@ CREATE SEQUENCE sales.cash_registers_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.cash_registers_id_seq OWNER TO postgres;
+
 --
--- Name: cash_registers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: cash_registers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.cash_registers_id_seq OWNED BY sales.cash_registers.id;
 
 
 --
--- Name: cash_sessions; Type: TABLE; Schema: sales; Owner: -
+-- Name: cash_sessions; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.cash_sessions (
@@ -1885,33 +2303,35 @@ CREATE TABLE sales.cash_sessions (
     notes character varying(300),
     user_id bigint,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT cash_sessions_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLOSED'::character varying, 'CANCELED'::character varying])::text[])))
+    CONSTRAINT cash_sessions_status_check CHECK (((status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('CLOSED'::character varying)::text, ('CANCELED'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.cash_sessions OWNER TO postgres;
+
 --
--- Name: TABLE cash_sessions; Type: COMMENT; Schema: sales; Owner: -
+-- Name: TABLE cash_sessions; Type: COMMENT; Schema: sales; Owner: postgres
 --
 
 COMMENT ON TABLE sales.cash_sessions IS 'Apertura y cierre de caja por caja registradora';
 
 
 --
--- Name: COLUMN cash_sessions.closing_balance; Type: COMMENT; Schema: sales; Owner: -
+-- Name: COLUMN cash_sessions.closing_balance; Type: COMMENT; Schema: sales; Owner: postgres
 --
 
 COMMENT ON COLUMN sales.cash_sessions.closing_balance IS 'Saldo fisico contado al cierre';
 
 
 --
--- Name: COLUMN cash_sessions.expected_balance; Type: COMMENT; Schema: sales; Owner: -
+-- Name: COLUMN cash_sessions.expected_balance; Type: COMMENT; Schema: sales; Owner: postgres
 --
 
 COMMENT ON COLUMN sales.cash_sessions.expected_balance IS 'Saldo calculado: saldo_apertura + ingresos - egresos';
 
 
 --
--- Name: cash_sessions_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: cash_sessions_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.cash_sessions_id_seq
@@ -1922,15 +2342,17 @@ CREATE SEQUENCE sales.cash_sessions_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.cash_sessions_id_seq OWNER TO postgres;
+
 --
--- Name: cash_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: cash_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.cash_sessions_id_seq OWNED BY sales.cash_sessions.id;
 
 
 --
--- Name: commercial_document_item_lots; Type: TABLE; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.commercial_document_item_lots (
@@ -1943,8 +2365,10 @@ CREATE TABLE sales.commercial_document_item_lots (
 );
 
 
+ALTER TABLE sales.commercial_document_item_lots OWNER TO postgres;
+
 --
--- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.commercial_document_item_lots_id_seq
@@ -1955,15 +2379,17 @@ CREATE SEQUENCE sales.commercial_document_item_lots_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.commercial_document_item_lots_id_seq OWNER TO postgres;
+
 --
--- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.commercial_document_item_lots_id_seq OWNED BY sales.commercial_document_item_lots.id;
 
 
 --
--- Name: commercial_document_items; Type: TABLE; Schema: sales; Owner: -
+-- Name: commercial_document_items; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.commercial_document_items (
@@ -1989,14 +2415,16 @@ CREATE TABLE sales.commercial_document_items (
     total numeric(14,2) DEFAULT 0 NOT NULL,
     metadata jsonb,
     CONSTRAINT commercial_document_items_conversion_factor_check CHECK ((conversion_factor > (0)::numeric)),
-    CONSTRAINT commercial_document_items_price_source_check CHECK (((price_source)::text = ANY ((ARRAY['MANUAL'::character varying, 'TIER'::character varying, 'PROFILE'::character varying])::text[]))),
+    CONSTRAINT commercial_document_items_price_source_check CHECK (((price_source)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('TIER'::character varying)::text, ('PROFILE'::character varying)::text]))),
     CONSTRAINT commercial_document_items_qty_check CHECK ((qty > (0)::numeric)),
     CONSTRAINT commercial_document_items_wholesale_discount_percent_check CHECK ((wholesale_discount_percent >= (0)::numeric))
 );
 
 
+ALTER TABLE sales.commercial_document_items OWNER TO postgres;
+
 --
--- Name: commercial_document_items_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: commercial_document_items_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.commercial_document_items_id_seq
@@ -2007,15 +2435,17 @@ CREATE SEQUENCE sales.commercial_document_items_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.commercial_document_items_id_seq OWNER TO postgres;
+
 --
--- Name: commercial_document_items_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: commercial_document_items_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.commercial_document_items_id_seq OWNED BY sales.commercial_document_items.id;
 
 
 --
--- Name: commercial_document_payments; Type: TABLE; Schema: sales; Owner: -
+-- Name: commercial_document_payments; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.commercial_document_payments (
@@ -2029,12 +2459,14 @@ CREATE TABLE sales.commercial_document_payments (
     notes character varying(300),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT commercial_document_payments_amount_check CHECK ((amount > (0)::numeric)),
-    CONSTRAINT commercial_document_payments_status_check CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'PAID'::character varying, 'CANCELED'::character varying])::text[])))
+    CONSTRAINT commercial_document_payments_status_check CHECK (((status)::text = ANY (ARRAY[('PENDING'::character varying)::text, ('PAID'::character varying)::text, ('CANCELED'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.commercial_document_payments OWNER TO postgres;
+
 --
--- Name: commercial_document_payments_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: commercial_document_payments_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.commercial_document_payments_id_seq
@@ -2045,15 +2477,17 @@ CREATE SEQUENCE sales.commercial_document_payments_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.commercial_document_payments_id_seq OWNER TO postgres;
+
 --
--- Name: commercial_document_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: commercial_document_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.commercial_document_payments_id_seq OWNED BY sales.commercial_document_payments.id;
 
 
 --
--- Name: commercial_documents; Type: TABLE; Schema: sales; Owner: -
+-- Name: commercial_documents; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.commercial_documents (
@@ -2090,13 +2524,15 @@ CREATE TABLE sales.commercial_documents (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
-    CONSTRAINT commercial_documents_document_kind_check CHECK (((document_kind)::text = ANY ((ARRAY['QUOTATION'::character varying, 'SALES_ORDER'::character varying, 'INVOICE'::character varying, 'RECEIPT'::character varying, 'CREDIT_NOTE'::character varying, 'DEBIT_NOTE'::character varying])::text[]))),
-    CONSTRAINT commercial_documents_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'APPROVED'::character varying, 'ISSUED'::character varying, 'VOID'::character varying, 'CANCELED'::character varying])::text[])))
+    CONSTRAINT commercial_documents_document_kind_check CHECK (((document_kind)::text = ANY (ARRAY[('QUOTATION'::character varying)::text, ('SALES_ORDER'::character varying)::text, ('INVOICE'::character varying)::text, ('RECEIPT'::character varying)::text, ('CREDIT_NOTE'::character varying)::text, ('DEBIT_NOTE'::character varying)::text]))),
+    CONSTRAINT commercial_documents_status_check CHECK (((status)::text = ANY (ARRAY[('DRAFT'::character varying)::text, ('APPROVED'::character varying)::text, ('ISSUED'::character varying)::text, ('VOID'::character varying)::text, ('CANCELED'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.commercial_documents OWNER TO postgres;
+
 --
--- Name: commercial_documents_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: commercial_documents_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.commercial_documents_id_seq
@@ -2107,15 +2543,17 @@ CREATE SEQUENCE sales.commercial_documents_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.commercial_documents_id_seq OWNER TO postgres;
+
 --
--- Name: commercial_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: commercial_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.commercial_documents_id_seq OWNED BY sales.commercial_documents.id;
 
 
 --
--- Name: customer_price_profiles; Type: TABLE; Schema: sales; Owner: -
+-- Name: customer_price_profiles; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.customer_price_profiles (
@@ -2129,8 +2567,10 @@ CREATE TABLE sales.customer_price_profiles (
 );
 
 
+ALTER TABLE sales.customer_price_profiles OWNER TO postgres;
+
 --
--- Name: customer_price_profiles_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: customer_price_profiles_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.customer_price_profiles_id_seq
@@ -2141,15 +2581,55 @@ CREATE SEQUENCE sales.customer_price_profiles_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.customer_price_profiles_id_seq OWNER TO postgres;
+
 --
--- Name: customer_price_profiles_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: customer_price_profiles_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.customer_price_profiles_id_seq OWNED BY sales.customer_price_profiles.id;
 
 
 --
--- Name: customers; Type: TABLE; Schema: sales; Owner: -
+-- Name: customer_types; Type: TABLE; Schema: sales; Owner: postgres
+--
+
+CREATE TABLE sales.customer_types (
+    id bigint NOT NULL,
+    name character varying(120) NOT NULL,
+    sunat_code integer NOT NULL,
+    sunat_abbr character varying(120),
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE sales.customer_types OWNER TO postgres;
+
+--
+-- Name: customer_types_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
+--
+
+CREATE SEQUENCE sales.customer_types_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE sales.customer_types_id_seq OWNER TO postgres;
+
+--
+-- Name: customer_types_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
+--
+
+ALTER SEQUENCE sales.customer_types_id_seq OWNED BY sales.customer_types.id;
+
+
+--
+-- Name: customers; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.customers (
@@ -2168,12 +2648,15 @@ CREATE TABLE sales.customers (
     status smallint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    deleted_at timestamp with time zone
+    deleted_at timestamp with time zone,
+    customer_type_id bigint
 );
 
 
+ALTER TABLE sales.customers OWNER TO postgres;
+
 --
--- Name: customers_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: customers_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.customers_id_seq
@@ -2184,15 +2667,17 @@ CREATE SEQUENCE sales.customers_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.customers_id_seq OWNER TO postgres;
+
 --
--- Name: customers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: customers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.customers_id_seq OWNED BY sales.customers.id;
 
 
 --
--- Name: document_sequences; Type: TABLE; Schema: sales; Owner: -
+-- Name: document_sequences; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.document_sequences (
@@ -2204,12 +2689,14 @@ CREATE TABLE sales.document_sequences (
     series character varying(10) NOT NULL,
     current_number bigint DEFAULT 0 NOT NULL,
     status smallint DEFAULT 1 NOT NULL,
-    CONSTRAINT document_sequences_document_kind_check CHECK (((document_kind)::text = ANY ((ARRAY['QUOTATION'::character varying, 'SALES_ORDER'::character varying, 'INVOICE'::character varying, 'RECEIPT'::character varying, 'CREDIT_NOTE'::character varying, 'DEBIT_NOTE'::character varying])::text[])))
+    CONSTRAINT document_sequences_document_kind_check CHECK (((document_kind)::text = ANY (ARRAY[('QUOTATION'::character varying)::text, ('SALES_ORDER'::character varying)::text, ('INVOICE'::character varying)::text, ('RECEIPT'::character varying)::text, ('CREDIT_NOTE'::character varying)::text, ('DEBIT_NOTE'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.document_sequences OWNER TO postgres;
+
 --
--- Name: document_sequences_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: document_sequences_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.document_sequences_id_seq
@@ -2220,15 +2707,17 @@ CREATE SEQUENCE sales.document_sequences_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.document_sequences_id_seq OWNER TO postgres;
+
 --
--- Name: document_sequences_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: document_sequences_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.document_sequences_id_seq OWNED BY sales.document_sequences.id;
 
 
 --
--- Name: order_sequences; Type: TABLE; Schema: sales; Owner: -
+-- Name: order_sequences; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.order_sequences (
@@ -2241,8 +2730,10 @@ CREATE TABLE sales.order_sequences (
 );
 
 
+ALTER TABLE sales.order_sequences OWNER TO postgres;
+
 --
--- Name: order_sequences_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: order_sequences_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.order_sequences_id_seq
@@ -2253,15 +2744,17 @@ CREATE SEQUENCE sales.order_sequences_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.order_sequences_id_seq OWNER TO postgres;
+
 --
--- Name: order_sequences_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: order_sequences_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.order_sequences_id_seq OWNED BY sales.order_sequences.id;
 
 
 --
--- Name: price_tiers; Type: TABLE; Schema: sales; Owner: -
+-- Name: price_tiers; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.price_tiers (
@@ -2277,8 +2770,10 @@ CREATE TABLE sales.price_tiers (
 );
 
 
+ALTER TABLE sales.price_tiers OWNER TO postgres;
+
 --
--- Name: price_tiers_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: price_tiers_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.price_tiers_id_seq
@@ -2289,15 +2784,17 @@ CREATE SEQUENCE sales.price_tiers_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.price_tiers_id_seq OWNER TO postgres;
+
 --
--- Name: price_tiers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: price_tiers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.price_tiers_id_seq OWNED BY sales.price_tiers.id;
 
 
 --
--- Name: product_price_tier_values; Type: TABLE; Schema: sales; Owner: -
+-- Name: product_price_tier_values; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.product_price_tier_values (
@@ -2313,8 +2810,10 @@ CREATE TABLE sales.product_price_tier_values (
 );
 
 
+ALTER TABLE sales.product_price_tier_values OWNER TO postgres;
+
 --
--- Name: product_price_tier_values_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: product_price_tier_values_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.product_price_tier_values_id_seq
@@ -2325,15 +2824,17 @@ CREATE SEQUENCE sales.product_price_tier_values_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.product_price_tier_values_id_seq OWNER TO postgres;
+
 --
--- Name: product_price_tier_values_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: product_price_tier_values_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.product_price_tier_values_id_seq OWNED BY sales.product_price_tier_values.id;
 
 
 --
--- Name: product_tier_prices; Type: TABLE; Schema: sales; Owner: -
+-- Name: product_tier_prices; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.product_tier_prices (
@@ -2350,8 +2851,10 @@ CREATE TABLE sales.product_tier_prices (
 );
 
 
+ALTER TABLE sales.product_tier_prices OWNER TO postgres;
+
 --
--- Name: product_tier_prices_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: product_tier_prices_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.product_tier_prices_id_seq
@@ -2362,15 +2865,17 @@ CREATE SEQUENCE sales.product_tier_prices_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.product_tier_prices_id_seq OWNER TO postgres;
+
 --
--- Name: product_tier_prices_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: product_tier_prices_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.product_tier_prices_id_seq OWNED BY sales.product_tier_prices.id;
 
 
 --
--- Name: sales_order_item_lots; Type: TABLE; Schema: sales; Owner: -
+-- Name: sales_order_item_lots; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.sales_order_item_lots (
@@ -2383,8 +2888,10 @@ CREATE TABLE sales.sales_order_item_lots (
 );
 
 
+ALTER TABLE sales.sales_order_item_lots OWNER TO postgres;
+
 --
--- Name: sales_order_item_lots_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: sales_order_item_lots_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.sales_order_item_lots_id_seq
@@ -2395,15 +2902,17 @@ CREATE SEQUENCE sales.sales_order_item_lots_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.sales_order_item_lots_id_seq OWNER TO postgres;
+
 --
--- Name: sales_order_item_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: sales_order_item_lots_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.sales_order_item_lots_id_seq OWNED BY sales.sales_order_item_lots.id;
 
 
 --
--- Name: sales_order_items; Type: TABLE; Schema: sales; Owner: -
+-- Name: sales_order_items; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.sales_order_items (
@@ -2423,8 +2932,10 @@ CREATE TABLE sales.sales_order_items (
 );
 
 
+ALTER TABLE sales.sales_order_items OWNER TO postgres;
+
 --
--- Name: sales_order_items_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: sales_order_items_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.sales_order_items_id_seq
@@ -2435,15 +2946,17 @@ CREATE SEQUENCE sales.sales_order_items_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.sales_order_items_id_seq OWNER TO postgres;
+
 --
--- Name: sales_order_items_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: sales_order_items_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.sales_order_items_id_seq OWNED BY sales.sales_order_items.id;
 
 
 --
--- Name: sales_order_payments; Type: TABLE; Schema: sales; Owner: -
+-- Name: sales_order_payments; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.sales_order_payments (
@@ -2457,8 +2970,10 @@ CREATE TABLE sales.sales_order_payments (
 );
 
 
+ALTER TABLE sales.sales_order_payments OWNER TO postgres;
+
 --
--- Name: sales_order_payments_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: sales_order_payments_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.sales_order_payments_id_seq
@@ -2469,15 +2984,17 @@ CREATE SEQUENCE sales.sales_order_payments_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.sales_order_payments_id_seq OWNER TO postgres;
+
 --
--- Name: sales_order_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: sales_order_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.sales_order_payments_id_seq OWNED BY sales.sales_order_payments.id;
 
 
 --
--- Name: sales_orders; Type: TABLE; Schema: sales; Owner: -
+-- Name: sales_orders; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.sales_orders (
@@ -2509,8 +3026,10 @@ CREATE TABLE sales.sales_orders (
 );
 
 
+ALTER TABLE sales.sales_orders OWNER TO postgres;
+
 --
--- Name: sales_orders_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: sales_orders_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.sales_orders_id_seq
@@ -2521,15 +3040,17 @@ CREATE SEQUENCE sales.sales_orders_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.sales_orders_id_seq OWNER TO postgres;
+
 --
--- Name: sales_orders_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: sales_orders_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.sales_orders_id_seq OWNED BY sales.sales_orders.id;
 
 
 --
--- Name: series_numbers; Type: TABLE; Schema: sales; Owner: -
+-- Name: series_numbers; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.series_numbers (
@@ -2547,14 +3068,16 @@ CREATE TABLE sales.series_numbers (
     valid_to date,
     updated_by bigint,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT series_numbers_document_kind_check CHECK (((document_kind)::text = ANY ((ARRAY['QUOTATION'::character varying, 'SALES_ORDER'::character varying, 'INVOICE'::character varying, 'RECEIPT'::character varying, 'CREDIT_NOTE'::character varying, 'DEBIT_NOTE'::character varying])::text[]))),
+    CONSTRAINT series_numbers_document_kind_check CHECK (((document_kind)::text = ANY (ARRAY[('QUOTATION'::character varying)::text, ('SALES_ORDER'::character varying)::text, ('INVOICE'::character varying)::text, ('RECEIPT'::character varying)::text, ('CREDIT_NOTE'::character varying)::text, ('DEBIT_NOTE'::character varying)::text]))),
     CONSTRAINT series_numbers_number_padding_check CHECK (((number_padding >= 4) AND (number_padding <= 12))),
-    CONSTRAINT series_numbers_reset_policy_check CHECK (((reset_policy)::text = ANY ((ARRAY['NONE'::character varying, 'YEARLY'::character varying, 'MONTHLY'::character varying])::text[])))
+    CONSTRAINT series_numbers_reset_policy_check CHECK (((reset_policy)::text = ANY (ARRAY[('NONE'::character varying)::text, ('YEARLY'::character varying)::text, ('MONTHLY'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.series_numbers OWNER TO postgres;
+
 --
--- Name: series_numbers_id_seq; Type: SEQUENCE; Schema: sales; Owner: -
+-- Name: series_numbers_id_seq; Type: SEQUENCE; Schema: sales; Owner: postgres
 --
 
 CREATE SEQUENCE sales.series_numbers_id_seq
@@ -2565,15 +3088,17 @@ CREATE SEQUENCE sales.series_numbers_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE sales.series_numbers_id_seq OWNER TO postgres;
+
 --
--- Name: series_numbers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: -
+-- Name: series_numbers_id_seq; Type: SEQUENCE OWNED BY; Schema: sales; Owner: postgres
 --
 
 ALTER SEQUENCE sales.series_numbers_id_seq OWNED BY sales.series_numbers.id;
 
 
 --
--- Name: wholesale_settings; Type: TABLE; Schema: sales; Owner: -
+-- Name: wholesale_settings; Type: TABLE; Schema: sales; Owner: postgres
 --
 
 CREATE TABLE sales.wholesale_settings (
@@ -2582,377 +3107,422 @@ CREATE TABLE sales.wholesale_settings (
     pricing_mode character varying(20) DEFAULT 'PRICE_TIER'::character varying NOT NULL,
     allow_customer_override boolean DEFAULT true NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT wholesale_settings_pricing_mode_check CHECK (((pricing_mode)::text = ANY ((ARRAY['PRICE_TIER'::character varying, 'PRICE_LIST'::character varying])::text[])))
+    CONSTRAINT wholesale_settings_pricing_mode_check CHECK (((pricing_mode)::text = ANY (ARRAY[('PRICE_TIER'::character varying)::text, ('PRICE_LIST'::character varying)::text])))
 );
 
 
+ALTER TABLE sales.wholesale_settings OWNER TO postgres;
+
 --
--- Name: modules id; Type: DEFAULT; Schema: appcfg; Owner: -
+-- Name: modules id; Type: DEFAULT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.modules ALTER COLUMN id SET DEFAULT nextval('appcfg.modules_id_seq'::regclass);
 
 
 --
--- Name: saved_filters id; Type: DEFAULT; Schema: appcfg; Owner: -
+-- Name: saved_filters id; Type: DEFAULT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.saved_filters ALTER COLUMN id SET DEFAULT nextval('appcfg.saved_filters_id_seq'::regclass);
 
 
 --
--- Name: ui_entities id; Type: DEFAULT; Schema: appcfg; Owner: -
+-- Name: ui_entities id; Type: DEFAULT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_entities ALTER COLUMN id SET DEFAULT nextval('appcfg.ui_entities_id_seq'::regclass);
 
 
 --
--- Name: ui_fields id; Type: DEFAULT; Schema: appcfg; Owner: -
+-- Name: ui_fields id; Type: DEFAULT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_fields ALTER COLUMN id SET DEFAULT nextval('appcfg.ui_fields_id_seq'::regclass);
 
 
 --
--- Name: permissions id; Type: DEFAULT; Schema: auth; Owner: -
+-- Name: permissions id; Type: DEFAULT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.permissions ALTER COLUMN id SET DEFAULT nextval('auth.permissions_id_seq'::regclass);
 
 
 --
--- Name: refresh_tokens id; Type: DEFAULT; Schema: auth; Owner: -
+-- Name: refresh_tokens id; Type: DEFAULT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.refresh_tokens ALTER COLUMN id SET DEFAULT nextval('auth.refresh_tokens_id_seq'::regclass);
 
 
 --
--- Name: roles id; Type: DEFAULT; Schema: auth; Owner: -
+-- Name: roles id; Type: DEFAULT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.roles ALTER COLUMN id SET DEFAULT nextval('auth.roles_id_seq'::regclass);
 
 
 --
--- Name: users id; Type: DEFAULT; Schema: auth; Owner: -
+-- Name: users id; Type: DEFAULT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.users ALTER COLUMN id SET DEFAULT nextval('auth.users_id_seq'::regclass);
 
 
 --
--- Name: documents id; Type: DEFAULT; Schema: billing; Owner: -
+-- Name: documents id; Type: DEFAULT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents ALTER COLUMN id SET DEFAULT nextval('billing.documents_id_seq'::regclass);
 
 
 --
--- Name: branches id; Type: DEFAULT; Schema: core; Owner: -
+-- Name: branches id; Type: DEFAULT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.branches ALTER COLUMN id SET DEFAULT nextval('core.branches_id_seq'::regclass);
 
 
 --
--- Name: companies id; Type: DEFAULT; Schema: core; Owner: -
+-- Name: companies id; Type: DEFAULT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.companies ALTER COLUMN id SET DEFAULT nextval('core.companies_id_seq'::regclass);
 
 
 --
--- Name: currencies id; Type: DEFAULT; Schema: core; Owner: -
+-- Name: company_igv_rates id; Type: DEFAULT; Schema: core; Owner: postgres
+--
+
+ALTER TABLE ONLY core.company_igv_rates ALTER COLUMN id SET DEFAULT nextval('core.company_igv_rates_id_seq'::regclass);
+
+
+--
+-- Name: currencies id; Type: DEFAULT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.currencies ALTER COLUMN id SET DEFAULT nextval('core.currencies_id_seq'::regclass);
 
 
 --
--- Name: payment_methods id; Type: DEFAULT; Schema: core; Owner: -
+-- Name: payment_methods id; Type: DEFAULT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.payment_methods ALTER COLUMN id SET DEFAULT nextval('core.payment_methods_id_seq'::regclass);
 
 
 --
--- Name: units id; Type: DEFAULT; Schema: core; Owner: -
+-- Name: units id; Type: DEFAULT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.units ALTER COLUMN id SET DEFAULT nextval('core.units_id_seq'::regclass);
 
 
 --
--- Name: categories id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: categories id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.categories ALTER COLUMN id SET DEFAULT nextval('inventory.categories_id_seq'::regclass);
 
 
 --
--- Name: inventory_ledger id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: inventory_ledger id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger ALTER COLUMN id SET DEFAULT nextval('inventory.inventory_ledger_id_seq'::regclass);
 
 
 --
--- Name: outbox_events id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: outbox_events id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.outbox_events ALTER COLUMN id SET DEFAULT nextval('inventory.outbox_events_id_seq'::regclass);
 
 
 --
--- Name: product_brands id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_brands id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_brands ALTER COLUMN id SET DEFAULT nextval('inventory.product_brands_id_seq'::regclass);
 
 
 --
--- Name: product_lines id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_lines id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lines ALTER COLUMN id SET DEFAULT nextval('inventory.product_lines_id_seq'::regclass);
 
 
 --
--- Name: product_locations id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_locations id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_locations ALTER COLUMN id SET DEFAULT nextval('inventory.product_locations_id_seq'::regclass);
 
 
 --
--- Name: product_lots id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_lots id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots ALTER COLUMN id SET DEFAULT nextval('inventory.product_lots_id_seq'::regclass);
 
 
 --
--- Name: product_recipe_items id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_recipe_items id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipe_items ALTER COLUMN id SET DEFAULT nextval('inventory.product_recipe_items_id_seq'::regclass);
 
 
 --
--- Name: product_recipes id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_recipes id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes ALTER COLUMN id SET DEFAULT nextval('inventory.product_recipes_id_seq'::regclass);
 
 
 --
--- Name: product_uom_conversions id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions ALTER COLUMN id SET DEFAULT nextval('inventory.product_uom_conversions_id_seq'::regclass);
 
 
 --
--- Name: product_warranties id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: product_warranties id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_warranties ALTER COLUMN id SET DEFAULT nextval('inventory.product_warranties_id_seq'::regclass);
 
 
 --
--- Name: products id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: products id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products ALTER COLUMN id SET DEFAULT nextval('inventory.products_id_seq'::regclass);
 
 
 --
--- Name: report_requests id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: report_requests id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.report_requests ALTER COLUMN id SET DEFAULT nextval('inventory.report_requests_id_seq'::regclass);
 
 
 --
--- Name: stock_entries id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: stock_entries id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_entries ALTER COLUMN id SET DEFAULT nextval('inventory.stock_entries_id_seq'::regclass);
 
 
 --
--- Name: stock_entry_items id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: stock_entry_items id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_entry_items ALTER COLUMN id SET DEFAULT nextval('inventory.stock_entry_items_id_seq'::regclass);
 
 
 --
--- Name: stock_transformation_lines id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines ALTER COLUMN id SET DEFAULT nextval('inventory.stock_transformation_lines_id_seq'::regclass);
 
 
 --
--- Name: stock_transformations id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: stock_transformations id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations ALTER COLUMN id SET DEFAULT nextval('inventory.stock_transformations_id_seq'::regclass);
 
 
 --
--- Name: warehouses id; Type: DEFAULT; Schema: inventory; Owner: -
+-- Name: warehouses id; Type: DEFAULT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.warehouses ALTER COLUMN id SET DEFAULT nextval('inventory.warehouses_id_seq'::regclass);
 
 
 --
--- Name: cash_movements id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: detraccion_service_codes id; Type: DEFAULT; Schema: master; Owner: postgres
+--
+
+ALTER TABLE ONLY master.detraccion_service_codes ALTER COLUMN id SET DEFAULT nextval('master.detraccion_service_codes_id_seq'::regclass);
+
+
+--
+-- Name: failed_jobs id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.failed_jobs ALTER COLUMN id SET DEFAULT nextval('public.failed_jobs_id_seq'::regclass);
+
+
+--
+-- Name: migrations id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.migrations ALTER COLUMN id SET DEFAULT nextval('public.migrations_id_seq'::regclass);
+
+
+--
+-- Name: users id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- Name: cash_movements id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_movements ALTER COLUMN id SET DEFAULT nextval('sales.cash_movements_id_seq'::regclass);
 
 
 --
--- Name: cash_registers id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: cash_registers id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_registers ALTER COLUMN id SET DEFAULT nextval('sales.cash_registers_id_seq'::regclass);
 
 
 --
--- Name: cash_sessions id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: cash_sessions id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions ALTER COLUMN id SET DEFAULT nextval('sales.cash_sessions_id_seq'::regclass);
 
 
 --
--- Name: commercial_document_item_lots id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_item_lots ALTER COLUMN id SET DEFAULT nextval('sales.commercial_document_item_lots_id_seq'::regclass);
 
 
 --
--- Name: commercial_document_items id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: commercial_document_items id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items ALTER COLUMN id SET DEFAULT nextval('sales.commercial_document_items_id_seq'::regclass);
 
 
 --
--- Name: commercial_document_payments id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: commercial_document_payments id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_payments ALTER COLUMN id SET DEFAULT nextval('sales.commercial_document_payments_id_seq'::regclass);
 
 
 --
--- Name: commercial_documents id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: commercial_documents id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents ALTER COLUMN id SET DEFAULT nextval('sales.commercial_documents_id_seq'::regclass);
 
 
 --
--- Name: customer_price_profiles id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: customer_price_profiles id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles ALTER COLUMN id SET DEFAULT nextval('sales.customer_price_profiles_id_seq'::regclass);
 
 
 --
--- Name: customers id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: customer_types id; Type: DEFAULT; Schema: sales; Owner: postgres
+--
+
+ALTER TABLE ONLY sales.customer_types ALTER COLUMN id SET DEFAULT nextval('sales.customer_types_id_seq'::regclass);
+
+
+--
+-- Name: customers id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customers ALTER COLUMN id SET DEFAULT nextval('sales.customers_id_seq'::regclass);
 
 
 --
--- Name: document_sequences id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: document_sequences id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences ALTER COLUMN id SET DEFAULT nextval('sales.document_sequences_id_seq'::regclass);
 
 
 --
--- Name: order_sequences id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: order_sequences id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.order_sequences ALTER COLUMN id SET DEFAULT nextval('sales.order_sequences_id_seq'::regclass);
 
 
 --
--- Name: price_tiers id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: price_tiers id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.price_tiers ALTER COLUMN id SET DEFAULT nextval('sales.price_tiers_id_seq'::regclass);
 
 
 --
--- Name: product_price_tier_values id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: product_price_tier_values id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_price_tier_values ALTER COLUMN id SET DEFAULT nextval('sales.product_price_tier_values_id_seq'::regclass);
 
 
 --
--- Name: product_tier_prices id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: product_tier_prices id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices ALTER COLUMN id SET DEFAULT nextval('sales.product_tier_prices_id_seq'::regclass);
 
 
 --
--- Name: sales_order_item_lots id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: sales_order_item_lots id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_item_lots ALTER COLUMN id SET DEFAULT nextval('sales.sales_order_item_lots_id_seq'::regclass);
 
 
 --
--- Name: sales_order_items id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: sales_order_items id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items ALTER COLUMN id SET DEFAULT nextval('sales.sales_order_items_id_seq'::regclass);
 
 
 --
--- Name: sales_order_payments id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: sales_order_payments id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_payments ALTER COLUMN id SET DEFAULT nextval('sales.sales_order_payments_id_seq'::regclass);
 
 
 --
--- Name: sales_orders id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: sales_orders id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders ALTER COLUMN id SET DEFAULT nextval('sales.sales_orders_id_seq'::regclass);
 
 
 --
--- Name: series_numbers id; Type: DEFAULT; Schema: sales; Owner: -
+-- Name: series_numbers id; Type: DEFAULT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers ALTER COLUMN id SET DEFAULT nextval('sales.series_numbers_id_seq'::regclass);
 
 
 --
--- Data for Name: branch_feature_toggles; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: branch_feature_toggles; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.branch_feature_toggles (company_id, branch_id, feature_code, is_enabled, config, updated_by, updated_at) FROM stdin;
+1	1	SALES_TAX_BRIDGE	t	{"codigolocal": null}	1	2026-04-04 10:38:29-05
 \.
 
 
 --
--- Data for Name: branch_modules; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: branch_modules; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.branch_modules (company_id, branch_id, module_id, is_enabled, config, updated_by, updated_at) FROM stdin;
@@ -2960,19 +3530,32 @@ COPY appcfg.branch_modules (company_id, branch_id, module_id, is_enabled, config
 
 
 --
--- Data for Name: company_feature_toggles; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: company_feature_toggles; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.company_feature_toggles (company_id, feature_code, is_enabled, config, updated_by, updated_at) FROM stdin;
-1	PRODUCT_MULTI_UOM	f	\N	1	2026-03-21 13:45:32-05
-1	PRODUCT_UOM_CONVERSIONS	f	\N	1	2026-03-21 13:45:32-05
-1	PRODUCT_WHOLESALE_PRICING	f	\N	1	2026-03-21 13:45:32-05
-1	SALES_SELLER_TO_CASHIER	t	\N	1	2026-03-21 13:45:32-05
+1	PRODUCT_MULTI_UOM	f	\N	1	2026-04-04 10:38:28-05
+1	PRODUCT_UOM_CONVERSIONS	t	\N	1	2026-04-04 10:38:28-05
+1	PRODUCT_WHOLESALE_PRICING	t	\N	1	2026-04-04 10:38:28-05
+1	INVENTORY_PRODUCTS_BY_PROFILE	t	\N	1	2026-04-04 10:38:28-05
+1	INVENTORY_PRODUCT_MASTERS_BY_PROFILE	t	\N	1	2026-04-04 10:38:28-05
+1	SALES_CUSTOMER_PRICE_PROFILE	t	\N	1	2026-04-04 10:38:28-05
+1	SALES_SELLER_TO_CASHIER	f	\N	1	2026-04-04 10:38:28-05
+1	SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL	f	\N	1	2026-04-04 10:38:28-05
+1	SALES_ANTICIPO_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	SALES_TAX_BRIDGE	t	{"token": null, "beta_url": "https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA", "sol_pass": null, "sol_user": null, "envio_pse": null, "auth_scheme": "none", "bridge_mode": "BETA", "production_url": null, "timeout_seconds": 15, "auto_send_on_issue": true}	1	2026-04-04 10:38:28-05
+1	SALES_DETRACCION_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	SALES_RETENCION_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	SALES_PERCEPCION_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	PURCHASES_DETRACCION_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	PURCHASES_RETENCION_COMPRADOR_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	PURCHASES_RETENCION_PROVEEDOR_ENABLED	f	\N	1	2026-04-04 10:38:28-05
+1	PURCHASES_PERCEPCION_ENABLED	f	\N	1	2026-04-04 10:38:28-05
 \.
 
 
 --
--- Data for Name: company_modules; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: company_modules; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.company_modules (company_id, module_id, is_enabled, is_mandatory, config, updated_by, updated_at) FROM stdin;
@@ -2980,7 +3563,7 @@ COPY appcfg.company_modules (company_id, module_id, is_enabled, is_mandatory, co
 
 
 --
--- Data for Name: company_role_profiles; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: company_role_profiles; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.company_role_profiles (company_id, role_id, functional_profile, updated_by, updated_at) FROM stdin;
@@ -2989,7 +3572,7 @@ COPY appcfg.company_role_profiles (company_id, role_id, functional_profile, upda
 
 
 --
--- Data for Name: company_ui_field_settings; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: company_ui_field_settings; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.company_ui_field_settings (company_id, field_id, is_visible, is_required, is_editable, show_in_list, show_in_form, show_in_filters, updated_by, updated_at) FROM stdin;
@@ -2997,7 +3580,7 @@ COPY appcfg.company_ui_field_settings (company_id, field_id, is_visible, is_requ
 
 
 --
--- Data for Name: company_units; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: company_units; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.company_units (company_id, unit_id, is_enabled, updated_by, updated_at) FROM stdin;
@@ -3068,7 +3651,7 @@ COPY appcfg.company_units (company_id, unit_id, is_enabled, updated_by, updated_
 
 
 --
--- Data for Name: modules; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: modules; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.modules (id, code, name, description, is_core, status, created_at, updated_at) FROM stdin;
@@ -3079,7 +3662,7 @@ COPY appcfg.modules (id, code, name, description, is_core, status, created_at, u
 
 
 --
--- Data for Name: saved_filters; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: saved_filters; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.saved_filters (id, company_id, user_id, entity_id, name, is_public, filter_payload, sort_payload, status, created_at, updated_at) FROM stdin;
@@ -3087,7 +3670,7 @@ COPY appcfg.saved_filters (id, company_id, user_id, entity_id, name, is_public, 
 
 
 --
--- Data for Name: ui_entities; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: ui_entities; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.ui_entities (id, module_id, code, name, route_path, status) FROM stdin;
@@ -3095,7 +3678,7 @@ COPY appcfg.ui_entities (id, module_id, code, name, route_path, status) FROM std
 
 
 --
--- Data for Name: ui_fields; Type: TABLE DATA; Schema: appcfg; Owner: -
+-- Data for Name: ui_fields; Type: TABLE DATA; Schema: appcfg; Owner: postgres
 --
 
 COPY appcfg.ui_fields (id, entity_id, code, label, data_type, default_visible, default_editable, default_filterable, display_order, config, status) FROM stdin;
@@ -3103,7 +3686,7 @@ COPY appcfg.ui_fields (id, entity_id, code, label, data_type, default_visible, d
 
 
 --
--- Data for Name: permissions; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: permissions; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.permissions (id, code, description) FROM stdin;
@@ -3111,7 +3694,7 @@ COPY auth.permissions (id, code, description) FROM stdin;
 
 
 --
--- Data for Name: refresh_tokens; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: refresh_tokens; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.refresh_tokens (id, user_id, token_hash, expires_at, revoked_at, created_at) FROM stdin;
@@ -3998,12 +4581,14 @@ COPY auth.refresh_tokens (id, user_id, token_hash, expires_at, revoked_at, creat
 881	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.a58c5022e0957d77d49cd367fac8db6b41392d6ac36dd0fd7a91ba5a500b5ee7	2026-04-27 13:51:16-05	2026-03-28 13:51:17-05	2026-03-28 13:51:16-05
 882	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.6f2769eadad4a1e0c7259aa3d8987030d4e1c58e1350b83026ca242066adaccd	2026-04-27 13:51:17-05	2026-03-28 13:51:18-05	2026-03-28 13:51:17-05
 883	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.2094d083250509e88a2b3f33b7a7d07fbd95200b18d2bcd2e8285d44fd131540	2026-04-27 13:51:18-05	2026-03-28 13:51:29-05	2026-03-28 13:51:18-05
-884	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.1632918e5a1acb9d396d54d9ba09d71e596b1efe47f08d3cd795dd57ee31f46a	2026-04-27 13:51:29-05	\N	2026-03-28 13:51:29-05
+884	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.1632918e5a1acb9d396d54d9ba09d71e596b1efe47f08d3cd795dd57ee31f46a	2026-04-27 13:51:29-05	2026-04-04 10:29:35-05	2026-03-28 13:51:29-05
+885	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.523a47d8bc8e43bbbd45d5baa0dd9edada644880135e50a5ea901f3fd96c769e	2026-05-04 10:29:35-05	2026-04-04 11:01:14-05	2026-04-04 10:29:35-05
+886	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.8b71576af2761d2f1af2e2e37dd1584a9b53adcaf678937aefc1ff1b13eadfbf	2026-05-04 11:01:14-05	\N	2026-04-04 11:01:14-05
 \.
 
 
 --
--- Data for Name: role_module_access; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: role_module_access; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.role_module_access (role_id, module_id, can_view, can_create, can_update, can_delete, can_export, can_approve, field_rules, data_scope_rules, updated_at) FROM stdin;
@@ -4020,7 +4605,7 @@ COPY auth.role_module_access (role_id, module_id, can_view, can_create, can_upda
 
 
 --
--- Data for Name: role_permissions; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: role_permissions; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.role_permissions (role_id, permission_id) FROM stdin;
@@ -4028,7 +4613,7 @@ COPY auth.role_permissions (role_id, permission_id) FROM stdin;
 
 
 --
--- Data for Name: role_ui_field_access; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: role_ui_field_access; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.role_ui_field_access (role_id, field_id, can_view, can_edit, can_filter) FROM stdin;
@@ -4036,7 +4621,7 @@ COPY auth.role_ui_field_access (role_id, field_id, can_view, can_edit, can_filte
 
 
 --
--- Data for Name: roles; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: roles; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.roles (id, company_id, code, name, status) FROM stdin;
@@ -4047,7 +4632,7 @@ COPY auth.roles (id, company_id, code, name, status) FROM stdin;
 
 
 --
--- Data for Name: user_module_overrides; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: user_module_overrides; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.user_module_overrides (user_id, module_id, can_view, can_create, can_update, can_delete, can_export, can_approve, field_rules, data_scope_rules, updated_at) FROM stdin;
@@ -4055,7 +4640,7 @@ COPY auth.user_module_overrides (user_id, module_id, can_view, can_create, can_u
 
 
 --
--- Data for Name: user_roles; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: user_roles; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.user_roles (user_id, role_id) FROM stdin;
@@ -4066,7 +4651,7 @@ COPY auth.user_roles (user_id, role_id) FROM stdin;
 
 
 --
--- Data for Name: user_ui_field_access; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: user_ui_field_access; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.user_ui_field_access (user_id, field_id, can_view, can_edit, can_filter) FROM stdin;
@@ -4074,18 +4659,18 @@ COPY auth.user_ui_field_access (user_id, field_id, can_view, can_edit, can_filte
 
 
 --
--- Data for Name: users; Type: TABLE DATA; Schema: auth; Owner: -
+-- Data for Name: users; Type: TABLE DATA; Schema: auth; Owner: postgres
 --
 
 COPY auth.users (id, company_id, branch_id, username, password_hash, first_name, last_name, email, phone, status, last_login_at, created_at, updated_at, deleted_at) FROM stdin;
 3	1	1	caja_demo	$2y$10$DvUMKOMvfT32M3gwGLGD2.4ddiskMfu.nfQT2kwKeiyQZOCDdMP1.	Caja	Demo	caja@demo.local	\N	1	2026-03-27 02:26:51-05	2026-03-20 11:11:40.73812-05	2026-03-27 02:26:51-05	\N
 2	1	1	vendedor_demo	$2y$10$DvUMKOMvfT32M3gwGLGD2.4ddiskMfu.nfQT2kwKeiyQZOCDdMP1.	Vendedor	Demo	vendedor@demo.local	\N	1	2026-03-27 05:41:47-05	2026-03-20 11:11:40.73812-05	2026-03-27 05:41:47-05	\N
-1	1	1	admin	$2y$10$nF/XtkduomCfsJZwZQke9uh6eU.KEpGgG4FxFsLkJeGrX8MxnjdMe	Admin	Sistema	admin@demo.local	\N	1	2026-03-28 13:51:29-05	2026-03-10 21:21:33.764975-05	2026-03-28 13:51:29-05	\N
+1	1	1	admin	$2y$10$nF/XtkduomCfsJZwZQke9uh6eU.KEpGgG4FxFsLkJeGrX8MxnjdMe	Admin	Sistema	admin@demo.local	\N	1	2026-04-04 10:29:35-05	2026-03-10 21:21:33.764975-05	2026-04-04 10:29:35-05	\N
 \.
 
 
 --
--- Data for Name: documents; Type: TABLE DATA; Schema: billing; Owner: -
+-- Data for Name: documents; Type: TABLE DATA; Schema: billing; Owner: postgres
 --
 
 COPY billing.documents (id, company_id, source_order_id, doc_type, series, number, issue_at, customer_id, currency_id, subtotal, tax_total, total, status, created_at) FROM stdin;
@@ -4093,7 +4678,7 @@ COPY billing.documents (id, company_id, source_order_id, doc_type, series, numbe
 
 
 --
--- Data for Name: branches; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: branches; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.branches (id, company_id, code, name, address, is_main, status, created_at, updated_at) FROM stdin;
@@ -4102,24 +4687,34 @@ COPY core.branches (id, company_id, code, name, address, is_main, status, create
 
 
 --
--- Data for Name: companies; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: companies; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.companies (id, tax_id, legal_name, trade_name, email, phone, address, status, created_at, updated_at) FROM stdin;
-1	20111111111	EMPRESA DEMO SAC	DEMO	\N	\N	\N	1	2026-03-10 21:21:33.764975-05	2026-03-10 21:21:33.764975-05
+1	10455923951	MSEP PERU SAC	DEMO	\N	\N	\N	1	2026-03-10 21:21:33.764975-05	2026-03-10 21:21:33.764975-05
 \.
 
 
 --
--- Data for Name: company_settings; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: company_igv_rates; Type: TABLE DATA; Schema: core; Owner: postgres
+--
+
+COPY core.company_igv_rates (id, company_id, name, rate_percent, is_active, effective_from, created_at, updated_at) FROM stdin;
+1	1	IGV 18.00%	18.0000	t	2026-04-04	2026-04-04 10:36:55.376928-05	2026-04-04 10:36:55.376928-05
+\.
+
+
+--
+-- Data for Name: company_settings; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.company_settings (company_id, address, phone, email, website, logo_path, cert_path, cert_password_enc, bank_accounts, extra_data, updated_at) FROM stdin;
+1	AV. PRINCIPAL 123	+51 1 2345678	info@empresademo.com	\N	\N	certs/company_1.pfx	eyJpdiI6InFGYVRpNXdpWUFTUFQvVjJKTnJrTGc9PSIsInZhbHVlIjoiUWk2eGUzMnc1aFJORTdCazk2dVA3dz09IiwibWFjIjoiNDhhZDQ5MzhiZTA4YWRmNDBhOTE0NmMwZDQ1MTQ5ZDViZjFiYzkyZmJmMjU3MDg4ZjVjNGQ0ZDllN2RiODNmOCIsInRhZyI6IiJ9	[]	{"ubigeo": "150131", "distrito": "SAN ISIDRO", "provincia": "LIMA", "codigolocal": "0000", "departamento": "LIMA", "urbanizacion": "ORRANTIA", "telefono_fijo": "+51 1 2345678", "sunat_secondary_pass": "Moddatos", "sunat_secondary_user": "MODDATOS"}	2026-04-04 11:04:05-05
 \.
 
 
 --
--- Data for Name: currencies; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: currencies; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.currencies (id, code, name, symbol, is_default, status) FROM stdin;
@@ -4128,7 +4723,7 @@ COPY core.currencies (id, code, name, symbol, is_default, status) FROM stdin;
 
 
 --
--- Data for Name: payment_methods; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: payment_methods; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.payment_methods (id, code, name, status) FROM stdin;
@@ -4138,7 +4733,7 @@ COPY core.payment_methods (id, code, name, status) FROM stdin;
 
 
 --
--- Data for Name: tax_categories; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: tax_categories; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.tax_categories (id, code, name, tax_tribute_code, rate_percent, status, company_id, created_at, updated_at) FROM stdin;
@@ -4165,7 +4760,7 @@ COPY core.tax_categories (id, code, name, tax_tribute_code, rate_percent, status
 
 
 --
--- Data for Name: units; Type: TABLE DATA; Schema: core; Owner: -
+-- Data for Name: units; Type: TABLE DATA; Schema: core; Owner: postgres
 --
 
 COPY core.units (id, code, sunat_uom_code, name, status) FROM stdin;
@@ -4236,7 +4831,7 @@ COPY core.units (id, code, sunat_uom_code, name, status) FROM stdin;
 
 
 --
--- Data for Name: categories; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: categories; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.categories (id, company_id, name, status) FROM stdin;
@@ -4245,7 +4840,7 @@ COPY inventory.categories (id, company_id, name, status) FROM stdin;
 
 
 --
--- Data for Name: inventory_ledger; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: inventory_ledger; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.inventory_ledger (id, company_id, warehouse_id, product_id, lot_id, movement_type, quantity, unit_cost, ref_type, ref_id, notes, moved_at, created_by) FROM stdin;
@@ -4268,20 +4863,23 @@ COPY inventory.inventory_ledger (id, company_id, warehouse_id, product_id, lot_i
 20	1	1	3	1	IN	50.000	20.0000	STOCK_ENTRY	5	\N	2026-03-26 04:29:18-05	1
 21	1	1	3	1	OUT	10.000	0.0000	COMMERCIAL_DOCUMENT	35	Doc RECEIPT B001-13	2026-03-25 00:00:00-05	1
 22	1	1	3	1	OUT	10.000	0.0000	COMMERCIAL_DOCUMENT	37	Doc INVOICE F001-10	2026-03-25 23:52:03.694-05	3
+23	1	1	3	1	OUT	1.000	0.0000	COMMERCIAL_DOCUMENT	38	Doc Boleta B001-14	2026-04-04 10:39:09-05	1
+24	1	1	1	\N	OUT	10.000	0.0000	COMMERCIAL_DOCUMENT	39	Doc Boleta B001-15	2026-04-04 10:59:16-05	1
+25	1	1	3	1	OUT	5.000	0.0000	COMMERCIAL_DOCUMENT	40	Doc Factura F001-11	2026-04-04 11:07:31-05	1
 \.
 
 
 --
--- Data for Name: inventory_settings; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: inventory_settings; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.inventory_settings (company_id, inventory_mode, lot_outflow_strategy, allow_negative_stock, enforce_lot_for_tracked, updated_at, complexity_mode, enable_inventory_pro, enable_lot_tracking, enable_expiry_tracking, enable_advanced_reporting, enable_graphical_dashboard, enable_location_control) FROM stdin;
-1	KARDEX_SIMPLE	MANUAL	t	f	2026-03-27 16:57:12-05	BASIC	f	f	f	f	f	f
+1	KARDEX_SIMPLE	MANUAL	t	f	2026-04-04 10:38:50-05	ADVANCED	t	t	t	t	t	t
 \.
 
 
 --
--- Data for Name: lot_expiry_projection; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: lot_expiry_projection; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.lot_expiry_projection (company_id, warehouse_id, product_id, lot_id, branch_id, lot_code, manufacture_at, expires_at, stock, unit_cost, stock_value, expiry_bucket, days_to_expire, updated_at) FROM stdin;
@@ -4289,7 +4887,7 @@ COPY inventory.lot_expiry_projection (company_id, warehouse_id, product_id, lot_
 
 
 --
--- Data for Name: outbox_events; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: outbox_events; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.outbox_events (id, company_id, aggregate_type, aggregate_id, event_type, payload_json, status, attempts, available_at, processed_at, last_error, created_at, updated_at) FROM stdin;
@@ -4297,7 +4895,7 @@ COPY inventory.outbox_events (id, company_id, aggregate_type, aggregate_id, even
 
 
 --
--- Data for Name: product_brands; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_brands; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_brands (id, company_id, name, status, created_by, created_at, updated_at) FROM stdin;
@@ -4307,7 +4905,7 @@ COPY inventory.product_brands (id, company_id, name, status, created_by, created
 
 
 --
--- Data for Name: product_lines; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_lines; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_lines (id, company_id, name, status, created_by, created_at, updated_at) FROM stdin;
@@ -4316,7 +4914,7 @@ COPY inventory.product_lines (id, company_id, name, status, created_by, created_
 
 
 --
--- Data for Name: product_locations; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_locations; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_locations (id, company_id, name, status, created_by, created_at, updated_at) FROM stdin;
@@ -4325,7 +4923,7 @@ COPY inventory.product_locations (id, company_id, name, status, created_by, crea
 
 
 --
--- Data for Name: product_lots; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_lots; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_lots (id, company_id, warehouse_id, product_id, lot_code, manufacture_at, expires_at, received_at, unit_cost, supplier_reference, status, created_by, created_at) FROM stdin;
@@ -4334,7 +4932,7 @@ COPY inventory.product_lots (id, company_id, warehouse_id, product_id, lot_code,
 
 
 --
--- Data for Name: product_recipe_items; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_recipe_items; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_recipe_items (id, recipe_id, component_product_id, qty_required, waste_percent, notes) FROM stdin;
@@ -4342,7 +4940,7 @@ COPY inventory.product_recipe_items (id, recipe_id, component_product_id, qty_re
 
 
 --
--- Data for Name: product_recipes; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_recipes; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_recipes (id, company_id, output_product_id, code, name, output_qty, status, created_by, created_at, updated_at) FROM stdin;
@@ -4350,7 +4948,7 @@ COPY inventory.product_recipes (id, company_id, output_product_id, code, name, o
 
 
 --
--- Data for Name: product_sale_units; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_sale_units; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_sale_units (company_id, product_id, unit_id, is_base, status, updated_by, updated_at) FROM stdin;
@@ -4358,7 +4956,7 @@ COPY inventory.product_sale_units (company_id, product_id, unit_id, is_base, sta
 
 
 --
--- Data for Name: product_uom_conversions; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_uom_conversions; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_uom_conversions (id, company_id, product_id, from_unit_id, to_unit_id, conversion_factor, status, created_at) FROM stdin;
@@ -4366,7 +4964,7 @@ COPY inventory.product_uom_conversions (id, company_id, product_id, from_unit_id
 
 
 --
--- Data for Name: product_warranties; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: product_warranties; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.product_warranties (id, company_id, name, status, created_by, created_at, updated_at) FROM stdin;
@@ -4375,7 +4973,7 @@ COPY inventory.product_warranties (id, company_id, name, status, created_by, cre
 
 
 --
--- Data for Name: products; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: products; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.products (id, company_id, sku, barcode, category_id, unit_id, name, description, sale_price, cost_price, is_stockable, lot_tracking, has_expiration, multi_uom, status, created_at, updated_at, deleted_at, line_id, brand_id, location_id, warranty_id, product_nature, sunat_code, image_url, seller_commission_percent) FROM stdin;
@@ -4386,7 +4984,7 @@ COPY inventory.products (id, company_id, sku, barcode, category_id, unit_id, nam
 
 
 --
--- Data for Name: report_requests; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: report_requests; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.report_requests (id, company_id, branch_id, requested_by, report_type, filters_json, status, result_json, error_message, requested_at, started_at, finished_at, created_at, updated_at) FROM stdin;
@@ -4395,7 +4993,7 @@ COPY inventory.report_requests (id, company_id, branch_id, requested_by, report_
 
 
 --
--- Data for Name: stock_daily_snapshot; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: stock_daily_snapshot; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.stock_daily_snapshot (snapshot_date, company_id, branch_id, warehouse_id, product_id, lot_id, qty_in, qty_out, qty_net, value_in, value_out, value_net, movement_count, first_moved_at, last_moved_at, updated_at) FROM stdin;
@@ -4403,7 +5001,7 @@ COPY inventory.stock_daily_snapshot (snapshot_date, company_id, branch_id, wareh
 
 
 --
--- Data for Name: stock_entries; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: stock_entries; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.stock_entries (id, company_id, branch_id, warehouse_id, entry_type, reference_no, supplier_reference, issue_at, status, notes, created_by, updated_by, created_at, updated_at, payment_method_id) FROM stdin;
@@ -4413,7 +5011,7 @@ COPY inventory.stock_entries (id, company_id, branch_id, warehouse_id, entry_typ
 
 
 --
--- Data for Name: stock_entry_items; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: stock_entry_items; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.stock_entry_items (id, entry_id, product_id, lot_id, qty, unit_cost, notes, created_at, tax_category_id, tax_rate) FROM stdin;
@@ -4423,7 +5021,7 @@ COPY inventory.stock_entry_items (id, entry_id, product_id, lot_id, qty, unit_co
 
 
 --
--- Data for Name: stock_transformation_lines; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: stock_transformation_lines; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.stock_transformation_lines (id, transformation_id, line_type, product_id, unit_id, lot_id, qty, qty_base, conversion_factor, unit_cost, notes) FROM stdin;
@@ -4431,7 +5029,7 @@ COPY inventory.stock_transformation_lines (id, transformation_id, line_type, pro
 
 
 --
--- Data for Name: stock_transformations; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: stock_transformations; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.stock_transformations (id, company_id, branch_id, warehouse_id, recipe_id, transformation_code, executed_at, status, notes, created_by, created_at) FROM stdin;
@@ -4439,7 +5037,7 @@ COPY inventory.stock_transformations (id, company_id, branch_id, warehouse_id, r
 
 
 --
--- Data for Name: transformation_settings; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: transformation_settings; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.transformation_settings (company_id, is_enabled, auto_consume_components, allow_negative_components, updated_at) FROM stdin;
@@ -4447,7 +5045,7 @@ COPY inventory.transformation_settings (company_id, is_enabled, auto_consume_com
 
 
 --
--- Data for Name: warehouses; Type: TABLE DATA; Schema: inventory; Owner: -
+-- Data for Name: warehouses; Type: TABLE DATA; Schema: inventory; Owner: postgres
 --
 
 COPY inventory.warehouses (id, company_id, branch_id, code, name, address, status) FROM stdin;
@@ -4456,7 +5054,7 @@ COPY inventory.warehouses (id, company_id, branch_id, code, name, address, statu
 
 
 --
--- Data for Name: additional_legends; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: additional_legends; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.additional_legends (id, code, description, status) FROM stdin;
@@ -4503,7 +5101,7 @@ COPY master.additional_legends (id, code, description, status) FROM stdin;
 
 
 --
--- Data for Name: credit_note_reasons; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: credit_note_reasons; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.credit_note_reasons (id, code, description, is_deleted) FROM stdin;
@@ -4521,7 +5119,7 @@ COPY master.credit_note_reasons (id, code, description, is_deleted) FROM stdin;
 
 
 --
--- Data for Name: debit_note_reasons; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: debit_note_reasons; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.debit_note_reasons (id, code, description, is_deleted) FROM stdin;
@@ -4532,7 +5130,46 @@ COPY master.debit_note_reasons (id, code, description, is_deleted) FROM stdin;
 
 
 --
--- Data for Name: employee_roles; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: detraccion_service_codes; Type: TABLE DATA; Schema: master; Owner: postgres
+--
+
+COPY master.detraccion_service_codes (id, code, name, rate_percent, is_active) FROM stdin;
+1	001	Azúcar y melaza de caña	10.00	1
+2	003	Alcohol etílico	10.00	1
+3	004	Recursos hidrobiológicos	4.00	1
+4	005	Maíz amarillo duro	4.00	1
+5	006	Arena y piedra	10.00	1
+6	007	Residuos, subproductos, desechos, recortes y desperdicios	15.00	1
+7	009	Carnes y despojos comestibles	4.00	1
+8	010	Harina, polvo y pellets de pescado, crustáceos y demás invertebrados acuáticos	4.00	1
+9	011	Madera	4.00	1
+10	016	Aceite de pescado	10.00	1
+11	019	Minerales metálicos no auríferos	10.00	1
+12	020	Bienes inmuebles gravados con IGV	4.00	1
+13	021	Oro y demás minerales metálicos auríferos y plata	10.00	1
+14	022	Minerales no metálicos	10.00	1
+15	023	Leche	4.00	1
+16	024	Tabaco en rama	10.00	1
+17	026	Intermediación laboral y tercerización	12.00	1
+18	030	Contratos de construcción	4.00	1
+19	031	Fabricación de bienes por encargo	10.00	1
+20	034	Arrendamiento de bienes muebles	10.00	1
+21	035	Mantenimiento y reparación de bienes muebles	12.00	1
+22	036	Movimiento de carga	10.00	1
+23	037	Otros servicios empresariales	12.00	1
+24	039	Actividades de servicios relacionadas con la minería	10.00	1
+25	040	Comisión mercantil	12.00	1
+26	041	Servicio de fabricación de bienes a partir de insumos del cliente	10.00	1
+27	042	Otros servicios gravados con el IGV	12.00	1
+28	043	Transporte ferroviario de pasajeros	10.00	1
+29	044	Actividades de agencias de aduana	10.00	1
+30	045	Actividades de agencias de viaje	12.00	1
+31	047	Demás servicios gravados con el IGV	12.00	1
+\.
+
+
+--
+-- Data for Name: employee_roles; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.employee_roles (id, name, is_lawyer, status) FROM stdin;
@@ -4543,7 +5180,7 @@ COPY master.employee_roles (id, name, is_lawyer, status) FROM stdin;
 
 
 --
--- Data for Name: geo_ubigeo; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: geo_ubigeo; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.geo_ubigeo (id, code, full_name, population_text, surface_text, latitude, longitude, status) FROM stdin;
@@ -6425,7 +7062,7 @@ COPY master.geo_ubigeo (id, code, full_name, population_text, surface_text, lati
 
 
 --
--- Data for Name: item_types; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: item_types; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.item_types (id, name, unit_code) FROM stdin;
@@ -6435,7 +7072,7 @@ COPY master.item_types (id, name, unit_code) FROM stdin;
 
 
 --
--- Data for Name: payment_types; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: payment_types; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.payment_types (id, name, comment, is_active, status) FROM stdin;
@@ -6454,7 +7091,7 @@ COPY master.payment_types (id, name, comment, is_active, status) FROM stdin;
 
 
 --
--- Data for Name: shipment_transfer_reasons; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: shipment_transfer_reasons; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.shipment_transfer_reasons (id, name, code, status) FROM stdin;
@@ -6471,7 +7108,7 @@ COPY master.shipment_transfer_reasons (id, name, code, status) FROM stdin;
 
 
 --
--- Data for Name: shipment_transport_modes; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: shipment_transport_modes; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.shipment_transport_modes (id, name, code, status) FROM stdin;
@@ -6481,7 +7118,7 @@ COPY master.shipment_transport_modes (id, name, code, status) FROM stdin;
 
 
 --
--- Data for Name: sunat_uom; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: sunat_uom; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.sunat_uom (id, code, name, is_active) FROM stdin;
@@ -6552,7 +7189,7 @@ COPY master.sunat_uom (id, code, name, is_active) FROM stdin;
 
 
 --
--- Data for Name: tax_codes; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: tax_codes; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.tax_codes (code, description, international_code, short_name) FROM stdin;
@@ -6560,7 +7197,7 @@ COPY master.tax_codes (code, description, international_code, short_name) FROM s
 
 
 --
--- Data for Name: vat_categories; Type: TABLE DATA; Schema: master; Owner: -
+-- Data for Name: vat_categories; Type: TABLE DATA; Schema: master; Owner: postgres
 --
 
 COPY master.vat_categories (id, code, name, is_deleted, tax_code) FROM stdin;
@@ -6587,7 +7224,49 @@ COPY master.vat_categories (id, code, name, is_deleted, tax_code) FROM stdin;
 
 
 --
--- Data for Name: cash_movements; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: failed_jobs; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.failed_jobs (id, connection, queue, payload, exception, failed_at) FROM stdin;
+\.
+
+
+--
+-- Data for Name: migrations; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.migrations (id, migration, batch) FROM stdin;
+1	2014_10_12_000000_create_users_table	1
+2	2014_10_12_100000_create_password_resets_table	1
+3	2019_08_19_000000_create_failed_jobs_table	1
+4	2026_04_01_000001_create_detraccion_service_codes_table	1
+5	2026_04_02_000001_create_tipo_clientes_table	1
+6	2026_04_02_000002_complete_company_settings_data	1
+7	2026_04_02_000003_add_tipo_cliente_codigo_to_sales_customers	1
+8	2026_04_02_000004_create_sales_customer_types_and_link_customers	1
+9	2026_04_02_000005_cleanup_old_customer_type_columns	1
+10	2026_04_02_000006_create_company_igv_rates_table	1
+\.
+
+
+--
+-- Data for Name: password_resets; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.password_resets (email, token, created_at) FROM stdin;
+\.
+
+
+--
+-- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.users (id, name, email, email_verified_at, password, remember_token, created_at, updated_at) FROM stdin;
+\.
+
+
+--
+-- Data for Name: cash_movements; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.cash_movements (id, cash_session_id, movement_type, payment_method_id, amount, ref_type, ref_id, notes, created_by, created_at, company_id, branch_id, cash_register_id, description, user_id, movement_at) FROM stdin;
@@ -6598,11 +7277,14 @@ COPY sales.cash_movements (id, cash_session_id, movement_type, payment_method_id
 6	7	INCOME	1	11.80	COMMERCIAL_DOCUMENT	22	Cobro doc RECEIPT B001-10	1	2026-03-19 21:12:27-05	1	1	1	Cobro doc RECEIPT B001-10	1	2026-03-19 21:12:27-05
 7	7	INCOME	1	11.80	COMMERCIAL_DOCUMENT	27	Cobro doc INVOICE F001-7	2	2026-03-20 19:22:49-05	1	1	1	Cobro doc INVOICE F001-7	2	2026-03-20 19:22:49-05
 8	7	INCOME	1	11.80	COMMERCIAL_DOCUMENT	28	Cobro doc RECEIPT B001-11	1	2026-03-21 13:40:46-05	1	1	1	Cobro doc RECEIPT B001-11	1	2026-03-21 13:40:46-05
+9	8	INCOME	1	30.00	COMMERCIAL_DOCUMENT	38	Cobro doc Boleta B001-14	1	2026-04-04 10:39:09-05	1	1	1	Cobro doc Boleta B001-14	1	2026-04-04 10:39:09-05
+10	8	INCOME	1	100.00	COMMERCIAL_DOCUMENT	39	Cobro doc Boleta B001-15	1	2026-04-04 10:59:16-05	1	1	1	Cobro doc Boleta B001-15	1	2026-04-04 10:59:16-05
+11	8	INCOME	1	150.00	COMMERCIAL_DOCUMENT	40	Cobro doc Factura F001-11	1	2026-04-04 11:07:31-05	1	1	1	Cobro doc Factura F001-11	1	2026-04-04 11:07:31-05
 \.
 
 
 --
--- Data for Name: cash_registers; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: cash_registers; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.cash_registers (id, company_id, branch_id, code, name, status, created_at) FROM stdin;
@@ -6611,7 +7293,7 @@ COPY sales.cash_registers (id, company_id, branch_id, code, name, status, create
 
 
 --
--- Data for Name: cash_sessions; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: cash_sessions; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.cash_sessions (id, company_id, branch_id, cash_register_id, opened_by, closed_by, opened_at, closed_at, opening_balance, closing_balance, expected_balance, difference_amount, status, notes, user_id, created_at) FROM stdin;
@@ -6620,23 +7302,25 @@ COPY sales.cash_sessions (id, company_id, branch_id, cash_register_id, opened_by
 5	1	1	1	1	1	2026-03-19 04:02:55-05	2026-03-19 04:06:54-05	0.00	0.00	0.00	\N	CLOSED	\N	1	2026-03-19 04:02:55-05
 6	1	1	1	1	1	2026-03-19 04:24:52-05	2026-03-19 04:34:10-05	0.00	0.00	0.00	\N	CLOSED	\N	1	2026-03-19 04:24:52-05
 7	1	1	1	1	1	2026-03-19 04:35:47-05	2026-03-21 13:42:55-05	0.00	59.00	59.00	\N	CLOSED	\N	1	2026-03-19 04:35:47-05
-8	1	1	1	1	\N	2026-03-21 20:06:22-05	\N	0.00	\N	0.00	\N	OPEN	\N	1	2026-03-21 20:06:22-05
+8	1	1	1	1	\N	2026-03-21 20:06:22-05	\N	0.00	\N	280.00	\N	OPEN	\N	1	2026-03-21 20:06:22-05
 \.
 
 
 --
--- Data for Name: commercial_document_item_lots; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: commercial_document_item_lots; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.commercial_document_item_lots (id, document_item_id, lot_id, qty, created_at) FROM stdin;
 1	32	1	10.000	2026-03-26 04:46:44-05
 2	33	1	10.000	2026-03-26 04:50:34-05
 3	34	1	10.000	2026-03-26 04:52:03-05
+4	35	1	1.000	2026-04-04 10:39:09-05
+5	37	1	5.000	2026-04-04 11:07:31-05
 \.
 
 
 --
--- Data for Name: commercial_document_items; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: commercial_document_items; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.commercial_document_items (id, document_id, line_no, product_id, unit_id, price_tier_id, tax_category_id, description, qty, qty_base, conversion_factor, base_unit_price, unit_price, unit_cost, wholesale_discount_percent, price_source, discount_total, tax_total, subtotal, total, metadata) FROM stdin;
@@ -6668,11 +7352,14 @@ COPY sales.commercial_document_items (id, document_id, line_no, product_id, unit
 32	35	1	3	58	\N	1	SIN-SKU - PRODUCTO2	10.000	10.000	1.00000000	30.0000	30.0000	0.0000	0.0000	MANUAL	0.00	54.00	300.00	354.00	\N
 33	36	1	3	58	\N	\N	SIN-SKU - PRODUCTO2	10.000	10.000	1.00000000	30.0000	30.0000	0.0000	0.0000	MANUAL	0.00	0.00	300.00	300.00	\N
 34	37	1	3	58	\N	\N	SIN-SKU - PRODUCTO2	10.000	10.000	1.00000000	30.0000	30.0000	0.0000	0.0000	MANUAL	0.00	0.00	300.00	300.00	\N
+35	38	1	3	58	\N	1	SIN-SKU - PRODUCTO2	1.000	1.000	1.00000000	25.4237	30.0000	0.0000	0.0000	MANUAL	0.00	4.58	25.42	30.00	"{\\"price_includes_tax\\":true}"
+36	39	1	1	58	\N	1	SIN-SKU - PRODUCTO1	10.000	10.000	1.00000000	8.4746	10.0000	0.0000	0.0000	MANUAL	0.00	15.25	84.75	100.00	"{\\"price_includes_tax\\":true}"
+37	40	1	3	58	\N	1	SIN-SKU - PRODUCTO2	5.000	5.000	1.00000000	25.4237	30.0000	0.0000	0.0000	MANUAL	0.00	22.88	127.12	150.00	"{\\"price_includes_tax\\":true}"
 \.
 
 
 --
--- Data for Name: commercial_document_payments; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: commercial_document_payments; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.commercial_document_payments (id, document_id, payment_method_id, amount, due_at, paid_at, status, notes, created_at) FROM stdin;
@@ -6696,11 +7383,14 @@ COPY sales.commercial_document_payments (id, document_id, payment_method_id, amo
 19	28	1	11.80	\N	2026-03-21 08:40:46.67-05	PAID	\N	2026-03-21 13:40:46-05
 20	31	1	11.80	\N	2026-03-21 15:14:17.545-05	PAID	\N	2026-03-21 20:14:17-05
 21	35	1	354.00	\N	2026-03-25 23:46:44.303-05	PAID	\N	2026-03-26 04:46:44-05
+22	38	1	30.00	\N	2026-04-04 10:39:09.375-05	PAID	\N	2026-04-04 10:39:09-05
+23	39	1	100.00	\N	2026-04-04 10:59:16.432-05	PAID	\N	2026-04-04 10:59:16-05
+24	40	1	150.00	\N	2026-04-04 11:07:31.129-05	PAID	\N	2026-04-04 11:07:31-05
 \.
 
 
 --
--- Data for Name: commercial_documents; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: commercial_documents; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.commercial_documents (id, company_id, branch_id, warehouse_id, document_kind, series, number, issue_at, due_at, customer_id, currency_id, payment_method_id, exchange_rate, source_document_id, reference_document_id, reference_reason_code, tax_affectation_code, seller_user_id, subtotal, tax_total, total, paid_total, balance_due, discount_total, status, external_status, notes, metadata, created_by, updated_by, created_at, updated_at, deleted_at) FROM stdin;
@@ -6735,29 +7425,48 @@ COPY sales.commercial_documents (id, company_id, branch_id, warehouse_id, docume
 35	1	1	1	RECEIPT	B001	13	2026-03-25 00:00:00-05	2026-03-25 00:00:00-05	1	1	1	\N	\N	\N	\N	\N	1	300.00	54.00	354.00	354.00	0.00	0.00	ISSUED	\N	\N	{"cash_register_id": null, "customer_address": "DIRECCION DEMO"}	1	1	2026-03-26 04:46:44-05	2026-03-26 04:46:44-05	\N
 36	1	1	1	QUOTATION	C001	8	2026-03-25 00:00:00-05	2026-03-25 00:00:00-05	1	1	1	\N	\N	\N	\N	\N	2	300.00	0.00	300.00	0.00	300.00	0.00	DRAFT	\N	\N	{"cash_register_id": null, "customer_address": "DIRECCION DEMO"}	2	2	2026-03-26 04:50:34-05	2026-03-26 04:50:34-05	\N
 37	1	1	1	INVOICE	F001	10	2026-03-25 23:52:03.694-05	2026-03-25 00:00:00-05	1	1	1	\N	\N	\N	\N	\N	3	300.00	0.00	300.00	0.00	300.00	0.00	ISSUED	\N	\N	{"cash_register_id": 1, "customer_address": "DIRECCION DEMO", "conversion_origin": "SALES_MODULE", "source_document_id": 36, "source_document_kind": "QUOTATION", "source_document_number": "C001-8", "stock_already_discounted": false}	3	3	2026-03-26 04:52:03-05	2026-03-26 04:52:03-05	\N
+40	1	1	1	INVOICE	F001	11	2026-04-04 06:07:31-05	2026-04-03 19:00:00-05	2	1	1	\N	\N	\N	\N	\N	1	127.12	22.88	150.00	150.00	0.00	0.00	ISSUED	\N	\N	{"sunat_status": "ACCEPTED", "sunat_bridge_mode": "BETA", "sunat_last_sync_at": "2026-04-04 16:07:32", "sunat_status_label": "Aceptado", "sunat_bridge_method": "POST", "sunat_bridge_request": {"form_key": "datosJSON", "payload_json": {"Pago": {"Monto": 150, "FormaPago": "Contado"}, "letra": "Ciento cincuenta con 00/100 SOL", "adjunto": null, "cliente": {"ruc": "10455923951", "razon_social": "FERNANDEZ DE LA CRUZ", "tipo_documento": "6"}, "detalle": [{"igv": 22.88, "base": 127.12, "sunat": "", "codigo": "3", "icbper": "off", "unidad": "NIU", "cantidad": 5, "tipo_igv": "10", "descuento": 0, "gratuitas": 0, "impuestos": 22.88, "igv_icbper": 0, "descripcion": "SIN-SKU - PRODUCTO2", "valor_venta": 127.12, "valor_icbper": 0, "porcentaje_igv": 18, "valor_unitario": 25.424, "precio_unitario": 30}], "empresa": {"ruc": "10455923951", "pass": "***", "user": "MODDATOS", "correo": "info@empresademo.com", "ubigeo": "150131", "distrito": "SAN ISIDRO", "direccion": "AV. PRINCIPAL 123", "envio_pse": "", "provincia": "LIMA", "codigolocal": "", "departamento": "LIMA", "razon_social": "MSEP PERU SAC", "urbanizacion": "ORRANTIA", "telefono_fijo": "+51 1 2345678", "nombre_comercial": "DEMO"}, "cabecera": {"igv": 22.88, "serie": "F001", "icbper": 0, "numero": "11", "gravadas": 127.12, "impuestos": 22.88, "inafectas": 0, "cod_motivo": "", "des_motivo": "", "exoneradas": 0, "tipo_moneda": "PEN", "fecha_emision": "2026-04-04 11:07:31", "importe_venta": 150, "observaciones": "", "tipo_documento": "01", "tipo_operacion": "0101", "descuentoGlobal": 0}, "Retencion": {"Estado": "off", "TotalRetencion": 0, "CodigoRetencion": "", "PorcentajeRetencion": 0}, "Detraccion": {"Estado": "off", "CodigoMedioPago": "001", "TotalDetraccion": 0, "CodigoDetraccion": "", "PorcentajeDetraccion": 0, "NumeroCuentaDetraccion": ""}, "Percepcion": {"Estado": "off", "TotalPercepcion": 0, "CodigoPercepcion": "", "PorcentajePercepcion": 0}, "detalle_pagos": []}, "payload_sha1": "4c80eec52fc92d2041d94511e43d81adfd48a182", "payload_length": 1560, "payload_preview": "{\\"empresa\\":{\\"ruc\\":\\"10455923951\\",\\"user\\":\\"MODDATOS\\",\\"pass\\":\\"Moddatos\\",\\"razon_social\\":\\"MSEP PERU SAC\\",\\"nombre_comercial\\":\\"DEMO\\",\\"direccion\\":\\"AV. PRINCIPAL 123\\",\\"urbanizacion\\":\\"ORRANTIA\\",\\"ubigeo\\":\\"150131\\",\\"departamento\\":\\"LIMA\\",\\"provincia\\":\\"LIMA\\",\\"distrito\\":\\"SAN ISIDRO\\",\\"codigolocal\\":\\"\\",\\"telefono_fijo\\":\\"+51 1 2345678\\",\\"correo\\":\\"info@empresademo.com\\",\\"envio_pse\\":\\"\\"},\\"cliente\\":{\\"ruc\\":\\"10455923951\\",\\"tipo_documento\\":\\"6\\",\\"razon_social\\":\\"FERNANDEZ DE LA CRUZ\\"},\\"cabecera\\":{\\"tipo_operacion\\":\\"0101\\",\\"tipo_documento\\":\\"01\\",\\"serie\\":\\"F001\\",\\"numero\\":\\"11\\",\\"fecha_emision\\":\\"2026-04-04 11:07:31\\",\\"tipo_moneda\\":\\"PEN\\",\\"gravadas\\":127.12,\\"inafectas\\":0,\\"exoneradas\\":0,\\"igv\\":22.88,\\"icbper\\":0,\\"impuestos\\":22.88,\\"importe_venta\\":150,\\"descuentoGlobal\\":0,\\"observaciones\\":\\"\\",\\"cod_motivo\\":\\"\\",\\"des_motivo\\":\\"\\"},\\"Pago\\":{\\"FormaPago\\":\\"Contado\\",\\"Monto\\":150},\\"detalle_pagos\\":[],\\"Detraccion\\":{\\"Estado\\":\\"off\\",\\"CodigoDetraccion\\":\\"\\",\\"CodigoMedioPago\\":\\"001\\",\\"NumeroCuentaDetraccion\\":\\"\\",\\"PorcentajeDetraccion\\":0,\\"TotalDetraccion\\":0},\\"Retencion\\":{\\"Estado\\":\\"off\\",\\"CodigoRetencion\\":\\"\\",\\"PorcentajeRetencion\\":0,\\"TotalRetencion\\":0},\\"Percepcion\\":{\\"Estado\\":\\"off\\",\\"CodigoPercepcion\\":\\"\\",\\"PorcentajePercepcion\\":0,\\"TotalPercepcion\\":0},\\"adjunto\\":null,\\"detalle\\":[{\\"sunat\\":\\"\\",\\"codigo\\":\\"3\\",\\"unidad\\":\\"NIU\\",\\"cantidad\\":5,\\"descripcion\\":\\"SIN-SKU - PRODUCTO2\\",\\"tipo_igv\\":\\"10\\",\\"base\\":127.12,\\"igv\\":22.88,\\"impuestos\\":22.88,\\"valor_venta\\":127.12,\\"valor_unitario\\":25.424,\\"precio_unitario\\":30,\\"porcentaje_igv\\":18,\\"icbper\\":\\"off\\",\\"valor_icbper\\":0,\\"igv_icbper\\":0,\\"gratuitas\\":0,\\"descuento\\":0}],\\"letra\\":\\"Ciento cincuenta con 00/100 SOL\\"}"}, "sunat_bridge_endpoint": "https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA/index.php/Sunat/send_xml", "sunat_bridge_response": {"msg": "La Factura numero F001-11, ha sido aceptada", "res": 1, "firma": "{\\"0\\":\\"cSbhWagp20tyfh\\\\/+ZefZeYSkvNU=\\"}"}, "sunat_bridge_http_code": 200, "sunat_bridge_content_type": "application/x-www-form-urlencoded"}	1	1	2026-04-04 11:07:31-05	2026-04-04 11:07:32-05	\N
+38	1	1	1	RECEIPT	B001	14	2026-04-04 05:39:09-05	2026-04-03 19:00:00-05	1	1	1	\N	\N	\N	\N	\N	1	25.42	4.58	30.00	30.00	0.00	0.00	ISSUED	\N	\N	{"sunat_status": "SENT", "sunat_retry_at": "2026-04-04 16:04:41", "sunat_bridge_mode": "BETA", "sunat_last_sync_at": "2026-04-04 16:04:43", "sunat_status_label": "Enviado", "sunat_bridge_method": "POST", "sunat_bridge_request": {"form_key": "datosJSON", "payload_json": {"Pago": {"Monto": 30, "FormaPago": "Contado"}, "letra": "Treinta con 00/100 SOL", "adjunto": null, "cliente": {"ruc": "99999999", "razon_social": "CLIENTE DEMO", "tipo_documento": "6"}, "detalle": [{"igv": 4.58, "base": 25.42, "sunat": "", "codigo": "3", "icbper": "off", "unidad": "NIU", "cantidad": 1, "tipo_igv": "10", "descuento": 0, "gratuitas": 0, "impuestos": 4.58, "igv_icbper": 0, "descripcion": "SIN-SKU - PRODUCTO2", "valor_venta": 25.42, "valor_icbper": 0, "porcentaje_igv": 18.02, "valor_unitario": 25.42, "precio_unitario": 30}], "empresa": {"ruc": "10455923951", "pass": "***", "user": "MODDATOS", "correo": "info@empresademo.com", "ubigeo": "150131", "distrito": "SAN ISIDRO", "direccion": "AV. PRINCIPAL 123", "envio_pse": "", "provincia": "LIMA", "codigolocal": "", "departamento": "LIMA", "razon_social": "MSEP PERU SAC", "urbanizacion": "ORRANTIA", "telefono_fijo": "+51 1 2345678", "nombre_comercial": "DEMO"}, "cabecera": {"igv": 4.58, "serie": "B001", "icbper": 0, "numero": "14", "gravadas": 25.42, "impuestos": 4.58, "inafectas": 0, "cod_motivo": "", "des_motivo": "", "exoneradas": 0, "tipo_moneda": "PEN", "fecha_emision": "2026-04-04 10:39:09", "importe_venta": 30, "observaciones": "", "tipo_documento": "03", "tipo_operacion": "0101", "descuentoGlobal": 0}, "Retencion": {"Estado": "off", "TotalRetencion": 0, "CodigoRetencion": "", "PorcentajeRetencion": 0}, "Detraccion": {"Estado": "off", "CodigoMedioPago": "001", "TotalDetraccion": 0, "CodigoDetraccion": "", "PorcentajeDetraccion": 0, "NumeroCuentaDetraccion": ""}, "Percepcion": {"Estado": "off", "TotalPercepcion": 0, "CodigoPercepcion": "", "PorcentajePercepcion": 0}, "detalle_pagos": []}, "payload_sha1": "ec60f458dae452e42eff419a9b135900775d274c", "payload_length": 1533, "payload_preview": "{\\"empresa\\":{\\"ruc\\":\\"10455923951\\",\\"user\\":\\"MODDATOS\\",\\"pass\\":\\"Moddatos\\",\\"razon_social\\":\\"MSEP PERU SAC\\",\\"nombre_comercial\\":\\"DEMO\\",\\"direccion\\":\\"AV. PRINCIPAL 123\\",\\"urbanizacion\\":\\"ORRANTIA\\",\\"ubigeo\\":\\"150131\\",\\"departamento\\":\\"LIMA\\",\\"provincia\\":\\"LIMA\\",\\"distrito\\":\\"SAN ISIDRO\\",\\"codigolocal\\":\\"\\",\\"telefono_fijo\\":\\"+51 1 2345678\\",\\"correo\\":\\"info@empresademo.com\\",\\"envio_pse\\":\\"\\"},\\"cliente\\":{\\"ruc\\":\\"99999999\\",\\"tipo_documento\\":\\"6\\",\\"razon_social\\":\\"CLIENTE DEMO\\"},\\"cabecera\\":{\\"tipo_operacion\\":\\"0101\\",\\"tipo_documento\\":\\"03\\",\\"serie\\":\\"B001\\",\\"numero\\":\\"14\\",\\"fecha_emision\\":\\"2026-04-04 10:39:09\\",\\"tipo_moneda\\":\\"PEN\\",\\"gravadas\\":25.42,\\"inafectas\\":0,\\"exoneradas\\":0,\\"igv\\":4.58,\\"icbper\\":0,\\"impuestos\\":4.58,\\"importe_venta\\":30,\\"descuentoGlobal\\":0,\\"observaciones\\":\\"\\",\\"cod_motivo\\":\\"\\",\\"des_motivo\\":\\"\\"},\\"Pago\\":{\\"FormaPago\\":\\"Contado\\",\\"Monto\\":30},\\"detalle_pagos\\":[],\\"Detraccion\\":{\\"Estado\\":\\"off\\",\\"CodigoDetraccion\\":\\"\\",\\"CodigoMedioPago\\":\\"001\\",\\"NumeroCuentaDetraccion\\":\\"\\",\\"PorcentajeDetraccion\\":0,\\"TotalDetraccion\\":0},\\"Retencion\\":{\\"Estado\\":\\"off\\",\\"CodigoRetencion\\":\\"\\",\\"PorcentajeRetencion\\":0,\\"TotalRetencion\\":0},\\"Percepcion\\":{\\"Estado\\":\\"off\\",\\"CodigoPercepcion\\":\\"\\",\\"PorcentajePercepcion\\":0,\\"TotalPercepcion\\":0},\\"adjunto\\":null,\\"detalle\\":[{\\"sunat\\":\\"\\",\\"codigo\\":\\"3\\",\\"unidad\\":\\"NIU\\",\\"cantidad\\":1,\\"descripcion\\":\\"SIN-SKU - PRODUCTO2\\",\\"tipo_igv\\":\\"10\\",\\"base\\":25.42,\\"igv\\":4.58,\\"impuestos\\":4.58,\\"valor_venta\\":25.42,\\"valor_unitario\\":25.42,\\"precio_unitario\\":30,\\"porcentaje_igv\\":18.02,\\"icbper\\":\\"off\\",\\"valor_icbper\\":0,\\"igv_icbper\\":0,\\"gratuitas\\":0,\\"descuento\\":0}],\\"letra\\":\\"Treinta con 00/100 SOL\\"}"}, "sunat_bridge_endpoint": "https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA/index.php/Sunat/send_xml", "sunat_bridge_response": {"raw": "SERVIDOR SUNAT NO RESPONDE <br> [code] => 2017<br> [message] => El numero de documento de identidad del receptor debe ser  RUC - Detalle: xxx.xxx.xxx value='ticket: 1775318978376 error: INFO: 2017 (nodo: \\"cac:PartyIdentification/cbc:ID\\" valor: \\"99999999\\")'"}, "sunat_bridge_http_code": 200, "sunat_bridge_content_type": "application/x-www-form-urlencoded"}	1	1	2026-04-04 10:39:09-05	2026-04-04 11:04:43-05	\N
+39	1	1	1	RECEIPT	B001	15	2026-04-04 05:59:16-05	2026-04-03 19:00:00-05	1	1	1	\N	\N	\N	\N	\N	1	84.75	15.25	100.00	100.00	0.00	0.00	ISSUED	\N	\N	{"sunat_status": "ACCEPTED", "sunat_retry_at": "2026-04-04 16:06:45", "sunat_bridge_mode": "BETA", "sunat_last_sync_at": "2026-04-04 16:06:46", "sunat_status_label": "Aceptado", "sunat_bridge_method": "POST", "sunat_bridge_request": {"form_key": "datosJSON", "payload_json": {"Pago": {"Monto": 100, "FormaPago": "Contado"}, "letra": "Ciento con 00/100 SOL", "adjunto": null, "cliente": {"ruc": "99999999", "razon_social": "CLIENTE DEMO", "tipo_documento": "1"}, "detalle": [{"igv": 15.25, "base": 84.75, "sunat": "", "codigo": "1", "icbper": "off", "unidad": "NIU", "cantidad": 10, "tipo_igv": "10", "descuento": 0, "gratuitas": 0, "impuestos": 15.25, "igv_icbper": 0, "descripcion": "SIN-SKU - PRODUCTO1", "valor_venta": 84.75, "valor_icbper": 0, "porcentaje_igv": 17.99, "valor_unitario": 8.475, "precio_unitario": 10}], "empresa": {"ruc": "10455923951", "pass": "***", "user": "MODDATOS", "correo": "info@empresademo.com", "ubigeo": "150131", "distrito": "SAN ISIDRO", "direccion": "AV. PRINCIPAL 123", "envio_pse": "", "provincia": "LIMA", "codigolocal": "", "departamento": "LIMA", "razon_social": "MSEP PERU SAC", "urbanizacion": "ORRANTIA", "telefono_fijo": "+51 1 2345678", "nombre_comercial": "DEMO"}, "cabecera": {"igv": 15.25, "serie": "B001", "icbper": 0, "numero": "15", "gravadas": 84.75, "impuestos": 15.25, "inafectas": 0, "cod_motivo": "", "des_motivo": "", "exoneradas": 0, "tipo_moneda": "PEN", "fecha_emision": "2026-04-04 10:59:16", "importe_venta": 100, "observaciones": "", "tipo_documento": "03", "tipo_operacion": "0101", "descuentoGlobal": 0}, "Retencion": {"Estado": "off", "TotalRetencion": 0, "CodigoRetencion": "", "PorcentajeRetencion": 0}, "Detraccion": {"Estado": "off", "CodigoMedioPago": "001", "TotalDetraccion": 0, "CodigoDetraccion": "", "PorcentajeDetraccion": 0, "NumeroCuentaDetraccion": ""}, "Percepcion": {"Estado": "off", "TotalPercepcion": 0, "CodigoPercepcion": "", "PorcentajePercepcion": 0}, "detalle_pagos": []}, "payload_sha1": "2dc51241e3ac830b8e3dfa949fb5bdd3da7fd5e5", "payload_length": 1539, "payload_preview": "{\\"empresa\\":{\\"ruc\\":\\"10455923951\\",\\"user\\":\\"MODDATOS\\",\\"pass\\":\\"Moddatos\\",\\"razon_social\\":\\"MSEP PERU SAC\\",\\"nombre_comercial\\":\\"DEMO\\",\\"direccion\\":\\"AV. PRINCIPAL 123\\",\\"urbanizacion\\":\\"ORRANTIA\\",\\"ubigeo\\":\\"150131\\",\\"departamento\\":\\"LIMA\\",\\"provincia\\":\\"LIMA\\",\\"distrito\\":\\"SAN ISIDRO\\",\\"codigolocal\\":\\"\\",\\"telefono_fijo\\":\\"+51 1 2345678\\",\\"correo\\":\\"info@empresademo.com\\",\\"envio_pse\\":\\"\\"},\\"cliente\\":{\\"ruc\\":\\"99999999\\",\\"tipo_documento\\":\\"1\\",\\"razon_social\\":\\"CLIENTE DEMO\\"},\\"cabecera\\":{\\"tipo_operacion\\":\\"0101\\",\\"tipo_documento\\":\\"03\\",\\"serie\\":\\"B001\\",\\"numero\\":\\"15\\",\\"fecha_emision\\":\\"2026-04-04 10:59:16\\",\\"tipo_moneda\\":\\"PEN\\",\\"gravadas\\":84.75,\\"inafectas\\":0,\\"exoneradas\\":0,\\"igv\\":15.25,\\"icbper\\":0,\\"impuestos\\":15.25,\\"importe_venta\\":100,\\"descuentoGlobal\\":0,\\"observaciones\\":\\"\\",\\"cod_motivo\\":\\"\\",\\"des_motivo\\":\\"\\"},\\"Pago\\":{\\"FormaPago\\":\\"Contado\\",\\"Monto\\":100},\\"detalle_pagos\\":[],\\"Detraccion\\":{\\"Estado\\":\\"off\\",\\"CodigoDetraccion\\":\\"\\",\\"CodigoMedioPago\\":\\"001\\",\\"NumeroCuentaDetraccion\\":\\"\\",\\"PorcentajeDetraccion\\":0,\\"TotalDetraccion\\":0},\\"Retencion\\":{\\"Estado\\":\\"off\\",\\"CodigoRetencion\\":\\"\\",\\"PorcentajeRetencion\\":0,\\"TotalRetencion\\":0},\\"Percepcion\\":{\\"Estado\\":\\"off\\",\\"CodigoPercepcion\\":\\"\\",\\"PorcentajePercepcion\\":0,\\"TotalPercepcion\\":0},\\"adjunto\\":null,\\"detalle\\":[{\\"sunat\\":\\"\\",\\"codigo\\":\\"1\\",\\"unidad\\":\\"NIU\\",\\"cantidad\\":10,\\"descripcion\\":\\"SIN-SKU - PRODUCTO1\\",\\"tipo_igv\\":\\"10\\",\\"base\\":84.75,\\"igv\\":15.25,\\"impuestos\\":15.25,\\"valor_venta\\":84.75,\\"valor_unitario\\":8.475,\\"precio_unitario\\":10,\\"porcentaje_igv\\":17.99,\\"icbper\\":\\"off\\",\\"valor_icbper\\":0,\\"igv_icbper\\":0,\\"gratuitas\\":0,\\"descuento\\":0}],\\"letra\\":\\"Ciento con 00/100 SOL\\"}"}, "sunat_bridge_endpoint": "https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA/index.php/Sunat/send_xml", "sunat_bridge_response": {"msg": "La Boleta numero B001-15, ha sido aceptada", "res": 1, "firma": "{\\"0\\":\\"+SnQ6+nq7pU2wGnOBc3kMqHaRi0=\\"}"}, "sunat_bridge_http_code": 200, "sunat_bridge_content_type": "application/x-www-form-urlencoded"}	1	1	2026-04-04 10:59:16-05	2026-04-04 11:06:46-05	\N
 \.
 
 
 --
--- Data for Name: customer_price_profiles; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: customer_price_profiles; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.customer_price_profiles (id, company_id, customer_id, default_tier_id, discount_percent, status) FROM stdin;
+1	1	1	\N	0.0000	1
+2	1	2	\N	0.0000	1
 \.
 
 
 --
--- Data for Name: customers; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: customer_types; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
-COPY sales.customers (id, company_id, doc_type, doc_number, legal_name, trade_name, first_name, last_name, email, phone, address, plate, status, created_at, updated_at, deleted_at) FROM stdin;
-1	1	DNI	99999999	CLIENTE DEMO	\N	\N	\N	cliente.demo@local.test	900000000	DIRECCION DEMO	\N	1	2026-03-10 22:11:30.41965-05	2026-03-10 22:11:30.41965-05	\N
-2	1	RUC	10455923951	FERNANDEZ DE LA CRUZ	FERNANDEZ DE LA CRUZ	ALEXANDER	FERNANDEZ	\N	\N	LIMA	RRR4	1	2026-03-11 16:42:07.100998-05	2026-03-11 16:42:07.100998-05	\N
+COPY sales.customer_types (id, name, sunat_code, sunat_abbr, is_active, created_at, updated_at) FROM stdin;
+1	Persona Natural	1	DOC.NACIONAL DE IDEN	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
+2	Persona Jurídica	6	REG. UNICO DE CONTRI	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
+3	Empresas Del Extranjero	0	DOC.TRIB.NO.DOM.SIN	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
+4	Carnet de Extranjeria	4	CARNET DE EXTRANJERIA	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
+5	Pasaporte	7	PASAPORTE	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
+6	Otros	8	OTROS	t	2026-04-04 10:36:55.332349-05	2026-04-04 10:36:55.332349-05
 \.
 
 
 --
--- Data for Name: document_sequences; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: customers; Type: TABLE DATA; Schema: sales; Owner: postgres
+--
+
+COPY sales.customers (id, company_id, doc_type, doc_number, legal_name, trade_name, first_name, last_name, email, phone, address, plate, status, created_at, updated_at, deleted_at, customer_type_id) FROM stdin;
+1	1	1	99999999	CLIENTE DEMO	\N	CLIENTE	DEMO	cliente.demo@local.test	900000000	DIRECCION DEMO	\N	1	2026-03-10 22:11:30.41965-05	2026-03-10 22:11:30.41965-05	\N	1
+2	1	6	10455923951	FERNANDEZ DE LA CRUZ	FERNANDEZ DE LA CRUZ	FERNANDEZ	DE LA CRUZ	\N	\N	LIMA	RRR4	1	2026-03-11 16:42:07.100998-05	2026-03-11 16:42:07.100998-05	\N	2
+\.
+
+
+--
+-- Data for Name: document_sequences; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.document_sequences (id, company_id, branch_id, warehouse_id, document_kind, series, current_number, status) FROM stdin;
@@ -6765,7 +7474,7 @@ COPY sales.document_sequences (id, company_id, branch_id, warehouse_id, document
 
 
 --
--- Data for Name: order_sequences; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: order_sequences; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.order_sequences (id, company_id, branch_id, doc_type, series, current_number) FROM stdin;
@@ -6773,7 +7482,7 @@ COPY sales.order_sequences (id, company_id, branch_id, doc_type, series, current
 
 
 --
--- Data for Name: price_tiers; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: price_tiers; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.price_tiers (id, company_id, code, name, min_qty, max_qty, priority, status) FROM stdin;
@@ -6781,7 +7490,7 @@ COPY sales.price_tiers (id, company_id, code, name, min_qty, max_qty, priority, 
 
 
 --
--- Data for Name: product_price_tier_values; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: product_price_tier_values; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.product_price_tier_values (id, company_id, product_id, price_tier_id, unit_id, unit_price, status, updated_by, updated_at) FROM stdin;
@@ -6789,7 +7498,7 @@ COPY sales.product_price_tier_values (id, company_id, product_id, price_tier_id,
 
 
 --
--- Data for Name: product_tier_prices; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: product_tier_prices; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.product_tier_prices (id, company_id, product_id, tier_id, currency_id, unit_price, valid_from, valid_to, status) FROM stdin;
@@ -6797,7 +7506,7 @@ COPY sales.product_tier_prices (id, company_id, product_id, tier_id, currency_id
 
 
 --
--- Data for Name: sales_order_item_lots; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: sales_order_item_lots; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.sales_order_item_lots (id, sales_order_item_id, lot_id, qty, created_at) FROM stdin;
@@ -6805,7 +7514,7 @@ COPY sales.sales_order_item_lots (id, sales_order_item_id, lot_id, qty, created_
 
 
 --
--- Data for Name: sales_order_items; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: sales_order_items; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.sales_order_items (id, order_id, line_no, product_id, unit_id, description, qty, unit_price, unit_cost, discount_total, tax_total, subtotal, total) FROM stdin;
@@ -6813,7 +7522,7 @@ COPY sales.sales_order_items (id, order_id, line_no, product_id, unit_id, descri
 
 
 --
--- Data for Name: sales_order_payments; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: sales_order_payments; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.sales_order_payments (id, order_id, payment_method_id, amount, due_at, notes, created_at) FROM stdin;
@@ -6821,7 +7530,7 @@ COPY sales.sales_order_payments (id, order_id, payment_method_id, amount, due_at
 
 
 --
--- Data for Name: sales_orders; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: sales_orders; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.sales_orders (id, company_id, branch_id, warehouse_id, customer_id, currency_id, payment_method_id, seller_user_id, sequence_series, sequence_number, issue_at, exchange_rate, subtotal, tax_total, total, change_amount, notes, status, discount_stock, show_image, created_by, updated_by, created_at, updated_at, deleted_at) FROM stdin;
@@ -6829,20 +7538,20 @@ COPY sales.sales_orders (id, company_id, branch_id, warehouse_id, customer_id, c
 
 
 --
--- Data for Name: series_numbers; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: series_numbers; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.series_numbers (id, company_id, branch_id, warehouse_id, document_kind, series, current_number, number_padding, reset_policy, is_enabled, valid_from, valid_to, updated_by, updated_at) FROM stdin;
 1	1	1	\N	INVOICE	F001	1	8	NONE	t	2026-03-10	\N	1	2026-03-11 04:09:35-05
 5	1	1	1	SALES_ORDER	P001	3	8	NONE	t	\N	\N	2	2026-03-20 17:17:19-05
-3	1	1	1	RECEIPT	B001	13	8	NONE	t	\N	\N	1	2026-03-26 04:46:44-05
 4	1	1	1	QUOTATION	C001	8	8	NONE	t	\N	\N	2	2026-03-26 04:50:34-05
-2	1	1	1	INVOICE	F001	10	8	NONE	t	\N	\N	3	2026-03-26 04:52:03-05
+3	1	1	1	RECEIPT	B001	15	8	NONE	t	\N	\N	1	2026-04-04 10:59:16-05
+2	1	1	1	INVOICE	F001	11	8	NONE	t	\N	\N	1	2026-04-04 11:07:31-05
 \.
 
 
 --
--- Data for Name: wholesale_settings; Type: TABLE DATA; Schema: sales; Owner: -
+-- Data for Name: wholesale_settings; Type: TABLE DATA; Schema: sales; Owner: postgres
 --
 
 COPY sales.wholesale_settings (company_id, is_enabled, pricing_mode, allow_customer_override, updated_at) FROM stdin;
@@ -6850,364 +7559,406 @@ COPY sales.wholesale_settings (company_id, is_enabled, pricing_mode, allow_custo
 
 
 --
--- Name: modules_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: -
+-- Name: modules_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: postgres
 --
 
 SELECT pg_catalog.setval('appcfg.modules_id_seq', 3, true);
 
 
 --
--- Name: saved_filters_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: -
+-- Name: saved_filters_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: postgres
 --
 
 SELECT pg_catalog.setval('appcfg.saved_filters_id_seq', 1, false);
 
 
 --
--- Name: ui_entities_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: -
+-- Name: ui_entities_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: postgres
 --
 
 SELECT pg_catalog.setval('appcfg.ui_entities_id_seq', 1, false);
 
 
 --
--- Name: ui_fields_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: -
+-- Name: ui_fields_id_seq; Type: SEQUENCE SET; Schema: appcfg; Owner: postgres
 --
 
 SELECT pg_catalog.setval('appcfg.ui_fields_id_seq', 1, false);
 
 
 --
--- Name: permissions_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
+-- Name: permissions_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: postgres
 --
 
 SELECT pg_catalog.setval('auth.permissions_id_seq', 1, false);
 
 
 --
--- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
+-- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: postgres
 --
 
-SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 884, true);
+SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 886, true);
 
 
 --
--- Name: roles_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
+-- Name: roles_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: postgres
 --
 
 SELECT pg_catalog.setval('auth.roles_id_seq', 3, true);
 
 
 --
--- Name: users_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
+-- Name: users_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: postgres
 --
 
 SELECT pg_catalog.setval('auth.users_id_seq', 3, true);
 
 
 --
--- Name: documents_id_seq; Type: SEQUENCE SET; Schema: billing; Owner: -
+-- Name: documents_id_seq; Type: SEQUENCE SET; Schema: billing; Owner: postgres
 --
 
 SELECT pg_catalog.setval('billing.documents_id_seq', 1, false);
 
 
 --
--- Name: branches_id_seq; Type: SEQUENCE SET; Schema: core; Owner: -
+-- Name: branches_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
 --
 
 SELECT pg_catalog.setval('core.branches_id_seq', 3, true);
 
 
 --
--- Name: companies_id_seq; Type: SEQUENCE SET; Schema: core; Owner: -
+-- Name: companies_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
 --
 
 SELECT pg_catalog.setval('core.companies_id_seq', 3, true);
 
 
 --
--- Name: currencies_id_seq; Type: SEQUENCE SET; Schema: core; Owner: -
+-- Name: company_igv_rates_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
+--
+
+SELECT pg_catalog.setval('core.company_igv_rates_id_seq', 1, true);
+
+
+--
+-- Name: currencies_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
 --
 
 SELECT pg_catalog.setval('core.currencies_id_seq', 2, true);
 
 
 --
--- Name: payment_methods_id_seq; Type: SEQUENCE SET; Schema: core; Owner: -
+-- Name: payment_methods_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
 --
 
 SELECT pg_catalog.setval('core.payment_methods_id_seq', 3, true);
 
 
 --
--- Name: units_id_seq; Type: SEQUENCE SET; Schema: core; Owner: -
+-- Name: units_id_seq; Type: SEQUENCE SET; Schema: core; Owner: postgres
 --
 
 SELECT pg_catalog.setval('core.units_id_seq', 63, true);
 
 
 --
--- Name: categories_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: categories_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.categories_id_seq', 1, true);
 
 
 --
--- Name: inventory_ledger_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: inventory_ledger_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
-SELECT pg_catalog.setval('inventory.inventory_ledger_id_seq', 22, true);
+SELECT pg_catalog.setval('inventory.inventory_ledger_id_seq', 25, true);
 
 
 --
--- Name: outbox_events_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: outbox_events_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.outbox_events_id_seq', 1, false);
 
 
 --
--- Name: product_brands_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_brands_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_brands_id_seq', 2, true);
 
 
 --
--- Name: product_lines_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_lines_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_lines_id_seq', 1, true);
 
 
 --
--- Name: product_locations_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_locations_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_locations_id_seq', 1, true);
 
 
 --
--- Name: product_lots_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_lots_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_lots_id_seq', 1, true);
 
 
 --
--- Name: product_recipe_items_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_recipe_items_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_recipe_items_id_seq', 1, false);
 
 
 --
--- Name: product_recipes_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_recipes_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_recipes_id_seq', 1, false);
 
 
 --
--- Name: product_uom_conversions_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_uom_conversions_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_uom_conversions_id_seq', 1, false);
 
 
 --
--- Name: product_warranties_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: product_warranties_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.product_warranties_id_seq', 1, true);
 
 
 --
--- Name: products_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: products_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.products_id_seq', 3, true);
 
 
 --
--- Name: report_requests_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: report_requests_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.report_requests_id_seq', 1, true);
 
 
 --
--- Name: stock_entries_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: stock_entries_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.stock_entries_id_seq', 5, true);
 
 
 --
--- Name: stock_entry_items_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: stock_entry_items_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.stock_entry_items_id_seq', 3, true);
 
 
 --
--- Name: stock_transformation_lines_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.stock_transformation_lines_id_seq', 1, false);
 
 
 --
--- Name: stock_transformations_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: stock_transformations_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.stock_transformations_id_seq', 1, false);
 
 
 --
--- Name: warehouses_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: -
+-- Name: warehouses_id_seq; Type: SEQUENCE SET; Schema: inventory; Owner: postgres
 --
 
 SELECT pg_catalog.setval('inventory.warehouses_id_seq', 2, true);
 
 
 --
--- Name: cash_movements_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: detraccion_service_codes_id_seq; Type: SEQUENCE SET; Schema: master; Owner: postgres
 --
 
-SELECT pg_catalog.setval('sales.cash_movements_id_seq', 8, true);
+SELECT pg_catalog.setval('master.detraccion_service_codes_id_seq', 31, true);
 
 
 --
--- Name: cash_registers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: failed_jobs_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.failed_jobs_id_seq', 1, false);
+
+
+--
+-- Name: migrations_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.migrations_id_seq', 10, true);
+
+
+--
+-- Name: users_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.users_id_seq', 1, false);
+
+
+--
+-- Name: cash_movements_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
+--
+
+SELECT pg_catalog.setval('sales.cash_movements_id_seq', 11, true);
+
+
+--
+-- Name: cash_registers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.cash_registers_id_seq', 1, true);
 
 
 --
--- Name: cash_sessions_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: cash_sessions_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.cash_sessions_id_seq', 8, true);
 
 
 --
--- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
-SELECT pg_catalog.setval('sales.commercial_document_item_lots_id_seq', 3, true);
-
-
---
--- Name: commercial_document_items_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
---
-
-SELECT pg_catalog.setval('sales.commercial_document_items_id_seq', 34, true);
+SELECT pg_catalog.setval('sales.commercial_document_item_lots_id_seq', 5, true);
 
 
 --
--- Name: commercial_document_payments_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: commercial_document_items_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
-SELECT pg_catalog.setval('sales.commercial_document_payments_id_seq', 21, true);
-
-
---
--- Name: commercial_documents_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
---
-
-SELECT pg_catalog.setval('sales.commercial_documents_id_seq', 37, true);
+SELECT pg_catalog.setval('sales.commercial_document_items_id_seq', 37, true);
 
 
 --
--- Name: customer_price_profiles_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: commercial_document_payments_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
-SELECT pg_catalog.setval('sales.customer_price_profiles_id_seq', 1, false);
+SELECT pg_catalog.setval('sales.commercial_document_payments_id_seq', 24, true);
 
 
 --
--- Name: customers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: commercial_documents_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
+--
+
+SELECT pg_catalog.setval('sales.commercial_documents_id_seq', 40, true);
+
+
+--
+-- Name: customer_price_profiles_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
+--
+
+SELECT pg_catalog.setval('sales.customer_price_profiles_id_seq', 2, true);
+
+
+--
+-- Name: customer_types_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
+--
+
+SELECT pg_catalog.setval('sales.customer_types_id_seq', 12, true);
+
+
+--
+-- Name: customers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.customers_id_seq', 2, true);
 
 
 --
--- Name: document_sequences_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: document_sequences_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.document_sequences_id_seq', 1, false);
 
 
 --
--- Name: order_sequences_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: order_sequences_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.order_sequences_id_seq', 1, false);
 
 
 --
--- Name: price_tiers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: price_tiers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.price_tiers_id_seq', 1, false);
 
 
 --
--- Name: product_price_tier_values_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: product_price_tier_values_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.product_price_tier_values_id_seq', 1, false);
 
 
 --
--- Name: product_tier_prices_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: product_tier_prices_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.product_tier_prices_id_seq', 1, false);
 
 
 --
--- Name: sales_order_item_lots_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: sales_order_item_lots_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.sales_order_item_lots_id_seq', 1, false);
 
 
 --
--- Name: sales_order_items_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: sales_order_items_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.sales_order_items_id_seq', 1, false);
 
 
 --
--- Name: sales_order_payments_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: sales_order_payments_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.sales_order_payments_id_seq', 1, false);
 
 
 --
--- Name: sales_orders_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: sales_orders_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.sales_orders_id_seq', 1, false);
 
 
 --
--- Name: series_numbers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: -
+-- Name: series_numbers_id_seq; Type: SEQUENCE SET; Schema: sales; Owner: postgres
 --
 
 SELECT pg_catalog.setval('sales.series_numbers_id_seq', 5, true);
 
 
 --
--- Name: branch_feature_toggles branch_feature_toggles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_feature_toggles branch_feature_toggles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_feature_toggles
@@ -7215,7 +7966,7 @@ ALTER TABLE ONLY appcfg.branch_feature_toggles
 
 
 --
--- Name: branch_modules branch_modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_modules branch_modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_modules
@@ -7223,7 +7974,7 @@ ALTER TABLE ONLY appcfg.branch_modules
 
 
 --
--- Name: company_feature_toggles company_feature_toggles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_feature_toggles company_feature_toggles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_feature_toggles
@@ -7231,7 +7982,7 @@ ALTER TABLE ONLY appcfg.company_feature_toggles
 
 
 --
--- Name: company_modules company_modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_modules company_modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_modules
@@ -7239,7 +7990,7 @@ ALTER TABLE ONLY appcfg.company_modules
 
 
 --
--- Name: company_role_profiles company_role_profiles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_role_profiles company_role_profiles_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_role_profiles
@@ -7247,7 +7998,7 @@ ALTER TABLE ONLY appcfg.company_role_profiles
 
 
 --
--- Name: company_ui_field_settings company_ui_field_settings_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_ui_field_settings company_ui_field_settings_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_ui_field_settings
@@ -7255,7 +8006,7 @@ ALTER TABLE ONLY appcfg.company_ui_field_settings
 
 
 --
--- Name: company_units company_units_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_units company_units_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_units
@@ -7263,7 +8014,7 @@ ALTER TABLE ONLY appcfg.company_units
 
 
 --
--- Name: modules modules_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: modules modules_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.modules
@@ -7271,7 +8022,7 @@ ALTER TABLE ONLY appcfg.modules
 
 
 --
--- Name: modules modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: modules modules_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.modules
@@ -7279,7 +8030,7 @@ ALTER TABLE ONLY appcfg.modules
 
 
 --
--- Name: saved_filters saved_filters_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: saved_filters saved_filters_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.saved_filters
@@ -7287,7 +8038,7 @@ ALTER TABLE ONLY appcfg.saved_filters
 
 
 --
--- Name: ui_entities ui_entities_module_id_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_entities ui_entities_module_id_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_entities
@@ -7295,7 +8046,7 @@ ALTER TABLE ONLY appcfg.ui_entities
 
 
 --
--- Name: ui_entities ui_entities_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_entities ui_entities_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_entities
@@ -7303,7 +8054,7 @@ ALTER TABLE ONLY appcfg.ui_entities
 
 
 --
--- Name: ui_fields ui_fields_entity_id_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_fields ui_fields_entity_id_code_key; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_fields
@@ -7311,7 +8062,7 @@ ALTER TABLE ONLY appcfg.ui_fields
 
 
 --
--- Name: ui_fields ui_fields_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_fields ui_fields_pkey; Type: CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_fields
@@ -7319,7 +8070,7 @@ ALTER TABLE ONLY appcfg.ui_fields
 
 
 --
--- Name: permissions permissions_code_key; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: permissions permissions_code_key; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.permissions
@@ -7327,7 +8078,7 @@ ALTER TABLE ONLY auth.permissions
 
 
 --
--- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.permissions
@@ -7335,7 +8086,7 @@ ALTER TABLE ONLY auth.permissions
 
 
 --
--- Name: refresh_tokens refresh_tokens_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: refresh_tokens refresh_tokens_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.refresh_tokens
@@ -7343,7 +8094,7 @@ ALTER TABLE ONLY auth.refresh_tokens
 
 
 --
--- Name: role_module_access role_module_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_module_access role_module_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_module_access
@@ -7351,7 +8102,7 @@ ALTER TABLE ONLY auth.role_module_access
 
 
 --
--- Name: role_permissions role_permissions_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_permissions role_permissions_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_permissions
@@ -7359,7 +8110,7 @@ ALTER TABLE ONLY auth.role_permissions
 
 
 --
--- Name: role_ui_field_access role_ui_field_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_ui_field_access role_ui_field_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_ui_field_access
@@ -7367,7 +8118,7 @@ ALTER TABLE ONLY auth.role_ui_field_access
 
 
 --
--- Name: roles roles_company_id_code_key; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: roles roles_company_id_code_key; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.roles
@@ -7375,7 +8126,7 @@ ALTER TABLE ONLY auth.roles
 
 
 --
--- Name: roles roles_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: roles roles_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.roles
@@ -7383,7 +8134,7 @@ ALTER TABLE ONLY auth.roles
 
 
 --
--- Name: user_module_overrides user_module_overrides_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_module_overrides user_module_overrides_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_module_overrides
@@ -7391,7 +8142,7 @@ ALTER TABLE ONLY auth.user_module_overrides
 
 
 --
--- Name: user_roles user_roles_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_roles user_roles_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_roles
@@ -7399,7 +8150,7 @@ ALTER TABLE ONLY auth.user_roles
 
 
 --
--- Name: user_ui_field_access user_ui_field_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_ui_field_access user_ui_field_access_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_ui_field_access
@@ -7407,7 +8158,7 @@ ALTER TABLE ONLY auth.user_ui_field_access
 
 
 --
--- Name: users users_pkey; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.users
@@ -7415,7 +8166,7 @@ ALTER TABLE ONLY auth.users
 
 
 --
--- Name: users users_username_key; Type: CONSTRAINT; Schema: auth; Owner: -
+-- Name: users users_username_key; Type: CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.users
@@ -7423,7 +8174,7 @@ ALTER TABLE ONLY auth.users
 
 
 --
--- Name: documents documents_company_id_doc_type_series_number_key; Type: CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_company_id_doc_type_series_number_key; Type: CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -7431,7 +8182,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: documents documents_pkey; Type: CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_pkey; Type: CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -7439,7 +8190,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: branches branches_company_id_code_key; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: branches branches_company_id_code_key; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.branches
@@ -7447,7 +8198,7 @@ ALTER TABLE ONLY core.branches
 
 
 --
--- Name: branches branches_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: branches branches_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.branches
@@ -7455,7 +8206,7 @@ ALTER TABLE ONLY core.branches
 
 
 --
--- Name: companies companies_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: companies companies_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.companies
@@ -7463,7 +8214,7 @@ ALTER TABLE ONLY core.companies
 
 
 --
--- Name: companies companies_tax_id_key; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: companies companies_tax_id_key; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.companies
@@ -7471,7 +8222,15 @@ ALTER TABLE ONLY core.companies
 
 
 --
--- Name: company_settings company_settings_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: company_igv_rates company_igv_rates_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
+--
+
+ALTER TABLE ONLY core.company_igv_rates
+    ADD CONSTRAINT company_igv_rates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: company_settings company_settings_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.company_settings
@@ -7479,7 +8238,7 @@ ALTER TABLE ONLY core.company_settings
 
 
 --
--- Name: currencies currencies_code_key; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: currencies currencies_code_key; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.currencies
@@ -7487,7 +8246,7 @@ ALTER TABLE ONLY core.currencies
 
 
 --
--- Name: currencies currencies_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: currencies currencies_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.currencies
@@ -7495,7 +8254,7 @@ ALTER TABLE ONLY core.currencies
 
 
 --
--- Name: payment_methods payment_methods_code_key; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: payment_methods payment_methods_code_key; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.payment_methods
@@ -7503,7 +8262,7 @@ ALTER TABLE ONLY core.payment_methods
 
 
 --
--- Name: payment_methods payment_methods_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: payment_methods payment_methods_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.payment_methods
@@ -7511,7 +8270,7 @@ ALTER TABLE ONLY core.payment_methods
 
 
 --
--- Name: tax_categories tax_categories_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: tax_categories tax_categories_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.tax_categories
@@ -7519,7 +8278,7 @@ ALTER TABLE ONLY core.tax_categories
 
 
 --
--- Name: units units_code_key; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: units units_code_key; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.units
@@ -7527,7 +8286,7 @@ ALTER TABLE ONLY core.units
 
 
 --
--- Name: units units_pkey; Type: CONSTRAINT; Schema: core; Owner: -
+-- Name: units units_pkey; Type: CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.units
@@ -7535,7 +8294,7 @@ ALTER TABLE ONLY core.units
 
 
 --
--- Name: categories categories_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: categories categories_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.categories
@@ -7543,7 +8302,7 @@ ALTER TABLE ONLY inventory.categories
 
 
 --
--- Name: categories categories_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.categories
@@ -7551,7 +8310,7 @@ ALTER TABLE ONLY inventory.categories
 
 
 --
--- Name: inventory_ledger inventory_ledger_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -7559,7 +8318,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_settings inventory_settings_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_settings inventory_settings_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_settings
@@ -7567,7 +8326,7 @@ ALTER TABLE ONLY inventory.inventory_settings
 
 
 --
--- Name: lot_expiry_projection lot_expiry_projection_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: lot_expiry_projection lot_expiry_projection_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.lot_expiry_projection
@@ -7575,7 +8334,7 @@ ALTER TABLE ONLY inventory.lot_expiry_projection
 
 
 --
--- Name: outbox_events outbox_events_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: outbox_events outbox_events_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.outbox_events
@@ -7583,7 +8342,7 @@ ALTER TABLE ONLY inventory.outbox_events
 
 
 --
--- Name: product_brands product_brands_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_brands product_brands_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_brands
@@ -7591,7 +8350,7 @@ ALTER TABLE ONLY inventory.product_brands
 
 
 --
--- Name: product_brands product_brands_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_brands product_brands_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_brands
@@ -7599,7 +8358,7 @@ ALTER TABLE ONLY inventory.product_brands
 
 
 --
--- Name: product_lines product_lines_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lines product_lines_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lines
@@ -7607,7 +8366,7 @@ ALTER TABLE ONLY inventory.product_lines
 
 
 --
--- Name: product_lines product_lines_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lines product_lines_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lines
@@ -7615,7 +8374,7 @@ ALTER TABLE ONLY inventory.product_lines
 
 
 --
--- Name: product_locations product_locations_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_locations product_locations_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_locations
@@ -7623,7 +8382,7 @@ ALTER TABLE ONLY inventory.product_locations
 
 
 --
--- Name: product_locations product_locations_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_locations product_locations_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_locations
@@ -7631,7 +8390,7 @@ ALTER TABLE ONLY inventory.product_locations
 
 
 --
--- Name: product_lots product_lots_company_id_warehouse_id_product_id_lot_code_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_company_id_warehouse_id_product_id_lot_code_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -7639,7 +8398,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_lots product_lots_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -7647,7 +8406,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_recipe_items product_recipe_items_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipe_items product_recipe_items_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipe_items
@@ -7655,7 +8414,7 @@ ALTER TABLE ONLY inventory.product_recipe_items
 
 
 --
--- Name: product_recipe_items product_recipe_items_recipe_id_component_product_id_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipe_items product_recipe_items_recipe_id_component_product_id_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipe_items
@@ -7663,7 +8422,7 @@ ALTER TABLE ONLY inventory.product_recipe_items
 
 
 --
--- Name: product_recipes product_recipes_company_id_code_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipes product_recipes_company_id_code_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes
@@ -7671,7 +8430,7 @@ ALTER TABLE ONLY inventory.product_recipes
 
 
 --
--- Name: product_recipes product_recipes_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipes product_recipes_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes
@@ -7679,7 +8438,7 @@ ALTER TABLE ONLY inventory.product_recipes
 
 
 --
--- Name: product_sale_units product_sale_units_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_sale_units product_sale_units_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_sale_units
@@ -7687,7 +8446,7 @@ ALTER TABLE ONLY inventory.product_sale_units
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_company_id_product_id_from_unit_id__key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_company_id_product_id_from_unit_id__key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -7695,7 +8454,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -7703,7 +8462,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: product_warranties product_warranties_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_warranties product_warranties_company_id_name_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_warranties
@@ -7711,7 +8470,7 @@ ALTER TABLE ONLY inventory.product_warranties
 
 
 --
--- Name: product_warranties product_warranties_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_warranties product_warranties_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_warranties
@@ -7719,7 +8478,7 @@ ALTER TABLE ONLY inventory.product_warranties
 
 
 --
--- Name: products products_company_id_sku_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: products products_company_id_sku_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products
@@ -7727,7 +8486,7 @@ ALTER TABLE ONLY inventory.products
 
 
 --
--- Name: products products_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: products products_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products
@@ -7735,7 +8494,7 @@ ALTER TABLE ONLY inventory.products
 
 
 --
--- Name: report_requests report_requests_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: report_requests report_requests_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.report_requests
@@ -7743,7 +8502,7 @@ ALTER TABLE ONLY inventory.report_requests
 
 
 --
--- Name: stock_daily_snapshot stock_daily_snapshot_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_daily_snapshot stock_daily_snapshot_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_daily_snapshot
@@ -7751,7 +8510,7 @@ ALTER TABLE ONLY inventory.stock_daily_snapshot
 
 
 --
--- Name: stock_entries stock_entries_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_entries stock_entries_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_entries
@@ -7759,7 +8518,7 @@ ALTER TABLE ONLY inventory.stock_entries
 
 
 --
--- Name: stock_entry_items stock_entry_items_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_entry_items stock_entry_items_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_entry_items
@@ -7767,7 +8526,7 @@ ALTER TABLE ONLY inventory.stock_entry_items
 
 
 --
--- Name: stock_transformation_lines stock_transformation_lines_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines stock_transformation_lines_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines
@@ -7775,7 +8534,7 @@ ALTER TABLE ONLY inventory.stock_transformation_lines
 
 
 --
--- Name: stock_transformations stock_transformations_company_id_transformation_code_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_company_id_transformation_code_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -7783,7 +8542,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: stock_transformations stock_transformations_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -7791,7 +8550,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: transformation_settings transformation_settings_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: transformation_settings transformation_settings_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.transformation_settings
@@ -7799,7 +8558,7 @@ ALTER TABLE ONLY inventory.transformation_settings
 
 
 --
--- Name: warehouses warehouses_company_id_code_key; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: warehouses warehouses_company_id_code_key; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.warehouses
@@ -7807,7 +8566,7 @@ ALTER TABLE ONLY inventory.warehouses
 
 
 --
--- Name: warehouses warehouses_pkey; Type: CONSTRAINT; Schema: inventory; Owner: -
+-- Name: warehouses warehouses_pkey; Type: CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.warehouses
@@ -7815,7 +8574,7 @@ ALTER TABLE ONLY inventory.warehouses
 
 
 --
--- Name: additional_legends additional_legends_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: additional_legends additional_legends_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.additional_legends
@@ -7823,7 +8582,7 @@ ALTER TABLE ONLY master.additional_legends
 
 
 --
--- Name: additional_legends additional_legends_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: additional_legends additional_legends_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.additional_legends
@@ -7831,7 +8590,7 @@ ALTER TABLE ONLY master.additional_legends
 
 
 --
--- Name: credit_note_reasons credit_note_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: credit_note_reasons credit_note_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.credit_note_reasons
@@ -7839,7 +8598,7 @@ ALTER TABLE ONLY master.credit_note_reasons
 
 
 --
--- Name: credit_note_reasons credit_note_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: credit_note_reasons credit_note_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.credit_note_reasons
@@ -7847,7 +8606,7 @@ ALTER TABLE ONLY master.credit_note_reasons
 
 
 --
--- Name: debit_note_reasons debit_note_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: debit_note_reasons debit_note_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.debit_note_reasons
@@ -7855,7 +8614,7 @@ ALTER TABLE ONLY master.debit_note_reasons
 
 
 --
--- Name: debit_note_reasons debit_note_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: debit_note_reasons debit_note_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.debit_note_reasons
@@ -7863,7 +8622,23 @@ ALTER TABLE ONLY master.debit_note_reasons
 
 
 --
--- Name: employee_roles employee_roles_name_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: detraccion_service_codes detraccion_service_codes_code_unique; Type: CONSTRAINT; Schema: master; Owner: postgres
+--
+
+ALTER TABLE ONLY master.detraccion_service_codes
+    ADD CONSTRAINT detraccion_service_codes_code_unique UNIQUE (code);
+
+
+--
+-- Name: detraccion_service_codes detraccion_service_codes_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
+--
+
+ALTER TABLE ONLY master.detraccion_service_codes
+    ADD CONSTRAINT detraccion_service_codes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: employee_roles employee_roles_name_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.employee_roles
@@ -7871,7 +8646,7 @@ ALTER TABLE ONLY master.employee_roles
 
 
 --
--- Name: employee_roles employee_roles_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: employee_roles employee_roles_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.employee_roles
@@ -7879,7 +8654,7 @@ ALTER TABLE ONLY master.employee_roles
 
 
 --
--- Name: geo_ubigeo geo_ubigeo_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: geo_ubigeo geo_ubigeo_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.geo_ubigeo
@@ -7887,7 +8662,7 @@ ALTER TABLE ONLY master.geo_ubigeo
 
 
 --
--- Name: geo_ubigeo geo_ubigeo_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: geo_ubigeo geo_ubigeo_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.geo_ubigeo
@@ -7895,7 +8670,7 @@ ALTER TABLE ONLY master.geo_ubigeo
 
 
 --
--- Name: item_types item_types_name_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: item_types item_types_name_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.item_types
@@ -7903,7 +8678,7 @@ ALTER TABLE ONLY master.item_types
 
 
 --
--- Name: item_types item_types_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: item_types item_types_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.item_types
@@ -7911,7 +8686,7 @@ ALTER TABLE ONLY master.item_types
 
 
 --
--- Name: payment_types payment_types_name_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: payment_types payment_types_name_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.payment_types
@@ -7919,7 +8694,7 @@ ALTER TABLE ONLY master.payment_types
 
 
 --
--- Name: payment_types payment_types_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: payment_types payment_types_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.payment_types
@@ -7927,7 +8702,7 @@ ALTER TABLE ONLY master.payment_types
 
 
 --
--- Name: shipment_transfer_reasons shipment_transfer_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: shipment_transfer_reasons shipment_transfer_reasons_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.shipment_transfer_reasons
@@ -7935,7 +8710,7 @@ ALTER TABLE ONLY master.shipment_transfer_reasons
 
 
 --
--- Name: shipment_transfer_reasons shipment_transfer_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: shipment_transfer_reasons shipment_transfer_reasons_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.shipment_transfer_reasons
@@ -7943,7 +8718,7 @@ ALTER TABLE ONLY master.shipment_transfer_reasons
 
 
 --
--- Name: shipment_transport_modes shipment_transport_modes_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: shipment_transport_modes shipment_transport_modes_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.shipment_transport_modes
@@ -7951,7 +8726,7 @@ ALTER TABLE ONLY master.shipment_transport_modes
 
 
 --
--- Name: shipment_transport_modes shipment_transport_modes_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: shipment_transport_modes shipment_transport_modes_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.shipment_transport_modes
@@ -7959,7 +8734,7 @@ ALTER TABLE ONLY master.shipment_transport_modes
 
 
 --
--- Name: sunat_uom sunat_uom_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: sunat_uom sunat_uom_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.sunat_uom
@@ -7967,7 +8742,7 @@ ALTER TABLE ONLY master.sunat_uom
 
 
 --
--- Name: sunat_uom sunat_uom_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: sunat_uom sunat_uom_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.sunat_uom
@@ -7975,7 +8750,7 @@ ALTER TABLE ONLY master.sunat_uom
 
 
 --
--- Name: tax_codes tax_codes_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: tax_codes tax_codes_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.tax_codes
@@ -7983,7 +8758,7 @@ ALTER TABLE ONLY master.tax_codes
 
 
 --
--- Name: vat_categories vat_categories_code_key; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: vat_categories vat_categories_code_key; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.vat_categories
@@ -7991,7 +8766,7 @@ ALTER TABLE ONLY master.vat_categories
 
 
 --
--- Name: vat_categories vat_categories_pkey; Type: CONSTRAINT; Schema: master; Owner: -
+-- Name: vat_categories vat_categories_pkey; Type: CONSTRAINT; Schema: master; Owner: postgres
 --
 
 ALTER TABLE ONLY master.vat_categories
@@ -7999,7 +8774,39 @@ ALTER TABLE ONLY master.vat_categories
 
 
 --
--- Name: cash_movements cash_movements_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: failed_jobs failed_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.failed_jobs
+    ADD CONSTRAINT failed_jobs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: migrations migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.migrations
+    ADD CONSTRAINT migrations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_email_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_unique UNIQUE (email);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cash_movements cash_movements_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_movements
@@ -8007,7 +8814,7 @@ ALTER TABLE ONLY sales.cash_movements
 
 
 --
--- Name: cash_registers cash_registers_company_id_code_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_registers cash_registers_company_id_code_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_registers
@@ -8015,7 +8822,7 @@ ALTER TABLE ONLY sales.cash_registers
 
 
 --
--- Name: cash_registers cash_registers_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_registers cash_registers_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_registers
@@ -8023,7 +8830,7 @@ ALTER TABLE ONLY sales.cash_registers
 
 
 --
--- Name: cash_sessions cash_sessions_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -8031,7 +8838,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: commercial_document_item_lots commercial_document_item_lots_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots commercial_document_item_lots_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_item_lots
@@ -8039,7 +8846,7 @@ ALTER TABLE ONLY sales.commercial_document_item_lots
 
 
 --
--- Name: commercial_document_items commercial_document_items_document_id_line_no_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_document_id_line_no_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -8047,7 +8854,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_items commercial_document_items_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -8055,7 +8862,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_payments commercial_document_payments_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_payments commercial_document_payments_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_payments
@@ -8063,7 +8870,7 @@ ALTER TABLE ONLY sales.commercial_document_payments
 
 
 --
--- Name: commercial_documents commercial_documents_company_id_document_kind_series_number_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_company_id_document_kind_series_number_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -8071,7 +8878,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -8079,7 +8886,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: customer_price_profiles customer_price_profiles_company_id_customer_id_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_price_profiles customer_price_profiles_company_id_customer_id_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles
@@ -8087,7 +8894,7 @@ ALTER TABLE ONLY sales.customer_price_profiles
 
 
 --
--- Name: customer_price_profiles customer_price_profiles_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_price_profiles customer_price_profiles_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles
@@ -8095,7 +8902,23 @@ ALTER TABLE ONLY sales.customer_price_profiles
 
 
 --
--- Name: customers customers_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_types customer_types_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
+--
+
+ALTER TABLE ONLY sales.customer_types
+    ADD CONSTRAINT customer_types_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_types customer_types_sunat_code_unique; Type: CONSTRAINT; Schema: sales; Owner: postgres
+--
+
+ALTER TABLE ONLY sales.customer_types
+    ADD CONSTRAINT customer_types_sunat_code_unique UNIQUE (sunat_code);
+
+
+--
+-- Name: customers customers_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customers
@@ -8103,7 +8926,7 @@ ALTER TABLE ONLY sales.customers
 
 
 --
--- Name: document_sequences document_sequences_company_id_branch_id_warehouse_id_docume_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: document_sequences document_sequences_company_id_branch_id_warehouse_id_docume_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences
@@ -8111,7 +8934,7 @@ ALTER TABLE ONLY sales.document_sequences
 
 
 --
--- Name: document_sequences document_sequences_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: document_sequences document_sequences_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences
@@ -8119,7 +8942,7 @@ ALTER TABLE ONLY sales.document_sequences
 
 
 --
--- Name: order_sequences order_sequences_company_id_branch_id_doc_type_series_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: order_sequences order_sequences_company_id_branch_id_doc_type_series_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.order_sequences
@@ -8127,7 +8950,7 @@ ALTER TABLE ONLY sales.order_sequences
 
 
 --
--- Name: order_sequences order_sequences_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: order_sequences order_sequences_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.order_sequences
@@ -8135,7 +8958,7 @@ ALTER TABLE ONLY sales.order_sequences
 
 
 --
--- Name: price_tiers price_tiers_company_id_code_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: price_tiers price_tiers_company_id_code_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.price_tiers
@@ -8143,7 +8966,7 @@ ALTER TABLE ONLY sales.price_tiers
 
 
 --
--- Name: price_tiers price_tiers_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: price_tiers price_tiers_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.price_tiers
@@ -8151,7 +8974,7 @@ ALTER TABLE ONLY sales.price_tiers
 
 
 --
--- Name: product_price_tier_values product_price_tier_values_company_id_product_id_price_tier__key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_price_tier_values product_price_tier_values_company_id_product_id_price_tier__key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_price_tier_values
@@ -8159,7 +8982,7 @@ ALTER TABLE ONLY sales.product_price_tier_values
 
 
 --
--- Name: product_price_tier_values product_price_tier_values_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_price_tier_values product_price_tier_values_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_price_tier_values
@@ -8167,7 +8990,7 @@ ALTER TABLE ONLY sales.product_price_tier_values
 
 
 --
--- Name: product_tier_prices product_tier_prices_company_id_product_id_tier_id_currency__key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_company_id_product_id_tier_id_currency__key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -8175,7 +8998,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: product_tier_prices product_tier_prices_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -8183,7 +9006,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: sales_order_item_lots sales_order_item_lots_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_item_lots sales_order_item_lots_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_item_lots
@@ -8191,7 +9014,7 @@ ALTER TABLE ONLY sales.sales_order_item_lots
 
 
 --
--- Name: sales_order_items sales_order_items_order_id_line_no_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_items sales_order_items_order_id_line_no_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items
@@ -8199,7 +9022,7 @@ ALTER TABLE ONLY sales.sales_order_items
 
 
 --
--- Name: sales_order_items sales_order_items_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_items sales_order_items_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items
@@ -8207,7 +9030,7 @@ ALTER TABLE ONLY sales.sales_order_items
 
 
 --
--- Name: sales_order_payments sales_order_payments_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_payments sales_order_payments_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_payments
@@ -8215,7 +9038,7 @@ ALTER TABLE ONLY sales.sales_order_payments
 
 
 --
--- Name: sales_orders sales_orders_company_id_sequence_series_sequence_number_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_company_id_sequence_series_sequence_number_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -8223,7 +9046,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -8231,7 +9054,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: series_numbers series_numbers_company_id_branch_id_warehouse_id_document_k_key; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_company_id_branch_id_warehouse_id_document_k_key; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -8239,7 +9062,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: series_numbers series_numbers_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -8247,7 +9070,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: wholesale_settings wholesale_settings_pkey; Type: CONSTRAINT; Schema: sales; Owner: -
+-- Name: wholesale_settings wholesale_settings_pkey; Type: CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.wholesale_settings
@@ -8255,476 +9078,504 @@ ALTER TABLE ONLY sales.wholesale_settings
 
 
 --
--- Name: idx_branch_feature_enabled; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_branch_feature_enabled; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_branch_feature_enabled ON appcfg.branch_feature_toggles USING btree (company_id, branch_id, is_enabled);
 
 
 --
--- Name: idx_branch_modules_enabled; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_branch_modules_enabled; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_branch_modules_enabled ON appcfg.branch_modules USING btree (company_id, branch_id, is_enabled);
 
 
 --
--- Name: idx_company_feature_enabled; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_company_feature_enabled; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_company_feature_enabled ON appcfg.company_feature_toggles USING btree (company_id, is_enabled);
 
 
 --
--- Name: idx_company_modules_enabled; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_company_modules_enabled; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_company_modules_enabled ON appcfg.company_modules USING btree (company_id, is_enabled);
 
 
 --
--- Name: idx_saved_filters_company_user; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_saved_filters_company_user; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_saved_filters_company_user ON appcfg.saved_filters USING btree (company_id, user_id);
 
 
 --
--- Name: idx_saved_filters_entity; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_saved_filters_entity; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_saved_filters_entity ON appcfg.saved_filters USING btree (entity_id, status);
 
 
 --
--- Name: idx_ui_fields_entity; Type: INDEX; Schema: appcfg; Owner: -
+-- Name: idx_ui_fields_entity; Type: INDEX; Schema: appcfg; Owner: postgres
 --
 
 CREATE INDEX idx_ui_fields_entity ON appcfg.ui_fields USING btree (entity_id, status);
 
 
 --
--- Name: idx_refresh_tokens_user; Type: INDEX; Schema: auth; Owner: -
+-- Name: idx_refresh_tokens_user; Type: INDEX; Schema: auth; Owner: postgres
 --
 
 CREATE INDEX idx_refresh_tokens_user ON auth.refresh_tokens USING btree (user_id);
 
 
 --
--- Name: idx_role_module_access_module; Type: INDEX; Schema: auth; Owner: -
+-- Name: idx_role_module_access_module; Type: INDEX; Schema: auth; Owner: postgres
 --
 
 CREATE INDEX idx_role_module_access_module ON auth.role_module_access USING btree (module_id);
 
 
 --
--- Name: idx_user_module_overrides_module; Type: INDEX; Schema: auth; Owner: -
+-- Name: idx_user_module_overrides_module; Type: INDEX; Schema: auth; Owner: postgres
 --
 
 CREATE INDEX idx_user_module_overrides_module ON auth.user_module_overrides USING btree (module_id);
 
 
 --
--- Name: idx_inv_ledger_product_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: company_igv_rates_active_unique_idx; Type: INDEX; Schema: core; Owner: postgres
+--
+
+CREATE UNIQUE INDEX company_igv_rates_active_unique_idx ON core.company_igv_rates USING btree (company_id) WHERE (is_active = true);
+
+
+--
+-- Name: company_igv_rates_company_idx; Type: INDEX; Schema: core; Owner: postgres
+--
+
+CREATE INDEX company_igv_rates_company_idx ON core.company_igv_rates USING btree (company_id);
+
+
+--
+-- Name: idx_inv_ledger_product_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inv_ledger_product_date ON inventory.inventory_ledger USING btree (company_id, product_id, moved_at DESC);
 
 
 --
--- Name: idx_inv_ledger_ref; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inv_ledger_ref; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inv_ledger_ref ON inventory.inventory_ledger USING btree (ref_type, ref_id);
 
 
 --
--- Name: idx_inv_ledger_warehouse_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inv_ledger_warehouse_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inv_ledger_warehouse_date ON inventory.inventory_ledger USING btree (company_id, warehouse_id, moved_at DESC);
 
 
 --
--- Name: idx_inventory_lot_expiry_company_expiry; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_lot_expiry_company_expiry; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_lot_expiry_company_expiry ON inventory.lot_expiry_projection USING btree (company_id, expires_at);
 
 
 --
--- Name: idx_inventory_lot_expiry_company_product; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_lot_expiry_company_product; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_lot_expiry_company_product ON inventory.lot_expiry_projection USING btree (company_id, product_id);
 
 
 --
--- Name: idx_inventory_lot_expiry_company_wh; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_lot_expiry_company_wh; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_lot_expiry_company_wh ON inventory.lot_expiry_projection USING btree (company_id, warehouse_id);
 
 
 --
--- Name: idx_inventory_outbox_company_created; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_outbox_company_created; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_outbox_company_created ON inventory.outbox_events USING btree (company_id, created_at DESC);
 
 
 --
--- Name: idx_inventory_outbox_event_type; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_outbox_event_type; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_outbox_event_type ON inventory.outbox_events USING btree (event_type);
 
 
 --
--- Name: idx_inventory_outbox_status_available; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_outbox_status_available; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_outbox_status_available ON inventory.outbox_events USING btree (status, available_at);
 
 
 --
--- Name: idx_inventory_report_requests_company_status; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_report_requests_company_status; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_report_requests_company_status ON inventory.report_requests USING btree (company_id, status);
 
 
 --
--- Name: idx_inventory_report_requests_company_type; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_report_requests_company_type; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_report_requests_company_type ON inventory.report_requests USING btree (company_id, report_type);
 
 
 --
--- Name: idx_inventory_report_requests_requested_at; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_report_requests_requested_at; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_report_requests_requested_at ON inventory.report_requests USING btree (requested_at DESC);
 
 
 --
--- Name: idx_inventory_stock_daily_company_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_stock_daily_company_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_stock_daily_company_date ON inventory.stock_daily_snapshot USING btree (company_id, snapshot_date DESC);
 
 
 --
--- Name: idx_inventory_stock_daily_company_product; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_stock_daily_company_product; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_stock_daily_company_product ON inventory.stock_daily_snapshot USING btree (company_id, product_id, snapshot_date DESC);
 
 
 --
--- Name: idx_inventory_stock_daily_company_wh; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_inventory_stock_daily_company_wh; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_inventory_stock_daily_company_wh ON inventory.stock_daily_snapshot USING btree (company_id, warehouse_id, snapshot_date DESC);
 
 
 --
--- Name: idx_ledger_lot_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_ledger_lot_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_ledger_lot_date ON inventory.inventory_ledger USING btree (lot_id, moved_at);
 
 
 --
--- Name: idx_ledger_product_wh_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_ledger_product_wh_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_ledger_product_wh_date ON inventory.inventory_ledger USING btree (product_id, warehouse_id, moved_at);
 
 
 --
--- Name: idx_product_lots_company_code; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_product_lots_company_code; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_product_lots_company_code ON inventory.product_lots USING btree (company_id, lot_code);
 
 
 --
--- Name: idx_product_lots_prod_wh_exp; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_product_lots_prod_wh_exp; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_product_lots_prod_wh_exp ON inventory.product_lots USING btree (product_id, warehouse_id, expires_at);
 
 
 --
--- Name: idx_product_recipes_output; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_product_recipes_output; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_product_recipes_output ON inventory.product_recipes USING btree (output_product_id, status);
 
 
 --
--- Name: idx_product_uom_conv_product; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_product_uom_conv_product; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_product_uom_conv_product ON inventory.product_uom_conversions USING btree (product_id, status);
 
 
 --
--- Name: idx_products_company_name; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_products_company_name; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_products_company_name ON inventory.products USING btree (company_id, name);
 
 
 --
--- Name: idx_recipe_items_recipe; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_recipe_items_recipe; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_recipe_items_recipe ON inventory.product_recipe_items USING btree (recipe_id);
 
 
 --
--- Name: idx_stock_transform_company_date; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_stock_transform_company_date; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_stock_transform_company_date ON inventory.stock_transformations USING btree (company_id, executed_at);
 
 
 --
--- Name: idx_stock_transform_lines_transform; Type: INDEX; Schema: inventory; Owner: -
+-- Name: idx_stock_transform_lines_transform; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX idx_stock_transform_lines_transform ON inventory.stock_transformation_lines USING btree (transformation_id, line_type);
 
 
 --
--- Name: stock_entries_company_issue_idx; Type: INDEX; Schema: inventory; Owner: -
+-- Name: stock_entries_company_issue_idx; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX stock_entries_company_issue_idx ON inventory.stock_entries USING btree (company_id, issue_at DESC, id DESC);
 
 
 --
--- Name: stock_entry_items_entry_idx; Type: INDEX; Schema: inventory; Owner: -
+-- Name: stock_entry_items_entry_idx; Type: INDEX; Schema: inventory; Owner: postgres
 --
 
 CREATE INDEX stock_entry_items_entry_idx ON inventory.stock_entry_items USING btree (entry_id);
 
 
 --
--- Name: idx_master_geo_full_name; Type: INDEX; Schema: master; Owner: -
+-- Name: idx_master_geo_full_name; Type: INDEX; Schema: master; Owner: postgres
 --
 
 CREATE INDEX idx_master_geo_full_name ON master.geo_ubigeo USING btree (full_name);
 
 
 --
--- Name: idx_master_geo_status; Type: INDEX; Schema: master; Owner: -
+-- Name: idx_master_geo_status; Type: INDEX; Schema: master; Owner: postgres
 --
 
 CREATE INDEX idx_master_geo_status ON master.geo_ubigeo USING btree (status);
 
 
 --
--- Name: idx_master_vat_tax_code; Type: INDEX; Schema: master; Owner: -
+-- Name: idx_master_vat_tax_code; Type: INDEX; Schema: master; Owner: postgres
 --
 
 CREATE INDEX idx_master_vat_tax_code ON master.vat_categories USING btree (tax_code);
 
 
 --
--- Name: idx_cash_movements_company; Type: INDEX; Schema: sales; Owner: -
+-- Name: password_resets_email_index; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX password_resets_email_index ON public.password_resets USING btree (email);
+
+
+--
+-- Name: customers_customer_type_id_idx; Type: INDEX; Schema: sales; Owner: postgres
+--
+
+CREATE INDEX customers_customer_type_id_idx ON sales.customers USING btree (customer_type_id);
+
+
+--
+-- Name: idx_cash_movements_company; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_movements_company ON sales.cash_movements USING btree (company_id, movement_at DESC);
 
 
 --
--- Name: idx_cash_movements_register; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_movements_register; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_movements_register ON sales.cash_movements USING btree (cash_register_id, movement_at DESC);
 
 
 --
--- Name: idx_cash_movements_session; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_movements_session; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_movements_session ON sales.cash_movements USING btree (cash_session_id);
 
 
 --
--- Name: idx_cash_movements_session_type; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_movements_session_type; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_movements_session_type ON sales.cash_movements USING btree (cash_session_id, movement_type);
 
 
 --
--- Name: idx_cash_sessions_company; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_sessions_company; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_sessions_company ON sales.cash_sessions USING btree (company_id, status);
 
 
 --
--- Name: idx_cash_sessions_company_date; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_sessions_company_date; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_sessions_company_date ON sales.cash_sessions USING btree (company_id, opened_at);
 
 
 --
--- Name: idx_cash_sessions_register; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_sessions_register; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_sessions_register ON sales.cash_sessions USING btree (cash_register_id, status);
 
 
 --
--- Name: idx_cash_sessions_register_status; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_cash_sessions_register_status; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_cash_sessions_register_status ON sales.cash_sessions USING btree (cash_register_id, status);
 
 
 --
--- Name: idx_commercial_doc_items_doc; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_doc_items_doc; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_doc_items_doc ON sales.commercial_document_items USING btree (document_id);
 
 
 --
--- Name: idx_commercial_doc_items_product; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_doc_items_product; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_doc_items_product ON sales.commercial_document_items USING btree (product_id);
 
 
 --
--- Name: idx_commercial_doc_items_tier; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_doc_items_tier; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_doc_items_tier ON sales.commercial_document_items USING btree (price_tier_id);
 
 
 --
--- Name: idx_commercial_docs_company_issue; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_docs_company_issue; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_docs_company_issue ON sales.commercial_documents USING btree (company_id, issue_at);
 
 
 --
--- Name: idx_commercial_docs_company_kind_status; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_docs_company_kind_status; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_docs_company_kind_status ON sales.commercial_documents USING btree (company_id, document_kind, status);
 
 
 --
--- Name: idx_commercial_docs_customer; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_docs_customer; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_docs_customer ON sales.commercial_documents USING btree (company_id, customer_id);
 
 
 --
--- Name: idx_commercial_docs_reference; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_docs_reference; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_docs_reference ON sales.commercial_documents USING btree (reference_document_id);
 
 
 --
--- Name: idx_commercial_item_lots_item; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_item_lots_item; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_item_lots_item ON sales.commercial_document_item_lots USING btree (document_item_id);
 
 
 --
--- Name: idx_commercial_payments_doc; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_commercial_payments_doc; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_commercial_payments_doc ON sales.commercial_document_payments USING btree (document_id, status);
 
 
 --
--- Name: idx_customer_price_profiles_customer; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_customer_price_profiles_customer; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_customer_price_profiles_customer ON sales.customer_price_profiles USING btree (customer_id, status);
 
 
 --
--- Name: idx_customers_doc; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_customers_doc; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_customers_doc ON sales.customers USING btree (company_id, doc_number);
 
 
 --
--- Name: idx_doc_sequences_company_kind; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_doc_sequences_company_kind; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_doc_sequences_company_kind ON sales.document_sequences USING btree (company_id, document_kind, status);
 
 
 --
--- Name: idx_product_tier_prices_product; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_product_tier_prices_product; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_product_tier_prices_product ON sales.product_tier_prices USING btree (product_id, tier_id, status);
 
 
 --
--- Name: idx_sales_item_lots_item; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_sales_item_lots_item; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_sales_item_lots_item ON sales.sales_order_item_lots USING btree (sales_order_item_id);
 
 
 --
--- Name: idx_sales_item_lots_lot; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_sales_item_lots_lot; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_sales_item_lots_lot ON sales.sales_order_item_lots USING btree (lot_id);
 
 
 --
--- Name: idx_sales_orders_customer; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_sales_orders_customer; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_sales_orders_customer ON sales.sales_orders USING btree (company_id, customer_id);
 
 
 --
--- Name: idx_sales_orders_issue; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_sales_orders_issue; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_sales_orders_issue ON sales.sales_orders USING btree (company_id, issue_at);
 
 
 --
--- Name: idx_sales_orders_status; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_sales_orders_status; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_sales_orders_status ON sales.sales_orders USING btree (company_id, status);
 
 
 --
--- Name: idx_series_numbers_company_kind; Type: INDEX; Schema: sales; Owner: -
+-- Name: idx_series_numbers_company_kind; Type: INDEX; Schema: sales; Owner: postgres
 --
 
 CREATE INDEX idx_series_numbers_company_kind ON sales.series_numbers USING btree (company_id, document_kind, is_enabled);
 
 
 --
--- Name: branch_feature_toggles branch_feature_toggles_branch_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_feature_toggles branch_feature_toggles_branch_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_feature_toggles
@@ -8732,7 +9583,7 @@ ALTER TABLE ONLY appcfg.branch_feature_toggles
 
 
 --
--- Name: branch_feature_toggles branch_feature_toggles_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_feature_toggles branch_feature_toggles_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_feature_toggles
@@ -8740,7 +9591,7 @@ ALTER TABLE ONLY appcfg.branch_feature_toggles
 
 
 --
--- Name: branch_modules branch_modules_branch_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_modules branch_modules_branch_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_modules
@@ -8748,7 +9599,7 @@ ALTER TABLE ONLY appcfg.branch_modules
 
 
 --
--- Name: branch_modules branch_modules_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_modules branch_modules_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_modules
@@ -8756,7 +9607,7 @@ ALTER TABLE ONLY appcfg.branch_modules
 
 
 --
--- Name: branch_modules branch_modules_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: branch_modules branch_modules_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.branch_modules
@@ -8764,7 +9615,7 @@ ALTER TABLE ONLY appcfg.branch_modules
 
 
 --
--- Name: company_feature_toggles company_feature_toggles_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_feature_toggles company_feature_toggles_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_feature_toggles
@@ -8772,7 +9623,7 @@ ALTER TABLE ONLY appcfg.company_feature_toggles
 
 
 --
--- Name: company_modules company_modules_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_modules company_modules_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_modules
@@ -8780,7 +9631,7 @@ ALTER TABLE ONLY appcfg.company_modules
 
 
 --
--- Name: company_modules company_modules_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_modules company_modules_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_modules
@@ -8788,7 +9639,7 @@ ALTER TABLE ONLY appcfg.company_modules
 
 
 --
--- Name: company_ui_field_settings company_ui_field_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_ui_field_settings company_ui_field_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_ui_field_settings
@@ -8796,7 +9647,7 @@ ALTER TABLE ONLY appcfg.company_ui_field_settings
 
 
 --
--- Name: company_ui_field_settings company_ui_field_settings_field_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: company_ui_field_settings company_ui_field_settings_field_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.company_ui_field_settings
@@ -8804,7 +9655,7 @@ ALTER TABLE ONLY appcfg.company_ui_field_settings
 
 
 --
--- Name: saved_filters saved_filters_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: saved_filters saved_filters_company_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.saved_filters
@@ -8812,7 +9663,7 @@ ALTER TABLE ONLY appcfg.saved_filters
 
 
 --
--- Name: saved_filters saved_filters_entity_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: saved_filters saved_filters_entity_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.saved_filters
@@ -8820,7 +9671,7 @@ ALTER TABLE ONLY appcfg.saved_filters
 
 
 --
--- Name: ui_entities ui_entities_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_entities ui_entities_module_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_entities
@@ -8828,7 +9679,7 @@ ALTER TABLE ONLY appcfg.ui_entities
 
 
 --
--- Name: ui_fields ui_fields_entity_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: -
+-- Name: ui_fields ui_fields_entity_id_fkey; Type: FK CONSTRAINT; Schema: appcfg; Owner: postgres
 --
 
 ALTER TABLE ONLY appcfg.ui_fields
@@ -8836,7 +9687,7 @@ ALTER TABLE ONLY appcfg.ui_fields
 
 
 --
--- Name: refresh_tokens refresh_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: refresh_tokens refresh_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.refresh_tokens
@@ -8844,7 +9695,7 @@ ALTER TABLE ONLY auth.refresh_tokens
 
 
 --
--- Name: role_module_access role_module_access_module_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_module_access role_module_access_module_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_module_access
@@ -8852,7 +9703,7 @@ ALTER TABLE ONLY auth.role_module_access
 
 
 --
--- Name: role_module_access role_module_access_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_module_access role_module_access_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_module_access
@@ -8860,7 +9711,7 @@ ALTER TABLE ONLY auth.role_module_access
 
 
 --
--- Name: role_permissions role_permissions_permission_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_permissions role_permissions_permission_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_permissions
@@ -8868,7 +9719,7 @@ ALTER TABLE ONLY auth.role_permissions
 
 
 --
--- Name: role_permissions role_permissions_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_permissions role_permissions_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_permissions
@@ -8876,7 +9727,7 @@ ALTER TABLE ONLY auth.role_permissions
 
 
 --
--- Name: role_ui_field_access role_ui_field_access_field_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_ui_field_access role_ui_field_access_field_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_ui_field_access
@@ -8884,7 +9735,7 @@ ALTER TABLE ONLY auth.role_ui_field_access
 
 
 --
--- Name: role_ui_field_access role_ui_field_access_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: role_ui_field_access role_ui_field_access_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.role_ui_field_access
@@ -8892,7 +9743,7 @@ ALTER TABLE ONLY auth.role_ui_field_access
 
 
 --
--- Name: roles roles_company_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: roles roles_company_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.roles
@@ -8900,7 +9751,7 @@ ALTER TABLE ONLY auth.roles
 
 
 --
--- Name: user_module_overrides user_module_overrides_module_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_module_overrides user_module_overrides_module_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_module_overrides
@@ -8908,7 +9759,7 @@ ALTER TABLE ONLY auth.user_module_overrides
 
 
 --
--- Name: user_module_overrides user_module_overrides_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_module_overrides user_module_overrides_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_module_overrides
@@ -8916,7 +9767,7 @@ ALTER TABLE ONLY auth.user_module_overrides
 
 
 --
--- Name: user_roles user_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_roles user_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_roles
@@ -8924,7 +9775,7 @@ ALTER TABLE ONLY auth.user_roles
 
 
 --
--- Name: user_roles user_roles_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_roles user_roles_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_roles
@@ -8932,7 +9783,7 @@ ALTER TABLE ONLY auth.user_roles
 
 
 --
--- Name: user_ui_field_access user_ui_field_access_field_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_ui_field_access user_ui_field_access_field_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_ui_field_access
@@ -8940,7 +9791,7 @@ ALTER TABLE ONLY auth.user_ui_field_access
 
 
 --
--- Name: user_ui_field_access user_ui_field_access_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: user_ui_field_access user_ui_field_access_user_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.user_ui_field_access
@@ -8948,7 +9799,7 @@ ALTER TABLE ONLY auth.user_ui_field_access
 
 
 --
--- Name: users users_branch_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: users users_branch_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.users
@@ -8956,7 +9807,7 @@ ALTER TABLE ONLY auth.users
 
 
 --
--- Name: users users_company_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: -
+-- Name: users users_company_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
 --
 
 ALTER TABLE ONLY auth.users
@@ -8964,7 +9815,7 @@ ALTER TABLE ONLY auth.users
 
 
 --
--- Name: documents documents_company_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_company_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -8972,7 +9823,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: documents documents_currency_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_currency_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -8980,7 +9831,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: documents documents_customer_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_customer_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -8988,7 +9839,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: documents documents_source_order_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: -
+-- Name: documents documents_source_order_id_fkey; Type: FK CONSTRAINT; Schema: billing; Owner: postgres
 --
 
 ALTER TABLE ONLY billing.documents
@@ -8996,7 +9847,7 @@ ALTER TABLE ONLY billing.documents
 
 
 --
--- Name: branches branches_company_id_fkey; Type: FK CONSTRAINT; Schema: core; Owner: -
+-- Name: branches branches_company_id_fkey; Type: FK CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.branches
@@ -9004,7 +9855,15 @@ ALTER TABLE ONLY core.branches
 
 
 --
--- Name: units units_sunat_uom_code_fkey; Type: FK CONSTRAINT; Schema: core; Owner: -
+-- Name: company_igv_rates company_igv_rates_company_id_fkey; Type: FK CONSTRAINT; Schema: core; Owner: postgres
+--
+
+ALTER TABLE ONLY core.company_igv_rates
+    ADD CONSTRAINT company_igv_rates_company_id_fkey FOREIGN KEY (company_id) REFERENCES core.companies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: units units_sunat_uom_code_fkey; Type: FK CONSTRAINT; Schema: core; Owner: postgres
 --
 
 ALTER TABLE ONLY core.units
@@ -9012,7 +9871,7 @@ ALTER TABLE ONLY core.units
 
 
 --
--- Name: categories categories_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: categories categories_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.categories
@@ -9020,7 +9879,7 @@ ALTER TABLE ONLY inventory.categories
 
 
 --
--- Name: inventory_ledger inventory_ledger_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -9028,7 +9887,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_ledger inventory_ledger_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -9036,7 +9895,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_ledger inventory_ledger_lot_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_lot_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -9044,7 +9903,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_ledger inventory_ledger_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -9052,7 +9911,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_ledger inventory_ledger_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_ledger inventory_ledger_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_ledger
@@ -9060,7 +9919,7 @@ ALTER TABLE ONLY inventory.inventory_ledger
 
 
 --
--- Name: inventory_settings inventory_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: inventory_settings inventory_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.inventory_settings
@@ -9068,7 +9927,7 @@ ALTER TABLE ONLY inventory.inventory_settings
 
 
 --
--- Name: product_lots product_lots_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -9076,7 +9935,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_lots product_lots_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -9084,7 +9943,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_lots product_lots_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -9092,7 +9951,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_lots product_lots_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_lots product_lots_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_lots
@@ -9100,7 +9959,7 @@ ALTER TABLE ONLY inventory.product_lots
 
 
 --
--- Name: product_recipe_items product_recipe_items_component_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipe_items product_recipe_items_component_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipe_items
@@ -9108,7 +9967,7 @@ ALTER TABLE ONLY inventory.product_recipe_items
 
 
 --
--- Name: product_recipe_items product_recipe_items_recipe_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipe_items product_recipe_items_recipe_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipe_items
@@ -9116,7 +9975,7 @@ ALTER TABLE ONLY inventory.product_recipe_items
 
 
 --
--- Name: product_recipes product_recipes_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipes product_recipes_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes
@@ -9124,7 +9983,7 @@ ALTER TABLE ONLY inventory.product_recipes
 
 
 --
--- Name: product_recipes product_recipes_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipes product_recipes_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes
@@ -9132,7 +9991,7 @@ ALTER TABLE ONLY inventory.product_recipes
 
 
 --
--- Name: product_recipes product_recipes_output_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_recipes product_recipes_output_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_recipes
@@ -9140,7 +9999,7 @@ ALTER TABLE ONLY inventory.product_recipes
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -9148,7 +10007,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_from_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_from_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -9156,7 +10015,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -9164,7 +10023,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: product_uom_conversions product_uom_conversions_to_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: product_uom_conversions product_uom_conversions_to_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.product_uom_conversions
@@ -9172,7 +10031,7 @@ ALTER TABLE ONLY inventory.product_uom_conversions
 
 
 --
--- Name: products products_category_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: products products_category_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products
@@ -9180,7 +10039,7 @@ ALTER TABLE ONLY inventory.products
 
 
 --
--- Name: products products_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: products products_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products
@@ -9188,7 +10047,7 @@ ALTER TABLE ONLY inventory.products
 
 
 --
--- Name: products products_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: products products_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.products
@@ -9196,7 +10055,7 @@ ALTER TABLE ONLY inventory.products
 
 
 --
--- Name: stock_transformation_lines stock_transformation_lines_lot_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines stock_transformation_lines_lot_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines
@@ -9204,7 +10063,7 @@ ALTER TABLE ONLY inventory.stock_transformation_lines
 
 
 --
--- Name: stock_transformation_lines stock_transformation_lines_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines stock_transformation_lines_product_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines
@@ -9212,7 +10071,7 @@ ALTER TABLE ONLY inventory.stock_transformation_lines
 
 
 --
--- Name: stock_transformation_lines stock_transformation_lines_transformation_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines stock_transformation_lines_transformation_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines
@@ -9220,7 +10079,7 @@ ALTER TABLE ONLY inventory.stock_transformation_lines
 
 
 --
--- Name: stock_transformation_lines stock_transformation_lines_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformation_lines stock_transformation_lines_unit_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformation_lines
@@ -9228,7 +10087,7 @@ ALTER TABLE ONLY inventory.stock_transformation_lines
 
 
 --
--- Name: stock_transformations stock_transformations_branch_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_branch_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -9236,7 +10095,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: stock_transformations stock_transformations_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -9244,7 +10103,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: stock_transformations stock_transformations_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_created_by_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -9252,7 +10111,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: stock_transformations stock_transformations_recipe_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_recipe_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -9260,7 +10119,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: stock_transformations stock_transformations_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: stock_transformations stock_transformations_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.stock_transformations
@@ -9268,7 +10127,7 @@ ALTER TABLE ONLY inventory.stock_transformations
 
 
 --
--- Name: transformation_settings transformation_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: transformation_settings transformation_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.transformation_settings
@@ -9276,7 +10135,7 @@ ALTER TABLE ONLY inventory.transformation_settings
 
 
 --
--- Name: warehouses warehouses_branch_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: warehouses warehouses_branch_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.warehouses
@@ -9284,7 +10143,7 @@ ALTER TABLE ONLY inventory.warehouses
 
 
 --
--- Name: warehouses warehouses_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: -
+-- Name: warehouses warehouses_company_id_fkey; Type: FK CONSTRAINT; Schema: inventory; Owner: postgres
 --
 
 ALTER TABLE ONLY inventory.warehouses
@@ -9292,7 +10151,7 @@ ALTER TABLE ONLY inventory.warehouses
 
 
 --
--- Name: cash_movements cash_movements_cash_session_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_movements cash_movements_cash_session_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_movements
@@ -9300,7 +10159,7 @@ ALTER TABLE ONLY sales.cash_movements
 
 
 --
--- Name: cash_movements cash_movements_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_movements cash_movements_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_movements
@@ -9308,7 +10167,7 @@ ALTER TABLE ONLY sales.cash_movements
 
 
 --
--- Name: cash_movements cash_movements_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_movements cash_movements_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_movements
@@ -9316,7 +10175,7 @@ ALTER TABLE ONLY sales.cash_movements
 
 
 --
--- Name: cash_registers cash_registers_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_registers cash_registers_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_registers
@@ -9324,7 +10183,7 @@ ALTER TABLE ONLY sales.cash_registers
 
 
 --
--- Name: cash_registers cash_registers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_registers cash_registers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_registers
@@ -9332,7 +10191,7 @@ ALTER TABLE ONLY sales.cash_registers
 
 
 --
--- Name: cash_sessions cash_sessions_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -9340,7 +10199,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: cash_sessions cash_sessions_cash_register_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_cash_register_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -9348,7 +10207,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: cash_sessions cash_sessions_closed_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_closed_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -9356,7 +10215,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: cash_sessions cash_sessions_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -9364,7 +10223,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: cash_sessions cash_sessions_opened_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: cash_sessions cash_sessions_opened_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.cash_sessions
@@ -9372,7 +10231,7 @@ ALTER TABLE ONLY sales.cash_sessions
 
 
 --
--- Name: commercial_document_item_lots commercial_document_item_lots_document_item_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots commercial_document_item_lots_document_item_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_item_lots
@@ -9380,7 +10239,7 @@ ALTER TABLE ONLY sales.commercial_document_item_lots
 
 
 --
--- Name: commercial_document_item_lots commercial_document_item_lots_lot_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_item_lots commercial_document_item_lots_lot_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_item_lots
@@ -9388,7 +10247,7 @@ ALTER TABLE ONLY sales.commercial_document_item_lots
 
 
 --
--- Name: commercial_document_items commercial_document_items_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -9396,7 +10255,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_items commercial_document_items_price_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_price_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -9404,7 +10263,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_items commercial_document_items_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -9412,7 +10271,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_items commercial_document_items_tax_category_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_tax_category_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -9420,7 +10279,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_items commercial_document_items_unit_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_items commercial_document_items_unit_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_items
@@ -9428,7 +10287,7 @@ ALTER TABLE ONLY sales.commercial_document_items
 
 
 --
--- Name: commercial_document_payments commercial_document_payments_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_payments commercial_document_payments_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_payments
@@ -9436,7 +10295,7 @@ ALTER TABLE ONLY sales.commercial_document_payments
 
 
 --
--- Name: commercial_document_payments commercial_document_payments_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_document_payments commercial_document_payments_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_document_payments
@@ -9444,7 +10303,7 @@ ALTER TABLE ONLY sales.commercial_document_payments
 
 
 --
--- Name: commercial_documents commercial_documents_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9452,7 +10311,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9460,7 +10319,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9468,7 +10327,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9476,7 +10335,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9484,7 +10343,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9492,7 +10351,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_reference_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_reference_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9500,7 +10359,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_seller_user_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_seller_user_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9508,7 +10367,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_source_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_source_document_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9516,7 +10375,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9524,7 +10383,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: commercial_documents commercial_documents_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: commercial_documents commercial_documents_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.commercial_documents
@@ -9532,7 +10391,7 @@ ALTER TABLE ONLY sales.commercial_documents
 
 
 --
--- Name: customer_price_profiles customer_price_profiles_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_price_profiles customer_price_profiles_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles
@@ -9540,7 +10399,7 @@ ALTER TABLE ONLY sales.customer_price_profiles
 
 
 --
--- Name: customer_price_profiles customer_price_profiles_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_price_profiles customer_price_profiles_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles
@@ -9548,7 +10407,7 @@ ALTER TABLE ONLY sales.customer_price_profiles
 
 
 --
--- Name: customer_price_profiles customer_price_profiles_default_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: customer_price_profiles customer_price_profiles_default_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customer_price_profiles
@@ -9556,7 +10415,7 @@ ALTER TABLE ONLY sales.customer_price_profiles
 
 
 --
--- Name: customers customers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: customers customers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.customers
@@ -9564,7 +10423,15 @@ ALTER TABLE ONLY sales.customers
 
 
 --
--- Name: document_sequences document_sequences_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: customers customers_customer_type_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
+--
+
+ALTER TABLE ONLY sales.customers
+    ADD CONSTRAINT customers_customer_type_id_fkey FOREIGN KEY (customer_type_id) REFERENCES sales.customer_types(id);
+
+
+--
+-- Name: document_sequences document_sequences_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences
@@ -9572,7 +10439,7 @@ ALTER TABLE ONLY sales.document_sequences
 
 
 --
--- Name: document_sequences document_sequences_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: document_sequences document_sequences_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences
@@ -9580,7 +10447,7 @@ ALTER TABLE ONLY sales.document_sequences
 
 
 --
--- Name: document_sequences document_sequences_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: document_sequences document_sequences_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.document_sequences
@@ -9588,7 +10455,7 @@ ALTER TABLE ONLY sales.document_sequences
 
 
 --
--- Name: order_sequences order_sequences_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: order_sequences order_sequences_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.order_sequences
@@ -9596,7 +10463,7 @@ ALTER TABLE ONLY sales.order_sequences
 
 
 --
--- Name: order_sequences order_sequences_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: order_sequences order_sequences_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.order_sequences
@@ -9604,7 +10471,7 @@ ALTER TABLE ONLY sales.order_sequences
 
 
 --
--- Name: price_tiers price_tiers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: price_tiers price_tiers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.price_tiers
@@ -9612,7 +10479,7 @@ ALTER TABLE ONLY sales.price_tiers
 
 
 --
--- Name: product_tier_prices product_tier_prices_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -9620,7 +10487,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: product_tier_prices product_tier_prices_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -9628,7 +10495,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: product_tier_prices product_tier_prices_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -9636,7 +10503,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: product_tier_prices product_tier_prices_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: product_tier_prices product_tier_prices_tier_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.product_tier_prices
@@ -9644,7 +10511,7 @@ ALTER TABLE ONLY sales.product_tier_prices
 
 
 --
--- Name: sales_order_item_lots sales_order_item_lots_lot_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_item_lots sales_order_item_lots_lot_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_item_lots
@@ -9652,7 +10519,7 @@ ALTER TABLE ONLY sales.sales_order_item_lots
 
 
 --
--- Name: sales_order_item_lots sales_order_item_lots_sales_order_item_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_item_lots sales_order_item_lots_sales_order_item_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_item_lots
@@ -9660,7 +10527,7 @@ ALTER TABLE ONLY sales.sales_order_item_lots
 
 
 --
--- Name: sales_order_items sales_order_items_order_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_items sales_order_items_order_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items
@@ -9668,7 +10535,7 @@ ALTER TABLE ONLY sales.sales_order_items
 
 
 --
--- Name: sales_order_items sales_order_items_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_items sales_order_items_product_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items
@@ -9676,7 +10543,7 @@ ALTER TABLE ONLY sales.sales_order_items
 
 
 --
--- Name: sales_order_items sales_order_items_unit_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_items sales_order_items_unit_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_items
@@ -9684,7 +10551,7 @@ ALTER TABLE ONLY sales.sales_order_items
 
 
 --
--- Name: sales_order_payments sales_order_payments_order_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_payments sales_order_payments_order_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_payments
@@ -9692,7 +10559,7 @@ ALTER TABLE ONLY sales.sales_order_payments
 
 
 --
--- Name: sales_order_payments sales_order_payments_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_order_payments sales_order_payments_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_order_payments
@@ -9700,7 +10567,7 @@ ALTER TABLE ONLY sales.sales_order_payments
 
 
 --
--- Name: sales_orders sales_orders_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9708,7 +10575,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9716,7 +10583,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_created_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9724,7 +10591,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_currency_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9732,7 +10599,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_customer_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9740,7 +10607,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_payment_method_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9748,7 +10615,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_seller_user_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_seller_user_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9756,7 +10623,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9764,7 +10631,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: sales_orders sales_orders_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: sales_orders sales_orders_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.sales_orders
@@ -9772,7 +10639,7 @@ ALTER TABLE ONLY sales.sales_orders
 
 
 --
--- Name: series_numbers series_numbers_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_branch_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -9780,7 +10647,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: series_numbers series_numbers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -9788,7 +10655,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: series_numbers series_numbers_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_updated_by_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -9796,7 +10663,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: series_numbers series_numbers_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: series_numbers series_numbers_warehouse_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.series_numbers
@@ -9804,7 +10671,7 @@ ALTER TABLE ONLY sales.series_numbers
 
 
 --
--- Name: wholesale_settings wholesale_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: -
+-- Name: wholesale_settings wholesale_settings_company_id_fkey; Type: FK CONSTRAINT; Schema: sales; Owner: postgres
 --
 
 ALTER TABLE ONLY sales.wholesale_settings
@@ -9815,5 +10682,5 @@ ALTER TABLE ONLY sales.wholesale_settings
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 9JSkeOOxkmjKSL6ULtKrXcd8xnapn94i3S8e55mYnFYMmS0HrGi6dzKYwmxkr6b
+\unrestrict ByBnKZXteh3229f7fnPedipBDyMCJiK4m3pDOmMBqsucjospuMl34IcMg2GP6TE
 

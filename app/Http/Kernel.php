@@ -54,6 +54,7 @@ class Kernel extends HttpKernel
     protected $routeMiddleware = [
         'auth' => \App\Http\Middleware\Authenticate::class,
         'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
+        'tenant.rate' => \App\Http\Middleware\EnforceCompanyRateLimit::class,
         'rbac.module' => \App\Http\Middleware\ModuleRbacAccess::class,
         'admin.only' => \App\Http\Middleware\RequireAdminRole::class,
         'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,

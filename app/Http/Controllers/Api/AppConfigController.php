@@ -7,13 +7,18 @@ use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 
 class AppConfigController extends Controller
 {
+    private array $activeVerticalCache = [];
+    private array $verticalFeaturePreferenceCache = [];
+
     private const COMMERCE_FEATURE_CODES = [
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
@@ -96,7 +101,7 @@ class AppConfigController extends Controller
             ->get();
 
         $cashRegisters = DB::table('sales.cash_registers')
-            ->select('id', 'company_id', 'branch_id', 'code', 'name', 'status')
+            ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
             ->where('company_id', $companyId)
             ->where('status', 1)
             ->when($resolvedBranchId !== null, function ($query) use ($resolvedBranchId) {
@@ -105,11 +110,18 @@ class AppConfigController extends Controller
                         ->orWhereNull('branch_id');
                 });
             })
+            ->when($resolvedWarehouseId !== null, function ($query) use ($resolvedWarehouseId) {
+                $query->where(function ($nested) use ($resolvedWarehouseId) {
+                    $nested->where('warehouse_id', $resolvedWarehouseId)
+                        ->orWhereNull('warehouse_id');
+                });
+            })
             ->orderBy('name')
             ->get();
 
         return response()->json([
             'company' => $company,
+            'active_vertical' => $this->resolveActiveCompanyVertical($companyId),
             'branches' => $branches,
             'warehouses' => $warehouses,
             'cash_registers' => $cashRegisters,
@@ -199,7 +211,7 @@ class AppConfigController extends Controller
 
         $featureCodes = $companyFeatures->keys()->merge($branchFeatures->keys())->unique()->values();
 
-        $features = $featureCodes->map(function ($featureCode) use ($companyFeatures, $branchFeatures) {
+        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures) {
             $company = $companyFeatures->get($featureCode);
             $branch = $branchFeatures->get($featureCode);
 
@@ -210,13 +222,28 @@ class AppConfigController extends Controller
                 $isEnabled = (bool) $company->is_enabled;
             }
 
+            $companyConfig = $company ? $this->decodeJsonConfig($company->config) : null;
+            $branchConfig = $branch ? $this->decodeJsonConfig($branch->config) : null;
+
+            $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $featureCode);
+            if ($verticalPreference['resolved']) {
+                if ($verticalPreference['is_enabled'] !== null) {
+                    $isEnabled = (bool) $verticalPreference['is_enabled'];
+                }
+                if ($verticalPreference['config'] !== null) {
+                    $companyConfig = $verticalPreference['config'];
+                    $branchConfig = null;
+                }
+            }
+
             return [
                 'feature_code' => $featureCode,
                 'is_enabled' => $isEnabled,
                 'company_enabled' => $company ? (bool) $company->is_enabled : null,
                 'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
-                'company_config' => $company ? $this->decodeJsonConfig($company->config) : null,
-                'branch_config' => $branch ? $this->decodeJsonConfig($branch->config) : null,
+                'company_config' => $companyConfig,
+                'branch_config' => $branchConfig,
+                'vertical_source' => $verticalPreference['source'],
             ];
         })->values();
 
@@ -225,6 +252,1348 @@ class AppConfigController extends Controller
             'branch_id' => $branchId,
             'features' => $features,
         ]);
+    }
+
+    public function companyVerticalSettings(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json([
+                'message' => 'Invalid company scope',
+            ], 403);
+        }
+
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            return response()->json([
+                'message' => 'Verticalization tables not found. Execute migration 2026_04_07_000301 first.',
+            ], 409);
+        }
+
+        $verticals = DB::table('appcfg.verticals as v')
+            ->leftJoin('appcfg.company_verticals as cv', function ($join) use ($companyId) {
+                $join->on('cv.vertical_id', '=', 'v.id')
+                    ->where('cv.company_id', '=', $companyId)
+                    ->where('cv.status', '=', 1);
+            })
+            ->select([
+                'v.id',
+                'v.code',
+                'v.name',
+                'v.description',
+                'v.status',
+                DB::raw('CASE WHEN cv.id IS NULL THEN false ELSE true END as is_assigned'),
+                DB::raw('CASE WHEN cv.is_primary IS NULL THEN false ELSE cv.is_primary END as is_primary'),
+                'cv.effective_from',
+                'cv.effective_to',
+            ])
+            ->where('v.status', 1)
+            ->orderBy('v.name')
+            ->get();
+
+        $active = $verticals->first(function ($row) {
+            return (bool) $row->is_primary === true;
+        });
+
+        return response()->json([
+            'company_id' => $companyId,
+            'active_vertical' => $active ? [
+                'id' => (int) $active->id,
+                'code' => (string) $active->code,
+                'name' => (string) $active->name,
+                'description' => $active->description,
+                'effective_from' => $active->effective_from,
+                'effective_to' => $active->effective_to,
+            ] : null,
+            'verticals' => $verticals,
+        ]);
+    }
+
+    public function updateCompanyVerticalSettings(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            return response()->json([
+                'message' => 'Verticalization tables not found. Execute migration 2026_04_07_000301 first.',
+            ], 409);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'nullable|integer|min:1',
+            'vertical_code' => 'required|string|max:50',
+            'effective_from' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
+        if ($companyId !== (int) $authUser->company_id) {
+            return response()->json([
+                'message' => 'Invalid company scope',
+            ], 403);
+        }
+
+        $verticalCode = strtoupper(trim((string) ($payload['vertical_code'] ?? '')));
+        $vertical = DB::table('appcfg.verticals')
+            ->whereRaw('UPPER(code) = ?', [$verticalCode])
+            ->where('status', 1)
+            ->first(['id', 'code', 'name']);
+
+        if (!$vertical) {
+            return response()->json([
+                'message' => 'Invalid vertical code',
+            ], 422);
+        }
+
+        $effectiveFrom = (string) ($payload['effective_from'] ?? now()->toDateString());
+
+        DB::transaction(function () use ($companyId, $vertical, $effectiveFrom, $authUser) {
+            DB::table('appcfg.company_verticals')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->update([
+                    'is_primary' => false,
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                ]);
+
+            DB::table('appcfg.company_verticals')->updateOrInsert(
+                [
+                    'company_id' => $companyId,
+                    'vertical_id' => (int) $vertical->id,
+                ],
+                [
+                    'is_primary' => true,
+                    'status' => 1,
+                    'effective_from' => $effectiveFrom,
+                    'effective_to' => null,
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                    'created_by' => $authUser->id,
+                    'created_at' => now(),
+                ]
+            );
+        });
+
+        return $this->companyVerticalSettings($request);
+    }
+
+    public function companyVerticalAdminMatrix(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            return response()->json([
+                'message' => 'Verticalization tables not found. Execute migration 2026_04_07_000301 first.',
+            ], 409);
+        }
+
+        $verticals = DB::table('appcfg.verticals')
+            ->where('status', 1)
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'description']);
+
+        $companies = DB::table('core.companies')
+            ->orderBy('legal_name')
+            ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
+
+        $this->ensureCompanyAccessLinksForCompanies($companies);
+        $accessLinksByCompany = collect();
+        if ($this->tableExists('appcfg', 'company_access_links')) {
+            $accessLinksByCompany = DB::table('appcfg.company_access_links')
+                ->whereIn('company_id', $companies->pluck('id')->all())
+                ->get(['company_id', 'access_slug', 'is_active'])
+                ->keyBy('company_id');
+        }
+
+        $assignments = DB::table('appcfg.company_verticals as cv')
+            ->join('appcfg.verticals as v', 'v.id', '=', 'cv.vertical_id')
+            ->where('v.status', 1)
+            ->orderBy('cv.company_id')
+            ->orderBy('v.name')
+            ->get([
+                'cv.company_id',
+                'cv.vertical_id',
+                'v.code as vertical_code',
+                'v.name as vertical_name',
+                'cv.status',
+                'cv.is_primary',
+                'cv.effective_from',
+                'cv.effective_to',
+            ]);
+
+        $byCompany = [];
+        foreach ($assignments as $row) {
+            $companyId = (int) $row->company_id;
+            if (!array_key_exists($companyId, $byCompany)) {
+                $byCompany[$companyId] = [];
+            }
+
+            $byCompany[$companyId][] = [
+                'vertical_id' => (int) $row->vertical_id,
+                'vertical_code' => (string) $row->vertical_code,
+                'vertical_name' => (string) $row->vertical_name,
+                'is_enabled' => (int) $row->status === 1,
+                'is_primary' => (bool) $row->is_primary,
+                'effective_from' => $row->effective_from,
+                'effective_to' => $row->effective_to,
+            ];
+        }
+
+        $adminUsersByCompany = collect();
+        $adminUsersRaw = DB::table('auth.users as u')
+            ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('u.status', 1)
+            ->whereRaw("UPPER(r.code) = 'ADMIN'")
+            ->whereIn('u.company_id', $companies->pluck('id')->all())
+            ->orderBy('u.id')
+            ->get(['u.id', 'u.company_id', 'u.username', 'u.email']);
+        foreach ($adminUsersRaw as $au) {
+            $cid = (int) $au->company_id;
+            if (!$adminUsersByCompany->has($cid)) {
+                $adminUsersByCompany->put($cid, $au);
+            }
+        }
+
+        $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany) {
+            $companyId = (int) $company->id;
+            $companyAssignments = $byCompany[$companyId] ?? [];
+            $accessLink = $accessLinksByCompany->get($companyId);
+            $accessSlug = $accessLink ? (string) $accessLink->access_slug : null;
+            $adminUser = $adminUsersByCompany->get($companyId);
+
+            $active = null;
+            foreach ($companyAssignments as $assignment) {
+                if ($assignment['is_enabled'] && $assignment['is_primary']) {
+                    $active = $assignment;
+                    break;
+                }
+            }
+
+            return [
+                'company_id' => $companyId,
+                'tax_id' => $company->tax_id,
+                'legal_name' => $company->legal_name,
+                'trade_name' => $company->trade_name,
+                'company_status' => (int) $company->status,
+                'active_vertical_code' => $active['vertical_code'] ?? null,
+                'active_vertical_name' => $active['vertical_name'] ?? null,
+                'access_slug' => $accessSlug,
+                'access_url' => $accessSlug ? $this->buildCompanyAccessUrl($accessSlug) : null,
+                'access_link_active' => $accessLink ? ((int) $accessLink->is_active === 1) : false,
+                'assignments' => $companyAssignments,
+                'admin_username' => $adminUser ? $adminUser->username : null,
+                'admin_email' => $adminUser ? $adminUser->email : null,
+            ];
+        })->values();
+
+        return response()->json([
+            'verticals' => $verticals,
+            'companies' => $companyRows,
+        ]);
+    }
+
+    public function updateCompanyVerticalAdminMatrix(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            return response()->json([
+                'message' => 'Verticalization tables not found. Execute migration 2026_04_07_000301 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+            'vertical_code' => 'required|string|max:50',
+            'is_enabled' => 'required|boolean',
+            'make_primary' => 'nullable|boolean',
+            'effective_from' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) $payload['company_id'];
+        $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
+        $isEnabled = (bool) $payload['is_enabled'];
+        $makePrimary = array_key_exists('make_primary', $payload) ? (bool) $payload['make_primary'] : true;
+        $effectiveFrom = (string) ($payload['effective_from'] ?? now()->toDateString());
+
+        $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
+        if (!$companyExists) {
+            return response()->json([
+                'message' => 'Company not found',
+            ], 404);
+        }
+
+        $vertical = DB::table('appcfg.verticals')
+            ->whereRaw('UPPER(code) = ?', [$verticalCode])
+            ->where('status', 1)
+            ->first(['id', 'code', 'name']);
+
+        if (!$vertical) {
+            return response()->json([
+                'message' => 'Invalid vertical code',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($companyId, $vertical, $isEnabled, $makePrimary, $effectiveFrom, $authUser) {
+            if ($isEnabled) {
+                DB::table('core.companies')
+                    ->where('id', $companyId)
+                    ->update([
+                        'status' => 1,
+                        'updated_at' => now(),
+                    ]);
+
+                if ($makePrimary) {
+                    DB::table('appcfg.company_verticals')
+                        ->where('company_id', $companyId)
+                        ->where('status', 1)
+                        ->update([
+                            'is_primary' => false,
+                            'updated_by' => $authUser->id,
+                            'updated_at' => now(),
+                        ]);
+                }
+
+                DB::table('appcfg.company_verticals')->updateOrInsert(
+                    [
+                        'company_id' => $companyId,
+                        'vertical_id' => (int) $vertical->id,
+                    ],
+                    [
+                        'status' => 1,
+                        'is_primary' => $makePrimary,
+                        'effective_from' => $effectiveFrom,
+                        'effective_to' => null,
+                        'updated_by' => $authUser->id,
+                        'updated_at' => now(),
+                        'created_by' => $authUser->id,
+                        'created_at' => now(),
+                    ]
+                );
+
+                $hasPrimary = DB::table('appcfg.company_verticals')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where('is_primary', true)
+                    ->exists();
+
+                if (!$hasPrimary) {
+                    $firstEnabled = DB::table('appcfg.company_verticals')
+                        ->where('company_id', $companyId)
+                        ->where('status', 1)
+                        ->orderBy('updated_at', 'desc')
+                        ->first(['id']);
+
+                    if ($firstEnabled) {
+                        DB::table('appcfg.company_verticals')
+                            ->where('id', (int) $firstEnabled->id)
+                            ->update([
+                                'is_primary' => true,
+                                'updated_by' => $authUser->id,
+                                'updated_at' => now(),
+                            ]);
+                    }
+                }
+
+                return;
+            }
+
+            DB::table('core.companies')
+                ->where('id', $companyId)
+                ->update([
+                    'status' => 0,
+                    'updated_at' => now(),
+                ]);
+
+            DB::table('appcfg.company_verticals')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->update([
+                    'status' => 0,
+                    'is_primary' => false,
+                    'effective_to' => now()->toDateString(),
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                ]);
+
+            $companyUserIds = DB::table('auth.users')
+                ->where('company_id', $companyId)
+                ->pluck('id');
+
+            if ($companyUserIds->isNotEmpty()) {
+                DB::table('auth.refresh_tokens')
+                    ->whereIn('user_id', $companyUserIds->all())
+                    ->whereNull('revoked_at')
+                    ->update([
+                        'revoked_at' => now(),
+                    ]);
+            }
+
+            $hasPrimary = DB::table('appcfg.company_verticals')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->where('is_primary', true)
+                ->exists();
+
+            if (!$hasPrimary) {
+                $fallback = DB::table('appcfg.company_verticals')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->orderBy('updated_at', 'desc')
+                    ->first(['id']);
+
+                if ($fallback) {
+                    DB::table('appcfg.company_verticals')
+                        ->where('id', (int) $fallback->id)
+                        ->update([
+                            'is_primary' => true,
+                            'updated_by' => $authUser->id,
+                            'updated_at' => now(),
+                        ]);
+                }
+            }
+        });
+
+        return $this->companyVerticalAdminMatrix($request);
+    }
+
+    public function updateCompanyVerticalAdminMatrixBulk(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            return response()->json([
+                'message' => 'Verticalization tables not found. Execute migration 2026_04_07_000301 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_ids' => 'required|array|min:1',
+            'company_ids.*' => 'required|integer|min:1',
+            'vertical_code' => 'required|string|max:50',
+            'is_enabled' => 'required|boolean',
+            'make_primary' => 'nullable|boolean',
+            'effective_from' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
+        $isEnabled = (bool) $payload['is_enabled'];
+        $makePrimary = array_key_exists('make_primary', $payload) ? (bool) $payload['make_primary'] : true;
+        $effectiveFrom = (string) ($payload['effective_from'] ?? now()->toDateString());
+
+        if (empty($companyIds)) {
+            return response()->json([
+                'message' => 'company_ids is required',
+            ], 422);
+        }
+
+        $existingCompanies = DB::table('core.companies')
+            ->whereIn('id', $companyIds)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $missing = array_values(array_diff($companyIds, $existingCompanies));
+        if (!empty($missing)) {
+            return response()->json([
+                'message' => 'Some companies were not found',
+                'missing_company_ids' => $missing,
+            ], 404);
+        }
+
+        $vertical = DB::table('appcfg.verticals')
+            ->whereRaw('UPPER(code) = ?', [$verticalCode])
+            ->where('status', 1)
+            ->first(['id', 'code', 'name']);
+
+        if (!$vertical) {
+            return response()->json([
+                'message' => 'Invalid vertical code',
+            ], 422);
+        }
+
+        foreach ($companyIds as $companyId) {
+            DB::transaction(function () use ($companyId, $vertical, $isEnabled, $makePrimary, $effectiveFrom, $authUser) {
+                if ($isEnabled) {
+                    DB::table('core.companies')
+                        ->where('id', $companyId)
+                        ->update([
+                            'status' => 1,
+                            'updated_at' => now(),
+                        ]);
+
+                    if ($makePrimary) {
+                        DB::table('appcfg.company_verticals')
+                            ->where('company_id', $companyId)
+                            ->where('status', 1)
+                            ->update([
+                                'is_primary' => false,
+                                'updated_by' => $authUser->id,
+                                'updated_at' => now(),
+                            ]);
+                    }
+
+                    DB::table('appcfg.company_verticals')->updateOrInsert(
+                        [
+                            'company_id' => $companyId,
+                            'vertical_id' => (int) $vertical->id,
+                        ],
+                        [
+                            'status' => 1,
+                            'is_primary' => $makePrimary,
+                            'effective_from' => $effectiveFrom,
+                            'effective_to' => null,
+                            'updated_by' => $authUser->id,
+                            'updated_at' => now(),
+                            'created_by' => $authUser->id,
+                            'created_at' => now(),
+                        ]
+                    );
+
+                    $hasPrimary = DB::table('appcfg.company_verticals')
+                        ->where('company_id', $companyId)
+                        ->where('status', 1)
+                        ->where('is_primary', true)
+                        ->exists();
+
+                    if (!$hasPrimary) {
+                        $firstEnabled = DB::table('appcfg.company_verticals')
+                            ->where('company_id', $companyId)
+                            ->where('status', 1)
+                            ->orderBy('updated_at', 'desc')
+                            ->first(['id']);
+
+                        if ($firstEnabled) {
+                            DB::table('appcfg.company_verticals')
+                                ->where('id', (int) $firstEnabled->id)
+                                ->update([
+                                    'is_primary' => true,
+                                    'updated_by' => $authUser->id,
+                                    'updated_at' => now(),
+                                ]);
+                        }
+                    }
+
+                    return;
+                }
+
+                DB::table('core.companies')
+                    ->where('id', $companyId)
+                    ->update([
+                        'status' => 0,
+                        'updated_at' => now(),
+                    ]);
+
+                DB::table('appcfg.company_verticals')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->update([
+                        'status' => 0,
+                        'is_primary' => false,
+                        'effective_to' => now()->toDateString(),
+                        'updated_by' => $authUser->id,
+                        'updated_at' => now(),
+                    ]);
+
+                $companyUserIds = DB::table('auth.users')
+                    ->where('company_id', $companyId)
+                    ->pluck('id');
+
+                if ($companyUserIds->isNotEmpty()) {
+                    DB::table('auth.refresh_tokens')
+                        ->whereIn('user_id', $companyUserIds->all())
+                        ->whereNull('revoked_at')
+                        ->update([
+                            'revoked_at' => now(),
+                        ]);
+                }
+
+                $hasPrimary = DB::table('appcfg.company_verticals')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where('is_primary', true)
+                    ->exists();
+
+                if (!$hasPrimary) {
+                    $fallback = DB::table('appcfg.company_verticals')
+                        ->where('company_id', $companyId)
+                        ->where('status', 1)
+                        ->orderBy('updated_at', 'desc')
+                        ->first(['id']);
+
+                    if ($fallback) {
+                        DB::table('appcfg.company_verticals')
+                            ->where('id', (int) $fallback->id)
+                            ->update([
+                                'is_primary' => true,
+                                'updated_by' => $authUser->id,
+                                'updated_at' => now(),
+                            ]);
+                    }
+                }
+            });
+        }
+
+        return $this->companyVerticalAdminMatrix($request);
+    }
+
+    public function companyRateLimitMatrix(Request $request)
+    {
+        $defaultRead = (int) env('DEFAULT_COMPANY_RATE_LIMIT_PER_MINUTE', 3600);
+        $defaultWrite = (int) env('DEFAULT_COMPANY_RATE_LIMIT_WRITE_PER_MINUTE', 2400);
+        $defaultReports = (int) env('DEFAULT_COMPANY_RATE_LIMIT_REPORTS_PER_MINUTE', 900);
+
+        $companies = DB::table('core.companies')
+            ->orderBy('legal_name')
+            ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
+
+        $limitsByCompany = collect();
+        if ($this->tableExists('appcfg', 'company_rate_limits')) {
+            $limitsByCompany = DB::table('appcfg.company_rate_limits')
+                ->get([
+                    'company_id',
+                    'is_enabled',
+                    'requests_per_minute',
+                    'requests_per_minute_read',
+                    'requests_per_minute_write',
+                    'requests_per_minute_reports',
+                    'plan_code',
+                    'last_preset_code',
+                    'updated_at',
+                ])
+                ->keyBy('company_id');
+        }
+
+        $rows = $companies->map(function ($company) use ($limitsByCompany, $defaultRead, $defaultWrite, $defaultReports) {
+            $limit = $limitsByCompany->get((int) $company->id);
+
+            return [
+                'company_id' => (int) $company->id,
+                'tax_id' => $company->tax_id,
+                'legal_name' => $company->legal_name,
+                'trade_name' => $company->trade_name,
+                'company_status' => (int) $company->status,
+                'is_enabled' => $limit ? ((int) ($limit->is_enabled ?? 1) === 1) : true,
+                'requests_per_minute' => $limit ? (int) ($limit->requests_per_minute ?? $defaultRead) : $defaultRead,
+                'requests_per_minute_read' => $limit ? (int) ($limit->requests_per_minute_read ?? $limit->requests_per_minute ?? $defaultRead) : $defaultRead,
+                'requests_per_minute_write' => $limit ? (int) ($limit->requests_per_minute_write ?? $limit->requests_per_minute ?? $defaultWrite) : $defaultWrite,
+                'requests_per_minute_reports' => $limit ? (int) ($limit->requests_per_minute_reports ?? $limit->requests_per_minute ?? $defaultReports) : $defaultReports,
+                'plan_code' => $limit ? (string) ($limit->plan_code ?? 'PRO') : 'PRO',
+                'last_preset_code' => $limit ? ($limit->last_preset_code ? (string) $limit->last_preset_code : null) : null,
+                'updated_at' => $limit->updated_at ?? null,
+            ];
+        })->values();
+
+        return response()->json([
+            'defaults' => [
+                'requests_per_minute_read' => $defaultRead,
+                'requests_per_minute_write' => $defaultWrite,
+                'requests_per_minute_reports' => $defaultReports,
+            ],
+            'presets' => $this->companyRateLimitPresets($defaultRead, $defaultWrite, $defaultReports),
+            'companies' => $rows,
+        ]);
+    }
+
+    public function updateCompanyRateLimitMatrix(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'company_rate_limits')) {
+            return response()->json([
+                'message' => 'Rate limit table not found. Execute migration 2026_04_08_000402 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+            'is_enabled' => 'required|boolean',
+            'requests_per_minute_read' => 'required|integer|min:100|max:60000',
+            'requests_per_minute_write' => 'required|integer|min:100|max:60000',
+            'requests_per_minute_reports' => 'required|integer|min:100|max:60000',
+            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
+            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) $payload['company_id'];
+
+        $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
+        if (!$companyExists) {
+            return response()->json([
+                'message' => 'Company not found',
+            ], 404);
+        }
+
+        DB::table('appcfg.company_rate_limits')->updateOrInsert(
+            ['company_id' => $companyId],
+            [
+                'is_enabled' => (bool) $payload['is_enabled'],
+                'requests_per_minute' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
+                'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
+                'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
+                'last_preset_code' => $payload['preset_code'] ?? null,
+                'updated_by' => $authUser ? $authUser->id : null,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]
+        );
+
+        $this->logCompanyRateLimitAudit(
+            $companyId,
+            'SINGLE',
+            (string) ($payload['plan_code'] ?? 'CUSTOM'),
+            isset($payload['preset_code']) ? (string) $payload['preset_code'] : null,
+            (bool) $payload['is_enabled'],
+            (int) $payload['requests_per_minute_read'],
+            (int) $payload['requests_per_minute_write'],
+            (int) $payload['requests_per_minute_reports'],
+            $authUser ? (int) $authUser->id : null
+        );
+
+        return $this->companyRateLimitMatrix($request);
+    }
+
+    public function updateCompanyRateLimitMatrixBulk(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'company_rate_limits')) {
+            return response()->json([
+                'message' => 'Rate limit table not found. Execute migration 2026_04_08_000402 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_ids' => 'required|array|min:1',
+            'company_ids.*' => 'required|integer|min:1',
+            'is_enabled' => 'required|boolean',
+            'requests_per_minute_read' => 'required|integer|min:100|max:60000',
+            'requests_per_minute_write' => 'required|integer|min:100|max:60000',
+            'requests_per_minute_reports' => 'required|integer|min:100|max:60000',
+            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
+            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+
+        $existingCompanies = DB::table('core.companies')
+            ->whereIn('id', $companyIds)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $missing = array_values(array_diff($companyIds, $existingCompanies));
+        if (!empty($missing)) {
+            return response()->json([
+                'message' => 'Some companies were not found',
+                'missing_company_ids' => $missing,
+            ], 404);
+        }
+
+        foreach ($companyIds as $companyId) {
+            DB::table('appcfg.company_rate_limits')->updateOrInsert(
+                ['company_id' => $companyId],
+                [
+                    'is_enabled' => (bool) $payload['is_enabled'],
+                    'requests_per_minute' => (int) $payload['requests_per_minute_read'],
+                    'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
+                    'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
+                    'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
+                    'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
+                    'last_preset_code' => $payload['preset_code'] ?? null,
+                    'updated_by' => $authUser ? $authUser->id : null,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+
+            $this->logCompanyRateLimitAudit(
+                $companyId,
+                'BULK',
+                (string) ($payload['plan_code'] ?? 'CUSTOM'),
+                isset($payload['preset_code']) ? (string) $payload['preset_code'] : null,
+                (bool) $payload['is_enabled'],
+                (int) $payload['requests_per_minute_read'],
+                (int) $payload['requests_per_minute_write'],
+                (int) $payload['requests_per_minute_reports'],
+                $authUser ? (int) $authUser->id : null
+            );
+        }
+
+        return $this->companyRateLimitMatrix($request);
+    }
+
+    public function companyOperationalLimitMatrix(Request $request)
+    {
+        $companies = DB::table('core.companies')
+            ->orderBy('legal_name')
+            ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
+
+        $limitsByCompany = collect();
+        if ($this->tableExists('appcfg', 'company_operational_limits')) {
+            $limitsByCompany = DB::table('appcfg.company_operational_limits')
+                ->get([
+                    'company_id',
+                    'max_branches_enabled',
+                    'max_warehouses_enabled',
+                    'max_cash_registers_enabled',
+                    'max_cash_registers_per_warehouse',
+                    'updated_at',
+                ])
+                ->keyBy('company_id');
+        }
+
+        $rows = $companies->map(function ($company) use ($limitsByCompany) {
+            $companyId = (int) $company->id;
+            $limits = $limitsByCompany->get($companyId);
+
+            $usageBranches = (int) DB::table('core.branches')->where('company_id', $companyId)->where('status', 1)->count();
+            $usageWarehouses = (int) DB::table('inventory.warehouses')->where('company_id', $companyId)->where('status', 1)->count();
+            $usageCashRegisters = (int) DB::table('sales.cash_registers')->where('company_id', $companyId)->where('status', 1)->count();
+
+            return [
+                'company_id' => $companyId,
+                'tax_id' => $company->tax_id,
+                'legal_name' => $company->legal_name,
+                'trade_name' => $company->trade_name,
+                'company_status' => (int) $company->status,
+                'max_branches_enabled' => max(1, (int) ($limits->max_branches_enabled ?? 1)),
+                'max_warehouses_enabled' => max(1, (int) ($limits->max_warehouses_enabled ?? 1)),
+                'max_cash_registers_enabled' => max(1, (int) ($limits->max_cash_registers_enabled ?? 1)),
+                'max_cash_registers_per_warehouse' => max(1, (int) ($limits->max_cash_registers_per_warehouse ?? 1)),
+                'usage_branches' => $usageBranches,
+                'usage_warehouses' => $usageWarehouses,
+                'usage_cash_registers' => $usageCashRegisters,
+                'updated_at' => $limits->updated_at ?? null,
+            ];
+        })->values();
+
+        return response()->json([
+            'defaults' => [
+                'max_branches_enabled' => 1,
+                'max_warehouses_enabled' => 1,
+                'max_cash_registers_enabled' => 1,
+                'max_cash_registers_per_warehouse' => 1,
+            ],
+            'companies' => $rows,
+        ]);
+    }
+
+    public function updateCompanyOperationalLimitMatrix(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'company_operational_limits')) {
+            return response()->json([
+                'message' => 'Operational limits table not found. Execute migration 2026_04_08_000405 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+            'max_branches_enabled' => 'required|integer|min:1|max:10000',
+            'max_warehouses_enabled' => 'required|integer|min:1|max:10000',
+            'max_cash_registers_enabled' => 'required|integer|min:1|max:10000',
+            'max_cash_registers_per_warehouse' => 'required|integer|min:1|max:10000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = (int) $payload['company_id'];
+        $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
+        if (!$companyExists) {
+            return response()->json([
+                'message' => 'Company not found',
+            ], 404);
+        }
+
+        DB::table('appcfg.company_operational_limits')->updateOrInsert(
+            ['company_id' => $companyId],
+            [
+                'max_branches_enabled' => (int) $payload['max_branches_enabled'],
+                'max_warehouses_enabled' => (int) $payload['max_warehouses_enabled'],
+                'max_cash_registers_enabled' => (int) $payload['max_cash_registers_enabled'],
+                'max_cash_registers_per_warehouse' => (int) $payload['max_cash_registers_per_warehouse'],
+                'updated_by' => $authUser ? $authUser->id : null,
+                'updated_at' => now(),
+            ]
+        );
+
+        return $this->companyOperationalLimitMatrix($request);
+    }
+
+    public function updateCompanyOperationalLimitMatrixBulk(Request $request)
+    {
+        if (!$this->tableExists('appcfg', 'company_operational_limits')) {
+            return response()->json([
+                'message' => 'Operational limits table not found. Execute migration 2026_04_08_000405 first.',
+            ], 409);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+        $validator = Validator::make($request->all(), [
+            'company_ids' => 'required|array|min:1',
+            'company_ids.*' => 'required|integer|min:1',
+            'max_branches_enabled' => 'required|integer|min:1|max:10000',
+            'max_warehouses_enabled' => 'required|integer|min:1|max:10000',
+            'max_cash_registers_enabled' => 'required|integer|min:1|max:10000',
+            'max_cash_registers_per_warehouse' => 'required|integer|min:1|max:10000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+
+        foreach ($companyIds as $companyId) {
+            DB::table('appcfg.company_operational_limits')->updateOrInsert(
+                ['company_id' => $companyId],
+                [
+                    'max_branches_enabled' => (int) $payload['max_branches_enabled'],
+                    'max_warehouses_enabled' => (int) $payload['max_warehouses_enabled'],
+                    'max_cash_registers_enabled' => (int) $payload['max_cash_registers_enabled'],
+                    'max_cash_registers_per_warehouse' => (int) $payload['max_cash_registers_per_warehouse'],
+                    'updated_by' => $authUser ? $authUser->id : null,
+                    'updated_at' => now(),
+                ]
+            );
+        }
+
+        return $this->companyOperationalLimitMatrix($request);
+    }
+
+    public function createAdminCompany(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'tax_id' => 'required|string|min:8|max:20',
+            'legal_name' => 'required|string|min:3|max:200',
+            'trade_name' => 'nullable|string|max:200',
+            'email' => 'nullable|email|max:200',
+            'phone' => 'nullable|string|max:60',
+            'address' => 'nullable|string|max:500',
+            'vertical_code' => 'nullable|string|max:50',
+            'main_branch_code' => 'nullable|string|max:20',
+            'main_branch_name' => 'nullable|string|max:120',
+            'create_default_warehouse' => 'nullable|boolean',
+            'default_warehouse_code' => 'nullable|string|max:20',
+            'default_warehouse_name' => 'nullable|string|max:120',
+            'create_default_cash_register' => 'nullable|boolean',
+            'default_cash_register_code' => 'nullable|string|max:20',
+            'default_cash_register_name' => 'nullable|string|max:120',
+            'admin_username' => 'required|string|min:4|max:80',
+            'admin_password' => 'required|string|min:8|max:120',
+            'admin_first_name' => 'required|string|min:2|max:80',
+            'admin_last_name' => 'nullable|string|max:80',
+            'admin_email' => 'nullable|email|max:120',
+            'admin_phone' => 'nullable|string|max:40',
+            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
+            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
+            'requests_per_minute_read' => 'nullable|integer|min:100|max:60000',
+            'requests_per_minute_write' => 'nullable|integer|min:100|max:60000',
+            'requests_per_minute_reports' => 'nullable|integer|min:100|max:60000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $taxId = trim((string) $payload['tax_id']);
+        $adminUsername = trim((string) $payload['admin_username']);
+
+        $taxIdExists = DB::table('core.companies')
+            ->whereRaw('UPPER(tax_id) = ?', [strtoupper($taxId)])
+            ->exists();
+        if ($taxIdExists) {
+            return response()->json([
+                'message' => 'Ya existe una empresa con ese RUC',
+            ], 422);
+        }
+
+        $usernameExists = DB::table('auth.users')
+            ->whereRaw('UPPER(username) = ?', [strtoupper($adminUsername)])
+            ->exists();
+        if ($usernameExists) {
+            return response()->json([
+                'message' => 'El usuario administrador ya existe',
+            ], 422);
+        }
+
+        $defaultRead = (int) env('DEFAULT_COMPANY_RATE_LIMIT_PER_MINUTE', 3600);
+        $defaultWrite = (int) env('DEFAULT_COMPANY_RATE_LIMIT_WRITE_PER_MINUTE', 2400);
+        $defaultReports = (int) env('DEFAULT_COMPANY_RATE_LIMIT_REPORTS_PER_MINUTE', 900);
+
+        $planCode = (string) ($payload['plan_code'] ?? 'PRO');
+        $presetCode = isset($payload['preset_code']) ? (string) $payload['preset_code'] : null;
+
+        $readRate = (int) ($payload['requests_per_minute_read'] ?? $defaultRead);
+        $writeRate = (int) ($payload['requests_per_minute_write'] ?? $defaultWrite);
+        $reportsRate = (int) ($payload['requests_per_minute_reports'] ?? $defaultReports);
+
+        if ($presetCode !== null) {
+            $presets = collect($this->companyRateLimitPresets($defaultRead, $defaultWrite, $defaultReports))->keyBy('code');
+            if ($presets->has($presetCode)) {
+                $preset = $presets->get($presetCode);
+                $readRate = (int) ($preset['requests_per_minute_read'] ?? $readRate);
+                $writeRate = (int) ($preset['requests_per_minute_write'] ?? $writeRate);
+                $reportsRate = (int) ($preset['requests_per_minute_reports'] ?? $reportsRate);
+            }
+        }
+
+        $createDefaultWarehouse = array_key_exists('create_default_warehouse', $payload)
+            ? (bool) $payload['create_default_warehouse']
+            : true;
+        $createDefaultCashRegister = array_key_exists('create_default_cash_register', $payload)
+            ? (bool) $payload['create_default_cash_register']
+            : true;
+
+        $companyId = 0;
+        $branchId = 0;
+        $roleId = 0;
+        $adminUserId = 0;
+        $defaultWarehouseId = null;
+
+        DB::transaction(function () use (
+            $payload,
+            $authUser,
+            $taxId,
+            $adminUsername,
+            $planCode,
+            $presetCode,
+            $readRate,
+            $writeRate,
+            $reportsRate,
+            $createDefaultWarehouse,
+            $createDefaultCashRegister,
+            &$companyId,
+            &$branchId,
+            &$roleId,
+            &$adminUserId,
+            &$defaultWarehouseId
+        ) {
+            $companyId = (int) DB::table('core.companies')->insertGetId([
+                'tax_id' => $taxId,
+                'legal_name' => trim((string) $payload['legal_name']),
+                'trade_name' => isset($payload['trade_name']) ? trim((string) $payload['trade_name']) : null,
+                'email' => $payload['email'] ?? null,
+                'phone' => $payload['phone'] ?? null,
+                'address' => $payload['address'] ?? null,
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $branchCode = trim((string) ($payload['main_branch_code'] ?? '001'));
+            $branchName = trim((string) ($payload['main_branch_name'] ?? 'Sucursal Principal'));
+
+            $branchId = (int) DB::table('core.branches')->insertGetId([
+                'company_id' => $companyId,
+                'code' => $branchCode,
+                'name' => $branchName,
+                'address' => $payload['address'] ?? null,
+                'is_main' => true,
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($this->tableExists('core', 'company_settings')) {
+                DB::table('core.company_settings')->updateOrInsert(
+                    ['company_id' => $companyId],
+                    [
+                        'address' => $payload['address'] ?? null,
+                        'phone' => $payload['phone'] ?? null,
+                        'email' => $payload['email'] ?? null,
+                        'updated_at' => now(),
+                    ]
+                );
+            }
+
+            if ($createDefaultWarehouse && $this->tableExists('inventory', 'warehouses')) {
+                $defaultWarehouseId = (int) DB::table('inventory.warehouses')->insertGetId([
+                    'company_id' => $companyId,
+                    'branch_id' => $branchId,
+                    'code' => trim((string) ($payload['default_warehouse_code'] ?? 'ALM-001')),
+                    'name' => trim((string) ($payload['default_warehouse_name'] ?? 'Almacen Principal')),
+                    'address' => $payload['address'] ?? null,
+                    'status' => 1,
+                ]);
+            }
+
+            if ($createDefaultCashRegister && $this->tableExists('sales', 'cash_registers')) {
+                DB::table('sales.cash_registers')->insert([
+                    'company_id' => $companyId,
+                    'branch_id' => $branchId,
+                    'warehouse_id' => $defaultWarehouseId,
+                    'code' => trim((string) ($payload['default_cash_register_code'] ?? 'CAJA-001')),
+                    'name' => trim((string) ($payload['default_cash_register_name'] ?? 'Caja Principal')),
+                    'status' => 1,
+                    'created_at' => now(),
+                ]);
+            }
+
+            $roleId = (int) DB::table('auth.roles')->insertGetId([
+                'company_id' => $companyId,
+                'code' => 'ADMIN',
+                'name' => 'Administrador',
+                'status' => 1,
+            ]);
+
+            $templateAdminRole = DB::table('auth.roles')
+                ->where('company_id', (int) $authUser->company_id)
+                ->whereRaw('UPPER(code) = ?', ['ADMIN'])
+                ->first(['id']);
+
+            $templateAccess = collect();
+            if ($templateAdminRole) {
+                $templateAccess = DB::table('auth.role_module_access')
+                    ->where('role_id', (int) $templateAdminRole->id)
+                    ->get();
+            }
+
+            if ($templateAccess->isNotEmpty()) {
+                foreach ($templateAccess as $row) {
+                    DB::table('auth.role_module_access')->insert([
+                        'role_id' => $roleId,
+                        'module_id' => (int) $row->module_id,
+                        'can_view' => (bool) $row->can_view,
+                        'can_create' => (bool) $row->can_create,
+                        'can_update' => (bool) $row->can_update,
+                        'can_delete' => (bool) $row->can_delete,
+                        'can_export' => (bool) $row->can_export,
+                        'can_approve' => (bool) $row->can_approve,
+                        'field_rules' => $row->field_rules,
+                        'data_scope_rules' => $row->data_scope_rules,
+                        'updated_at' => now(),
+                    ]);
+                }
+            } else {
+                $moduleIds = DB::table('appcfg.modules')->where('status', 1)->pluck('id')->all();
+                foreach ($moduleIds as $moduleId) {
+                    DB::table('auth.role_module_access')->insert([
+                        'role_id' => $roleId,
+                        'module_id' => (int) $moduleId,
+                        'can_view' => true,
+                        'can_create' => true,
+                        'can_update' => true,
+                        'can_delete' => true,
+                        'can_export' => true,
+                        'can_approve' => true,
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            $adminUserId = (int) DB::table('auth.users')->insertGetId([
+                'company_id' => $companyId,
+                'branch_id' => $branchId,
+                'username' => $adminUsername,
+                'password_hash' => Hash::make((string) $payload['admin_password']),
+                'first_name' => trim((string) $payload['admin_first_name']),
+                'last_name' => isset($payload['admin_last_name']) ? trim((string) $payload['admin_last_name']) : null,
+                'email' => $payload['admin_email'] ?? null,
+                'phone' => $payload['admin_phone'] ?? null,
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('auth.user_roles')->insert([
+                'user_id' => $adminUserId,
+                'role_id' => $roleId,
+            ]);
+
+            if ($this->tableExists('appcfg', 'company_verticals') && $this->tableExists('appcfg', 'verticals')) {
+                $verticalCode = isset($payload['vertical_code']) ? strtoupper(trim((string) $payload['vertical_code'])) : '';
+                $vertical = null;
+                if ($verticalCode !== '') {
+                    $vertical = DB::table('appcfg.verticals')
+                        ->whereRaw('UPPER(code) = ?', [$verticalCode])
+                        ->where('status', 1)
+                        ->first(['id']);
+                }
+
+                if (!$vertical) {
+                    $vertical = DB::table('appcfg.verticals')
+                        ->where('status', 1)
+                        ->orderBy('name')
+                        ->first(['id']);
+                }
+
+                if ($vertical) {
+                    DB::table('appcfg.company_verticals')->insert([
+                        'company_id' => $companyId,
+                        'vertical_id' => (int) $vertical->id,
+                        'is_primary' => true,
+                        'status' => 1,
+                        'effective_from' => now()->toDateString(),
+                        'effective_to' => null,
+                        'created_by' => $authUser->id,
+                        'updated_by' => $authUser->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            if ($this->tableExists('appcfg', 'company_rate_limits')) {
+                DB::table('appcfg.company_rate_limits')->updateOrInsert(
+                    ['company_id' => $companyId],
+                    [
+                        'is_enabled' => true,
+                        'requests_per_minute' => $readRate,
+                        'requests_per_minute_read' => $readRate,
+                        'requests_per_minute_write' => $writeRate,
+                        'requests_per_minute_reports' => $reportsRate,
+                        'plan_code' => $planCode,
+                        'last_preset_code' => $presetCode,
+                        'updated_by' => $authUser->id,
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
+
+                $this->logCompanyRateLimitAudit(
+                    $companyId,
+                    'SINGLE',
+                    $planCode,
+                    $presetCode,
+                    true,
+                    $readRate,
+                    $writeRate,
+                    $reportsRate,
+                    (int) $authUser->id
+                );
+            }
+
+            if ($this->tableExists('appcfg', 'company_operational_limits')) {
+                DB::table('appcfg.company_operational_limits')->updateOrInsert(
+                    ['company_id' => $companyId],
+                    [
+                        'max_branches_enabled' => 1,
+                        'max_warehouses_enabled' => 1,
+                        'max_cash_registers_enabled' => 1,
+                        'max_cash_registers_per_warehouse' => 1,
+                        'updated_by' => $authUser->id,
+                        'updated_at' => now(),
+                    ]
+                );
+            }
+
+            $this->ensureCompanyAccessLink($companyId, (string) $payload['legal_name'], $taxId, $authUser->id);
+        });
+
+        return response()->json([
+            'message' => 'Empresa creada correctamente desde panel admin',
+            'company_id' => $companyId,
+            'branch_id' => $branchId,
+            'admin_user_id' => $adminUserId,
+            'admin_role_id' => $roleId,
+        ], 201);
+    }
+
+    public function resetAdminCompanyPassword(Request $request, $companyId)
+    {
+        $companyId = (int) $companyId;
+
+        $adminUser = DB::table('auth.users as u')
+            ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('u.company_id', $companyId)
+            ->where('u.status', 1)
+            ->whereRaw("UPPER(r.code) = 'ADMIN'")
+            ->orderBy('u.id')
+            ->first(['u.id', 'u.username', 'u.email']);
+
+        if (!$adminUser) {
+            return response()->json([
+                'message' => 'No se encontró un usuario administrador activo para esta empresa.',
+            ], 404);
+        }
+
+        $newPassword = $this->generateSecurePassword();
+
+        DB::table('auth.users')
+            ->where('id', (int) $adminUser->id)
+            ->update([
+                'password_hash' => Hash::make($newPassword),
+                'updated_at' => now(),
+            ]);
+
+        return response()->json([
+            'username' => $adminUser->username,
+            'email' => $adminUser->email,
+            'new_password' => $newPassword,
+            'message' => 'Contraseña reseteada correctamente.',
+        ]);
+    }
+
+    private function generateSecurePassword(int $length = 12): string
+    {
+        $chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
+        $password = '';
+        for ($i = 0; $i < $length; $i++) {
+            $password .= $chars[random_int(0, strlen($chars) - 1)];
+        }
+        return $password;
     }
 
     public function operationalLimits(Request $request)
@@ -273,6 +1642,7 @@ class AppConfigController extends Controller
             'max_branches_enabled' => 'nullable|integer|min:1|max:10000',
             'max_warehouses_enabled' => 'nullable|integer|min:1|max:10000',
             'max_cash_registers_enabled' => 'nullable|integer|min:1|max:10000',
+            'max_cash_registers_per_warehouse' => 'nullable|integer|min:1|max:10000',
         ]);
 
         if ($validator->fails()) {
@@ -312,6 +1682,9 @@ class AppConfigController extends Controller
             }
             if (isset($payload['max_cash_registers_enabled'])) {
                 $updates['max_cash_registers_enabled'] = (int) $payload['max_cash_registers_enabled'];
+            }
+            if (isset($payload['max_cash_registers_per_warehouse'])) {
+                $updates['max_cash_registers_per_warehouse'] = (int) $payload['max_cash_registers_per_warehouse'];
             }
 
             if (!empty($updates)) {
@@ -385,20 +1758,35 @@ class AppConfigController extends Controller
                 ->keyBy('feature_code');
         }
 
-        $features = collect(self::COMMERCE_FEATURE_CODES)->map(function ($code) use ($companyRows, $branchRows) {
+        $features = collect(self::COMMERCE_FEATURE_CODES)->map(function ($code) use ($companyId, $companyRows, $branchRows) {
             $companyRow = $companyRows->get($code);
             $branchRow = $branchRows->get($code);
             $companyConfig = $companyRow ? $this->decodeJsonConfig($companyRow->config) : null;
             $branchConfig = $branchRow ? $this->decodeJsonConfig($branchRow->config) : null;
 
+            $isEnabled = $branchRow && $branchRow->is_enabled !== null
+                ? (bool) $branchRow->is_enabled
+                : ($companyRow ? (bool) $companyRow->is_enabled : false);
+
+            $resolvedConfig = is_array($companyConfig) || is_array($branchConfig)
+                ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
+                : ($branchConfig ?? $companyConfig);
+
+            $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $code);
+            if ($verticalPreference['resolved']) {
+                if ($verticalPreference['is_enabled'] !== null) {
+                    $isEnabled = (bool) $verticalPreference['is_enabled'];
+                }
+                if ($verticalPreference['config'] !== null) {
+                    $resolvedConfig = $verticalPreference['config'];
+                }
+            }
+
             return [
                 'feature_code' => $code,
-                'is_enabled' => $branchRow && $branchRow->is_enabled !== null
-                    ? (bool) $branchRow->is_enabled
-                    : ($companyRow ? (bool) $companyRow->is_enabled : false),
-                'config' => is_array($companyConfig) || is_array($branchConfig)
-                    ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
-                    : ($branchConfig ?? $companyConfig),
+                'is_enabled' => $isEnabled,
+                'config' => $resolvedConfig,
+                'vertical_source' => $verticalPreference['source'],
             ];
         })->values();
 
@@ -532,6 +1920,108 @@ class AppConfigController extends Controller
         return json_encode($value);
     }
 
+    private function resolveVerticalFeaturePreference(int $companyId, string $featureCode): array
+    {
+        $cacheKey = $companyId . ':' . strtoupper(trim($featureCode));
+        if (array_key_exists($cacheKey, $this->verticalFeaturePreferenceCache)) {
+            return $this->verticalFeaturePreferenceCache[$cacheKey];
+        }
+
+        $default = [
+            'resolved' => false,
+            'is_enabled' => null,
+            'config' => null,
+            'source' => null,
+        ];
+
+        if (!$this->tableExists('appcfg', 'verticals')
+            || !$this->tableExists('appcfg', 'company_verticals')
+            || !$this->tableExists('appcfg', 'vertical_feature_templates')
+            || !$this->tableExists('appcfg', 'company_vertical_feature_overrides')) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
+
+        $activeVertical = $this->resolveActiveCompanyVertical($companyId);
+        if ($activeVertical === null) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
+
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+
+        $override = DB::table('appcfg.company_vertical_feature_overrides')
+            ->where('company_id', $companyId)
+            ->where('vertical_id', (int) $activeVertical['id'])
+            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+            ->first(['is_enabled', 'config']);
+
+        if ($override && ($override->is_enabled !== null || $override->config !== null)) {
+            $resolved = [
+                'resolved' => true,
+                'is_enabled' => $override->is_enabled !== null ? (bool) $override->is_enabled : null,
+                'config' => $override->config !== null ? $this->decodeJsonConfig($override->config) : null,
+                'source' => 'COMPANY_VERTICAL_OVERRIDE',
+            ];
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $resolved;
+            return $resolved;
+        }
+
+        $template = DB::table('appcfg.vertical_feature_templates')
+            ->where('vertical_id', (int) $activeVertical['id'])
+            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+            ->first(['is_enabled', 'config']);
+
+        if ($template) {
+            $resolved = [
+                'resolved' => true,
+                'is_enabled' => $template->is_enabled !== null ? (bool) $template->is_enabled : null,
+                'config' => $template->config !== null ? $this->decodeJsonConfig($template->config) : null,
+                'source' => 'VERTICAL_TEMPLATE',
+            ];
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $resolved;
+            return $resolved;
+        }
+
+        $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+        return $default;
+    }
+
+    private function resolveActiveCompanyVertical(int $companyId): ?array
+    {
+        if (array_key_exists($companyId, $this->activeVerticalCache)) {
+            return $this->activeVerticalCache[$companyId];
+        }
+
+        if (!$this->tableExists('appcfg', 'verticals') || !$this->tableExists('appcfg', 'company_verticals')) {
+            $this->activeVerticalCache[$companyId] = null;
+            return null;
+        }
+
+        $row = DB::table('appcfg.company_verticals as cv')
+            ->join('appcfg.verticals as v', 'v.id', '=', 'cv.vertical_id')
+            ->where('cv.company_id', $companyId)
+            ->where('cv.status', 1)
+            ->where('v.status', 1)
+            ->where('cv.is_primary', true)
+            ->select('v.id', 'v.code', 'v.name')
+            ->first();
+
+        if (!$row) {
+            $this->activeVerticalCache[$companyId] = null;
+            return null;
+        }
+
+        $resolved = [
+            'id' => (int) $row->id,
+            'code' => (string) $row->code,
+            'name' => (string) $row->name,
+        ];
+
+        $this->activeVerticalCache[$companyId] = $resolved;
+        return $resolved;
+    }
+
     private function fetchPlatformLimits(): array
     {
         $enabledCompanies = (int) DB::table('core.companies')
@@ -563,11 +2053,12 @@ class AppConfigController extends Controller
                 'max_branches_enabled' => max(1, $usage['enabled_branches']),
                 'max_warehouses_enabled' => max(1, $usage['enabled_warehouses']),
                 'max_cash_registers_enabled' => max(1, $usage['enabled_cash_registers']),
+                'max_cash_registers_per_warehouse' => 1,
             ];
         }
 
         $row = DB::table('appcfg.company_operational_limits')
-            ->select('max_branches_enabled', 'max_warehouses_enabled', 'max_cash_registers_enabled')
+            ->select('max_branches_enabled', 'max_warehouses_enabled', 'max_cash_registers_enabled', 'max_cash_registers_per_warehouse')
             ->where('company_id', $companyId)
             ->first();
 
@@ -576,6 +2067,7 @@ class AppConfigController extends Controller
                 'max_branches_enabled' => max(1, $usage['enabled_branches']),
                 'max_warehouses_enabled' => max(1, $usage['enabled_warehouses']),
                 'max_cash_registers_enabled' => max(1, $usage['enabled_cash_registers']),
+                'max_cash_registers_per_warehouse' => 1,
             ];
         }
 
@@ -583,6 +2075,7 @@ class AppConfigController extends Controller
             'max_branches_enabled' => (int) $row->max_branches_enabled,
             'max_warehouses_enabled' => (int) $row->max_warehouses_enabled,
             'max_cash_registers_enabled' => (int) $row->max_cash_registers_enabled,
+            'max_cash_registers_per_warehouse' => (int) ($row->max_cash_registers_per_warehouse ?? 1),
         ];
     }
 
@@ -602,6 +2095,165 @@ class AppConfigController extends Controller
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function ensureCompanyAccessLinksForCompanies($companies): void
+    {
+        if (!$this->tableExists('appcfg', 'company_access_links')) {
+            return;
+        }
+
+        foreach ($companies as $company) {
+            $companyId = (int) $company->id;
+            $exists = DB::table('appcfg.company_access_links')
+                ->where('company_id', $companyId)
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            $this->ensureCompanyAccessLink(
+                $companyId,
+                (string) ($company->legal_name ?? ''),
+                $company->tax_id !== null ? (string) $company->tax_id : null,
+                null
+            );
+        }
+    }
+
+    private function ensureCompanyAccessLink(int $companyId, string $legalName, ?string $taxId, ?int $actorId): string
+    {
+        if (!$this->tableExists('appcfg', 'company_access_links')) {
+            return '';
+        }
+
+        $existing = DB::table('appcfg.company_access_links')
+            ->where('company_id', $companyId)
+            ->first(['access_slug']);
+
+        if ($existing && !empty($existing->access_slug)) {
+            $currentSlug = (string) $existing->access_slug;
+            if (!$this->isSensitiveCompanyAccessSlug($currentSlug)) {
+                return $currentSlug;
+            }
+        }
+
+        $slug = $this->generateCompanyAccessSlug($companyId, $legalName, $taxId);
+
+        DB::table('appcfg.company_access_links')->updateOrInsert(
+            ['company_id' => $companyId],
+            [
+                'access_slug' => $slug,
+                'is_active' => true,
+                'created_by' => $actorId,
+                'updated_by' => $actorId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        return $slug;
+    }
+
+    private function generateCompanyAccessSlug(int $companyId, string $legalName, ?string $taxId): string
+    {
+        $hashSeed = hash('sha256', 'company-link|' . $companyId . '|' . (string) config('app.key'));
+        $base = 'emp-' . strtolower(substr($hashSeed, 0, 12));
+        $candidate = $base;
+        $suffix = 1;
+
+        while (DB::table('appcfg.company_access_links')
+            ->where('access_slug', $candidate)
+            ->where('company_id', '!=', $companyId)
+            ->exists()) {
+            $suffix++;
+            $candidate = $base . '-' . $suffix;
+        }
+
+        return $candidate;
+    }
+
+    private function isSensitiveCompanyAccessSlug(string $slug): bool
+    {
+        $normalized = strtolower(trim($slug));
+        if ($normalized === '') {
+            return true;
+        }
+
+        // Legacy format exposed tax identifiers in path, for example ruc-10455923951-1.
+        if (Str::startsWith($normalized, 'ruc-')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function resolveFrontendAppUrl(): string
+    {
+        $base = (string) env('FRONTEND_APP_URL', 'http://127.0.0.1:5173');
+        return rtrim($base, '/');
+    }
+
+    private function buildCompanyAccessUrl(string $slug): string
+    {
+        return $this->resolveFrontendAppUrl() . '/t/' . rawurlencode($slug);
+    }
+
+    private function companyRateLimitPresets(int $defaultRead, int $defaultWrite, int $defaultReports): array
+    {
+        return [
+            [
+                'code' => 'BASIC',
+                'name' => 'Basic',
+                'requests_per_minute_read' => max(1000, (int) round($defaultRead * 0.65)),
+                'requests_per_minute_write' => max(700, (int) round($defaultWrite * 0.6)),
+                'requests_per_minute_reports' => max(300, (int) round($defaultReports * 0.55)),
+            ],
+            [
+                'code' => 'PRO',
+                'name' => 'Pro',
+                'requests_per_minute_read' => $defaultRead,
+                'requests_per_minute_write' => $defaultWrite,
+                'requests_per_minute_reports' => $defaultReports,
+            ],
+            [
+                'code' => 'ENTERPRISE',
+                'name' => 'Enterprise',
+                'requests_per_minute_read' => max($defaultRead, 6000),
+                'requests_per_minute_write' => max($defaultWrite, 4000),
+                'requests_per_minute_reports' => max($defaultReports, 1500),
+            ],
+        ];
+    }
+
+    private function logCompanyRateLimitAudit(
+        int $companyId,
+        string $actionType,
+        string $planCode,
+        ?string $presetCode,
+        bool $isEnabled,
+        int $readPerMinute,
+        int $writePerMinute,
+        int $reportsPerMinute,
+        ?int $appliedBy
+    ): void {
+        if (!$this->tableExists('appcfg', 'company_rate_limit_audit')) {
+            return;
+        }
+
+        DB::table('appcfg.company_rate_limit_audit')->insert([
+            'company_id' => $companyId,
+            'action_type' => $actionType,
+            'plan_code' => $planCode,
+            'preset_code' => $presetCode,
+            'is_enabled' => $isEnabled,
+            'requests_per_minute_read' => $readPerMinute,
+            'requests_per_minute_write' => $writePerMinute,
+            'requests_per_minute_reports' => $reportsPerMinute,
+            'applied_by' => $appliedBy,
+            'created_at' => now(),
+        ]);
     }
     // ─────────────────────────────────────────────────────────
     // Perfil de empresa
@@ -663,6 +2315,8 @@ class AppConfigController extends Controller
             'urbanizacion'    => $extraData['urbanizacion'] ?? null,
             'sunat_secondary_user' => $extraData['sunat_secondary_user'] ?? null,
             'sunat_secondary_pass' => $extraData['sunat_secondary_pass'] ?? null,
+            'client_id'       => $extraData['client_id'] ?? null,
+            'client_secret'   => $extraData['client_secret'] ?? null,
             'logo_url'        => $logoUrl,
             'has_cert'        => $settings && !empty($settings->cert_path),
             'bank_accounts'   => $settings
@@ -693,6 +2347,8 @@ class AppConfigController extends Controller
             'urbanizacion'  => 'nullable|string|max:100',
             'sunat_secondary_user' => 'nullable|string|max:100',
             'sunat_secondary_pass' => 'nullable|string|max:100',
+            'client_id'     => 'nullable|string|max:200',
+            'client_secret' => 'nullable|string|max:500',
             'bank_accounts' => 'nullable|array',
             'bank_accounts.*.bank_name'     => 'required_with:bank_accounts.*|string|max:100',
             'bank_accounts.*.account_number'=> 'required_with:bank_accounts.*|string|max:50',
@@ -745,7 +2401,7 @@ class AppConfigController extends Controller
                 $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
             }
 
-            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass'];
+            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret'];
             $hasExtraDataUpdates = false;
             foreach ($extraDataFields as $field) {
                 if (array_key_exists($field, $payload)) {

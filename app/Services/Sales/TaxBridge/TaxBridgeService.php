@@ -5,9 +5,12 @@ namespace App\Services\Sales\TaxBridge;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class TaxBridgeService
 {
+    private const RECONCILE_WARN_ATTEMPTS = 8;
+
     public function __construct(private TaxBridgePayloadBuilder $payloadBuilder)
     {
     }
@@ -60,6 +63,27 @@ class TaxBridgeService
 
         if (strtoupper((string) ($document->status ?? '')) !== 'ISSUED') {
             throw new TaxBridgeException('Document must be in ISSUED status to reattempt tax bridge send', 422);
+        }
+
+        $metadata = json_decode((string) ($document->metadata ?? '{}'), true);
+        $metadata = is_array($metadata) ? $metadata : [];
+        $sunatStatus = strtoupper(trim((string) ($metadata['sunat_status'] ?? '')));
+
+        if ($sunatStatus === 'PENDING_CONFIRMATION') {
+            $nextAtRaw = (string) ($metadata['sunat_reconcile_next_at'] ?? '');
+            if ($nextAtRaw !== '') {
+                $isCoolingDown = false;
+                try {
+                    $nextAt = \Carbon\Carbon::parse($nextAtRaw);
+                    $isCoolingDown = $nextAt->greaterThan(now());
+                } catch (\Throwable $e) {
+                    // Ignore parse failures and allow manual retry.
+                }
+
+                if ($isCoolingDown) {
+                    throw new TaxBridgeException('Documento en verificacion automatica SUNAT. Espere unos minutos antes de reenviar.', 422);
+                }
+            }
         }
 
         $config = $this->resolveConfig($companyId, $document->branch_id !== null ? (int) $document->branch_id : null);
@@ -212,6 +236,9 @@ class TaxBridgeService
 
             $bridgeResCode = $this->extractBridgeResponseCode($decoded);
             $bridgeState = strtoupper(trim($this->extractBridgeResponseState($decoded)));
+            $bridgeMessage = $this->extractBridgeResponseMessage($decoded, $raw);
+            $bridgeTicket = $this->extractBridgeTicket($decoded);
+            $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
 
             $status = 'SENT';
             $label = 'Comunicacion de baja enviada';
@@ -219,12 +246,26 @@ class TaxBridgeService
             if (!$response->successful()) {
                 $status = 'HTTP_ERROR';
                 $label = 'Error HTTP en comunicacion de baja';
-            } elseif ($bridgeResCode === 1 || in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'ENVIADO', 'OK'], true)) {
+            } elseif ($finalBridgeCode !== null) {
+                if ($finalBridgeCode === 0 || $finalBridgeCode === 2323 || $finalBridgeCode === 2324 || $finalBridgeCode >= 4000) {
+                    $status = 'ACCEPTED';
+                    $label = 'Comunicacion de baja aceptada';
+                } elseif ($finalBridgeCode >= 2000 && $finalBridgeCode <= 3999) {
+                    $status = 'REJECTED';
+                    $label = 'Comunicacion de baja rechazada';
+                }
+            } elseif ($bridgeTicket !== null && ($this->containsBridgeErrorMarkers($bridgeMessage) || $this->containsBridgeErrorMarkers($raw))) {
+                $status = 'SENT';
+                $label = 'Comunicacion de baja enviada; ticket pendiente';
+            } elseif ($bridgeResCode === 1 && $bridgeTicket === null && !$this->containsBridgeErrorMarkers($bridgeMessage)) {
                 $status = 'ACCEPTED';
                 $label = 'Comunicacion de baja aceptada';
             } elseif ($bridgeResCode === 0 || in_array($bridgeState, ['RECHAZADO', 'REJECTED', 'ERROR'], true)) {
                 $status = 'REJECTED';
                 $label = 'Comunicacion de baja rechazada';
+            } elseif (in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'OK'], true) && $bridgeTicket === null) {
+                $status = 'ACCEPTED';
+                $label = 'Comunicacion de baja aceptada';
             }
 
             $this->updateDocumentTaxStatus($companyId, $documentId, [
@@ -234,6 +275,18 @@ class TaxBridgeService
                 'sunat_void_response' => is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 1500)],
                 'sunat_void_ticket' => is_array($decoded) ? ($decoded['ticket'] ?? null) : null,
             ]);
+
+            if ($status === 'ACCEPTED') {
+                DB::table('sales.commercial_documents')
+                    ->where('id', $documentId)
+                    ->where('company_id', $companyId)
+                    ->update([
+                        'status' => 'VOID',
+                        'updated_at' => now(),
+                    ]);
+
+                $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
+            }
 
             return [
                 'status' => $status,
@@ -303,6 +356,45 @@ class TaxBridgeService
             'bridge_response' => $metadata['sunat_bridge_response'] ?? null,
             'sunat_ticket' => $metadata['sunat_ticket'] ?? null,
             'bridge_note' => (string) ($metadata['sunat_bridge_note'] ?? ''),
+            'sunat_error_code' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['code'],
+            'sunat_error_message' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['message'],
+        ];
+    }
+
+    public function summarizeBridgeDiagnostic($response): array
+    {
+        $decoded = $response;
+        $raw = '';
+
+        if (is_string($response)) {
+            $raw = trim($response);
+            $parsed = json_decode($raw, true);
+            if (is_array($parsed)) {
+                $decoded = $parsed;
+            }
+        } elseif (is_array($response)) {
+            $raw = json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '';
+        } else {
+            $decoded = null;
+        }
+
+        $message = $this->extractBridgeResponseMessage($decoded, $raw);
+        $message = $this->compactBridgeText($message !== '' ? $message : $raw);
+        $code = $this->extractBridgeFinalCdrCode($decoded, trim($message . ' ' . $raw));
+
+        if ($message === '' && is_array($decoded)) {
+            foreach (['error', 'detail', 'details'] as $key) {
+                if (array_key_exists($key, $decoded) && is_scalar($decoded[$key])) {
+                    $message = $this->compactBridgeText((string) $decoded[$key]);
+                    break;
+                }
+            }
+        }
+
+        return [
+            'code' => $code !== null ? (string) $code : null,
+            'message' => $message !== '' ? $message : null,
+            'ticket' => $this->extractBridgeTicket($decoded),
         ];
     }
 
@@ -346,6 +438,43 @@ class TaxBridgeService
 
     private function performDispatch(int $companyId, int $documentId, array $config, bool $isRetry): array
     {
+        $document = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->select('id', 'issue_at')
+            ->first();
+
+        if (!$document) {
+            if ($isRetry) {
+                throw new TaxBridgeException('Document not found', 404);
+            }
+
+            return [
+                'status' => 'ERROR',
+                'label' => 'Documento no encontrado',
+            ];
+        }
+
+        if ($this->isOutsideSunatIssueWindow($document->issue_at ?? null)) {
+            $this->updateDocumentTaxStatus($companyId, $documentId, [
+                'sunat_status' => 'EXPIRED_WINDOW',
+                'sunat_status_label' => 'Fuera de plazo SUNAT (3 dias)',
+                'sunat_reconcile_auto_enabled' => false,
+                'sunat_needs_manual_confirmation' => true,
+                'sunat_bridge_note' => 'No se envia automaticamente: la fecha de emision supera la ventana de 3 dias de SUNAT',
+                'sunat_reconcile_next_at' => null,
+            ]);
+
+            if ($isRetry) {
+                throw new TaxBridgeException('Documento fuera de plazo SUNAT: solo se permite envio dentro de 3 dias desde la emision', 422);
+            }
+
+            return [
+                'status' => 'EXPIRED_WINDOW',
+                'label' => 'Fuera de plazo SUNAT (3 dias)',
+            ];
+        }
+
         if ($config['endpoint_url'] === '') {
             if ($isRetry) {
                 throw new TaxBridgeException('Tax bridge endpoint URL is not configured', 422);
@@ -435,32 +564,46 @@ class TaxBridgeService
 
             $bridgeResCode = $this->extractBridgeResponseCode($decoded);
             $bridgeState = strtoupper(trim($this->extractBridgeResponseState($decoded)));
+            $bridgeMessage = $this->extractBridgeResponseMessage($decoded, $raw);
+            $bridgeTicket = $this->extractBridgeTicket($decoded);
+            $bridgeLink = $this->extractBridgeConstancyLink($decoded);
+            $bridgeSignature = $this->extractBridgeElectronicSignature($decoded);
+            $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
             $status = 'SENT';
             $label = 'Enviado';
 
             if (!$response->successful()) {
-                $status = 'HTTP_ERROR';
-                $label = 'Error HTTP';
-            } elseif ($scalarBridgeCode === 1) {
+                $status = 'PENDING_CONFIRMATION';
+                $label = 'Pendiente confirmacion SUNAT';
+            } elseif ($finalBridgeCode !== null) {
+                if ($finalBridgeCode === 0 || $finalBridgeCode >= 4000) {
+                    $status = 'ACCEPTED';
+                    $label = 'Aceptado';
+                } elseif ($finalBridgeCode >= 2000 && $finalBridgeCode <= 3999) {
+                    $status = 'REJECTED';
+                    $label = 'Rechazado';
+                }
+            } elseif ($bridgeTicket !== null && ($this->containsBridgeErrorMarkers($bridgeMessage) || $this->containsBridgeErrorMarkers($raw))) {
+                $status = 'PENDING_CONFIRMATION';
+                $label = 'Pendiente confirmacion SUNAT';
+            } elseif ($scalarBridgeCode === 1 && $bridgeTicket === null) {
                 $status = 'ACCEPTED';
                 $label = 'Aceptado';
             } elseif ($scalarBridgeCode === 0) {
                 $status = 'REJECTED';
                 $label = 'Rechazado';
-            } elseif ($scalarBridgeCode === 3) {
-                $status = 'ACCEPTED';
-                $label = 'Aceptado';
-            } elseif ($bridgeResCode === 1 || in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'OK'], true)) {
+            } elseif ($bridgeResCode === 1 && $bridgeTicket === null && !$this->containsBridgeErrorMarkers($bridgeMessage)) {
                 $status = 'ACCEPTED';
                 $label = 'Aceptado';
             } elseif ($bridgeResCode === 0 || in_array($bridgeState, ['RECHAZADO', 'REJECTED', 'ERROR'], true)) {
                 $status = 'REJECTED';
                 $label = 'Rechazado';
-            } elseif ($bridgeResCode === 3 || in_array($bridgeState, ['ANULADO', 'VOIDED'], true)) {
-                // In some bridge implementations, code 3 represents a successful tributary terminal state.
+            } elseif (in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'OK'], true) && $bridgeTicket === null) {
                 $status = 'ACCEPTED';
                 $label = 'Aceptado';
             }
+
+            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, $status === 'PENDING_CONFIRMATION', $isRetry, !$response->successful() ? 'HTTP_ERROR' : null);
 
             $this->updateDocumentTaxStatus($companyId, $documentId, [
                 'sunat_status' => $status,
@@ -468,7 +611,20 @@ class TaxBridgeService
                 'sunat_bridge_http_code' => $response->status(),
                 'sunat_bridge_response' => is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 1500)],
                 'sunat_ticket' => is_array($decoded) ? ($decoded['ticket'] ?? null) : null,
+                'sunat_constancy_link' => $bridgeLink,
+                'sunat_electronic_signature' => $bridgeSignature,
+                'sunat_reconcile_attempts' => $attemptMeta['attempts'],
+                'sunat_reconcile_next_at' => $attemptMeta['next_at'],
+                'sunat_reconcile_auto_enabled' => $attemptMeta['auto_enabled'],
+                'sunat_reconcile_last_error_kind' => $attemptMeta['last_error_kind'],
+                'sunat_reconcile_last_error_at' => $attemptMeta['last_error_at'],
+                'sunat_needs_manual_confirmation' => $attemptMeta['needs_manual_confirmation'],
+                'sunat_bridge_note' => $attemptMeta['note'],
             ]);
+
+            if ($status === 'ACCEPTED') {
+                $this->settleInventoryForAcceptedDocumentIfNeeded($companyId, $documentId);
+            }
 
             return [
                 'status' => $status,
@@ -491,10 +647,18 @@ class TaxBridgeService
                 'error' => $e->getMessage(),
             ]);
 
+            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, true, $isRetry, 'NETWORK_ERROR');
+
             $this->updateDocumentTaxStatus($companyId, $documentId, [
-                'sunat_status' => 'NETWORK_ERROR',
-                'sunat_status_label' => 'Error red',
-                'sunat_bridge_note' => substr($e->getMessage(), 0, 500),
+                'sunat_status' => 'PENDING_CONFIRMATION',
+                'sunat_status_label' => 'Pendiente confirmacion SUNAT',
+                'sunat_reconcile_attempts' => $attemptMeta['attempts'],
+                'sunat_reconcile_next_at' => $attemptMeta['next_at'],
+                'sunat_reconcile_auto_enabled' => $attemptMeta['auto_enabled'],
+                'sunat_reconcile_last_error_kind' => $attemptMeta['last_error_kind'],
+                'sunat_reconcile_last_error_at' => $attemptMeta['last_error_at'],
+                'sunat_needs_manual_confirmation' => $attemptMeta['needs_manual_confirmation'],
+                'sunat_bridge_note' => $attemptMeta['note'] . ' | ' . substr($e->getMessage(), 0, 350),
             ]);
 
             if ($isRetry) {
@@ -502,10 +666,159 @@ class TaxBridgeService
             }
 
             return [
-                'status' => 'NETWORK_ERROR',
-                'label' => 'Error red',
+                'status' => 'PENDING_CONFIRMATION',
+                'label' => 'Pendiente confirmacion SUNAT',
             ];
         }
+    }
+
+    public function reconcilePendingDocuments(int $limit = 30): array
+    {
+        $limit = max(1, min(200, $limit));
+        $processed = 0;
+        $accepted = 0;
+        $rejected = 0;
+        $pending = 0;
+        $failed = 0;
+
+        // Exclude companies that have explicitly disabled automatic reconcile.
+        $disabledCompanyIds = DB::table('appcfg.company_feature_toggles')
+            ->where('feature_code', 'SALES_TAX_BRIDGE')
+            ->whereRaw("LOWER(COALESCE(config->>'auto_reconcile_enabled', 'true')) = 'false'")
+            ->pluck('company_id')
+            ->toArray();
+
+        $query = DB::table('sales.commercial_documents')
+            ->where('status', 'ISSUED')
+            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+            ->where(function ($q) {
+                $q->whereRaw("(metadata->>'sunat_reconcile_auto_enabled') IS NULL")
+                  ->orWhereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'");
+            })
+            ->where(function ($q) {
+                $q->whereRaw("(metadata->>'sunat_reconcile_next_at') IS NULL")
+                  ->orWhereRaw("(metadata->>'sunat_reconcile_next_at')::timestamp <= NOW()");
+            });
+
+        if (!empty($disabledCompanyIds)) {
+            $query->whereNotIn('company_id', $disabledCompanyIds);
+        }
+
+        $rows = $query->orderBy('updated_at')
+            ->limit($limit)
+            ->get(['id', 'company_id']);
+
+        foreach ($rows as $row) {
+            $processed++;
+            try {
+                $res = $this->retry((int) $row->company_id, (int) $row->id);
+                $status = strtoupper((string) ($res['status'] ?? ''));
+
+                if ($status === 'ACCEPTED') {
+                    $accepted++;
+                } elseif ($status === 'REJECTED') {
+                    $rejected++;
+                } elseif ($status === 'PENDING_CONFIRMATION') {
+                    $pending++;
+                }
+            } catch (\Throwable $e) {
+                $failed++;
+                Log::warning('SUNAT reconcile pending document failed', [
+                    'company_id' => (int) $row->company_id,
+                    'document_id' => (int) $row->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return [
+            'processed' => $processed,
+            'accepted' => $accepted,
+            'rejected' => $rejected,
+            'pending' => $pending,
+            'failed' => $failed,
+        ];
+    }
+
+    public function getReconcileStats(int $companyId): array
+    {
+        $config = $this->resolveConfig($companyId, null);
+
+        $pendingCount = DB::table('sales.commercial_documents')
+            ->where('company_id', $companyId)
+            ->where('status', 'ISSUED')
+            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+            ->count();
+
+        $unsentCount = DB::table('sales.commercial_documents')
+            ->where('company_id', $companyId)
+            ->where('status', 'ISSUED')
+            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->whereRaw("COALESCE(TRIM(metadata->>'sunat_status'),'') = ''")
+            ->count();
+
+        $nextAt = DB::table('sales.commercial_documents')
+            ->where('company_id', $companyId)
+            ->where('status', 'ISSUED')
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+            ->whereRaw("(metadata->>'sunat_reconcile_next_at') IS NOT NULL")
+            ->whereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'")
+            ->min(DB::raw("(metadata->>'sunat_reconcile_next_at')::timestamp"));
+
+        return [
+            'auto_reconcile_enabled' => $config['auto_reconcile_enabled'],
+            'reconcile_batch_size' => $config['reconcile_batch_size'],
+            'pending_reconcile_count' => (int) $pendingCount,
+            'unsent_count' => (int) $unsentCount,
+            'next_reconcile_at' => $nextAt,
+        ];
+    }
+
+    private function buildReconcileAttemptMetadata(int $companyId, int $documentId, bool $pendingConfirmation, bool $isRetry, ?string $errorKind): array
+    {
+        $meta = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->value('metadata');
+
+        $decoded = json_decode((string) ($meta ?? '{}'), true);
+        $decoded = is_array($decoded) ? $decoded : [];
+        $currentAttempts = (int) ($decoded['sunat_reconcile_attempts'] ?? 0);
+
+        if ($pendingConfirmation) {
+            $attempts = $isRetry ? $currentAttempts + 1 : 1;
+            $attempts = max(1, $attempts);
+
+            // Progressive backoff with ceiling to keep retrying automatically
+            // without flooding SUNAT endpoints.
+            $minutes = min(120, (int) pow(2, min(6, $attempts - 1)));
+            $nextAt = now()->addMinutes($minutes)->toDateTimeString();
+            $needsManual = $attempts >= self::RECONCILE_WARN_ATTEMPTS;
+
+            return [
+                'attempts' => $attempts,
+                'next_at' => $nextAt,
+                'auto_enabled' => true,
+                'last_error_kind' => $errorKind,
+                'last_error_at' => now()->toDateTimeString(),
+                'needs_manual_confirmation' => $needsManual,
+                'note' => $needsManual
+                    ? 'Pendiente confirmacion SUNAT. Reintentos automaticos continuan en segundo plano.'
+                    : 'Pendiente confirmacion SUNAT. Reintento automatico programado.',
+            ];
+        }
+
+        return [
+            'attempts' => 0,
+            'next_at' => null,
+            'auto_enabled' => true,
+            'last_error_kind' => null,
+            'last_error_at' => null,
+            'needs_manual_confirmation' => false,
+            'note' => null,
+        ];
     }
 
     private function extractBridgeResponseCode($decoded): ?int
@@ -559,6 +872,159 @@ class TaxBridgeService
         }
 
         return '';
+    }
+
+    private function extractBridgeResponseMessage($decoded, string $raw): string
+    {
+        if (is_array($decoded)) {
+            foreach (['msg', 'message', 'descripcion', 'description', 'desRespuesta', 'cdr_desc', 'value', 'raw'] as $key) {
+                if (array_key_exists($key, $decoded) && is_scalar($decoded[$key])) {
+                    return trim((string) $decoded[$key]);
+                }
+            }
+        }
+
+        return trim($raw);
+    }
+
+    private function extractBridgeTicket($decoded): ?string
+    {
+        if (is_array($decoded) && array_key_exists('ticket', $decoded) && is_scalar($decoded['ticket'])) {
+            $ticket = trim((string) $decoded['ticket']);
+            return $ticket !== '' ? $ticket : null;
+        }
+
+        $text = $this->extractBridgeResponseMessage($decoded, '');
+        if (preg_match('/TICKET\s*:\s*([0-9]{8,})/i', $text, $matches) === 1) {
+            return trim((string) $matches[1]);
+        }
+
+        return null;
+    }
+
+    private function extractBridgeConstancyLink($decoded): ?string
+    {
+        $value = $this->extractBridgeStringByKeys($decoded, [
+            'link',
+            'enlace',
+            'url',
+            'sunat_link',
+            'constancia_link',
+            'consulta_url',
+            'url_consulta',
+            'cdr_link',
+            'cdr_url',
+        ]);
+
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim($value);
+        if ($normalized === '' || !preg_match('/^https?:\/\//i', $normalized)) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    private function extractBridgeElectronicSignature($decoded): ?string
+    {
+        $value = $this->extractBridgeStringByKeys($decoded, [
+            'firma',
+            'firma_electronica',
+            'firmaDigital',
+            'signature',
+            'digital_signature',
+            'hash_cpe',
+            'codigo_hash',
+            'digest_value',
+            'digestValue',
+        ]);
+
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim($value);
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function extractBridgeStringByKeys($decoded, array $keys): ?string
+    {
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $decoded) && is_scalar($decoded[$key])) {
+                $value = trim((string) $decoded[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        foreach ($decoded as $value) {
+            if (is_array($value)) {
+                $nested = $this->extractBridgeStringByKeys($value, $keys);
+                if ($nested !== null && trim($nested) !== '') {
+                    return trim($nested);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function extractBridgeFinalCdrCode($decoded, string $message): ?int
+    {
+        if (is_array($decoded)) {
+            foreach (['codRespuesta', 'cdr_code'] as $key) {
+                if (array_key_exists($key, $decoded) && is_scalar($decoded[$key]) && is_numeric((string) $decoded[$key])) {
+                    return (int) $decoded[$key];
+                }
+            }
+        }
+
+        if (preg_match('/\[\s*CODE\s*\]\s*=>\s*(\d{4})/i', $message, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if (preg_match('/(?:ERROR|COD(?:IGO)?|RESPUESTA)\D{0,30}(\d{4})\b/i', $message, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if (preg_match('/:\s*(\d{4})\b(?!.*:\s*\d{4}\b)/', $message, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if (preg_match('/^\s*(\d{1,4})\b/', $message, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
+    private function containsBridgeErrorMarkers(string $text): bool
+    {
+        $value = strtoupper(trim($text));
+        if ($value === '') {
+            return false;
+        }
+
+        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|CDR NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE/', $value) === 1;
+    }
+
+    private function compactBridgeText(string $text): string
+    {
+        $value = preg_replace('/<br\s*\/?>/i', ' | ', $text) ?? $text;
+        $value = strip_tags($value);
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        $value = trim($value, " \t\n\r\0\x0B|");
+
+        return $value;
     }
 
     public function downloadDocument(int $companyId, int $documentId, string $downloadMethod): array
@@ -673,6 +1139,14 @@ class TaxBridgeService
         ];
     }
 
+    /**
+     * Public proxy for DailySummaryService and other internal callers.
+     */
+    public function resolvePublicConfig(int $companyId, ?int $branchId): array
+    {
+        return $this->resolveConfig($companyId, $branchId);
+    }
+
     private function resolveConfig(int $companyId, ?int $branchId): array
     {
         $featureCode = 'SALES_TAX_BRIDGE';
@@ -731,6 +1205,8 @@ class TaxBridgeService
                 'sol_pass' => '',
                 'sunat_secondary_user' => '',
                 'sunat_secondary_pass' => '',
+                'client_id' => '',
+                'client_secret' => '',
                 'envio_pse' => '',
             ],
             is_array($companyConfig) ? $companyConfig : [],
@@ -755,12 +1231,18 @@ class TaxBridgeService
             'auth_scheme' => strtolower(trim((string) ($cfg['auth_scheme'] ?? 'none'))),
             'token' => (string) ($cfg['token'] ?? ''),
             'auto_send_on_issue' => (bool) ($cfg['auto_send_on_issue'] ?? true),
+            'auto_reconcile_enabled' => isset($cfg['auto_reconcile_enabled']) ? (bool) $cfg['auto_reconcile_enabled'] : true,
+            'reconcile_batch_size' => max(5, min(50, (int) ($cfg['reconcile_batch_size'] ?? 20))),
             'sol_user' => trim((string) ($cfg['sol_user'] ?? '')),
             'sol_pass' => (string) ($cfg['sol_pass'] ?? ''),
             'sunat_secondary_user' => trim((string) (($companySettingsExtra['sunat_secondary_user'] ?? '') ?: ($cfg['sunat_secondary_user'] ?? ''))),
             'sunat_secondary_pass' => (string) (($companySettingsExtra['sunat_secondary_pass'] ?? '') !== ''
                 ? $companySettingsExtra['sunat_secondary_pass']
                 : ($cfg['sunat_secondary_pass'] ?? '')),
+            'client_id' => trim((string) (($companySettingsExtra['client_id'] ?? '') ?: ($cfg['client_id'] ?? ''))),
+            'client_secret' => (string) (($companySettingsExtra['client_secret'] ?? '') !== ''
+                ? $companySettingsExtra['client_secret']
+                : ($cfg['client_secret'] ?? '')),
             'envio_pse' => trim((string) ($cfg['envio_pse'] ?? '')),
             'codigolocal' => trim((string) ($cfg['codigolocal'] ?? '')),
         ];
@@ -837,6 +1319,212 @@ class TaxBridgeService
         return null;
     }
 
+    public function manualConfirmWithEvidence(
+        int $companyId,
+        ?int $branchId,
+        int $documentId,
+        string $resolution,
+        int $actorId,
+        array $evidence
+    ): array {
+        $document = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if (!$document) {
+            throw new TaxBridgeException('Documento no encontrado', 404);
+        }
+
+        if (!$this->supportsDocumentKind((string) $document->document_kind)) {
+            throw new TaxBridgeException('Solo se admite confirmacion manual para comprobantes tributarios', 422);
+        }
+
+        $normalizedResolution = strtoupper(trim($resolution));
+        if (!in_array($normalizedResolution, ['ACCEPTED', 'REJECTED'], true)) {
+            throw new TaxBridgeException('Resolucion manual invalida', 422);
+        }
+
+        $updates = [
+            'sunat_status' => $normalizedResolution,
+            'sunat_status_label' => $normalizedResolution === 'ACCEPTED'
+                ? 'Confirmado manualmente con evidencia'
+                : 'Rechazado manualmente con evidencia',
+            'sunat_bridge_note' => 'Resolucion manual aplicada por usuario',
+            'sunat_manual_confirmation_required' => false,
+            'sunat_needs_manual_confirmation' => false,
+            'sunat_reconcile_next_at' => null,
+            'sunat_manual_confirmed_at' => now()->toDateTimeString(),
+            'sunat_manual_confirmed_by' => $actorId,
+            'sunat_manual_evidence' => [
+                'type' => strtoupper(trim((string) ($evidence['type'] ?? 'OTHER'))),
+                'reference' => trim((string) ($evidence['reference'] ?? '')),
+                'note' => trim((string) ($evidence['note'] ?? '')),
+            ],
+        ];
+
+        $this->updateDocumentTaxStatus($companyId, $documentId, $updates);
+
+        if ($normalizedResolution === 'ACCEPTED') {
+            $this->settleInventoryForAcceptedDocumentIfNeeded($companyId, $documentId);
+        }
+
+        return [
+            'document_id' => $documentId,
+            'sunat_status' => $normalizedResolution,
+            'sunat_status_label' => $updates['sunat_status_label'],
+            'inventory_sunat_settled' => $normalizedResolution === 'ACCEPTED',
+        ];
+    }
+
+    public function notifyStaleSunatExceptions(int $hours, int $limit): array
+    {
+        $thresholdHours = max(1, min(168, $hours));
+        $maxRows = max(1, min(500, $limit));
+        $statusSet = ['PENDING_CONFIRMATION', 'EXPIRED_WINDOW', 'HTTP_ERROR', 'NETWORK_ERROR', 'ERROR'];
+
+        $rows = DB::table('sales.commercial_documents')
+            ->select('id', 'company_id', 'branch_id', 'document_kind', 'series', 'number', 'updated_at', 'metadata')
+            ->whereIn(DB::raw("UPPER(COALESCE(metadata->>'sunat_status',''))"), $statusSet)
+            ->whereRaw('EXTRACT(EPOCH FROM (NOW() - updated_at)) >= ?', [$thresholdHours * 3600])
+            ->orderBy('updated_at')
+            ->limit($maxRows)
+            ->get();
+
+        $emailSent = 0;
+        $whatsappSent = 0;
+        $notified = 0;
+
+        foreach ($rows as $row) {
+            $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
+            $metadata = is_array($metadata) ? $metadata : [];
+
+            $repeatMinutes = max(10, (int) ($metadata['sunat_alert_repeat_minutes'] ?? 60));
+            $lastAlertAt = trim((string) ($metadata['sunat_alert_last_at'] ?? ''));
+            if ($lastAlertAt !== '') {
+                try {
+                    if (\Carbon\Carbon::parse($lastAlertAt)->addMinutes($repeatMinutes)->greaterThan(now())) {
+                        continue;
+                    }
+                } catch (\Throwable $e) {
+                    // Ignore malformed timestamp and continue.
+                }
+            }
+
+            $config = $this->resolveConfig((int) $row->company_id, $row->branch_id !== null ? (int) $row->branch_id : null);
+            $emails = $this->resolveAlertEmails((int) $row->company_id, $config);
+            $whatsappWebhook = trim((string) ($config['alerts_whatsapp_webhook'] ?? ''));
+            $status = strtoupper((string) ($metadata['sunat_status'] ?? 'PENDING_CONFIRMATION'));
+            $hoursPending = max(0, (int) floor(now()->diffInMinutes(\Carbon\Carbon::parse((string) $row->updated_at)) / 60));
+
+            $message = sprintf(
+                'Excepcion SUNAT pendiente %dh: doc #%d %s %s-%s estado=%s',
+                $hoursPending,
+                (int) $row->id,
+                (string) $row->document_kind,
+                (string) $row->series,
+                (string) $row->number,
+                $status
+            );
+
+            $hasChannel = false;
+
+            if (!empty($emails)) {
+                try {
+                    Mail::raw($message, function ($mail) use ($emails, $row, $status) {
+                        $mail->to($emails)
+                            ->subject(sprintf('Alerta SUNAT [%s] Documento #%d', $status, (int) $row->id));
+                    });
+                    $emailSent++;
+                    $hasChannel = true;
+                } catch (\Throwable $e) {
+                    Log::warning('SUNAT alert email failed', [
+                        'document_id' => (int) $row->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($whatsappWebhook !== '') {
+                try {
+                    Http::timeout(8)->post($whatsappWebhook, [
+                        'text' => $message,
+                        'document_id' => (int) $row->id,
+                        'company_id' => (int) $row->company_id,
+                        'status' => $status,
+                    ]);
+                    $whatsappSent++;
+                    $hasChannel = true;
+                } catch (\Throwable $e) {
+                    Log::warning('SUNAT alert whatsapp failed', [
+                        'document_id' => (int) $row->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if (!$hasChannel) {
+                Log::warning('SUNAT alert fallback log', [
+                    'document_id' => (int) $row->id,
+                    'message' => $message,
+                ]);
+            }
+
+            $metadata['sunat_alert_last_at'] = now()->toDateTimeString();
+            $metadata['sunat_alert_count'] = (int) ($metadata['sunat_alert_count'] ?? 0) + 1;
+
+            DB::table('sales.commercial_documents')
+                ->where('id', (int) $row->id)
+                ->where('company_id', (int) $row->company_id)
+                ->update([
+                    'metadata' => json_encode($metadata),
+                    'updated_at' => now(),
+                ]);
+
+            $notified++;
+        }
+
+        return [
+            'candidates' => (int) $rows->count(),
+            'notified' => $notified,
+            'email' => $emailSent,
+            'whatsapp' => $whatsappSent,
+        ];
+    }
+
+    private function resolveAlertEmails(int $companyId, array $config): array
+    {
+        $emails = [];
+
+        $cfgEmails = $config['alerts_email_to'] ?? [];
+        if (is_string($cfgEmails) && trim($cfgEmails) !== '') {
+            $cfgEmails = preg_split('/[,;\s]+/', trim($cfgEmails)) ?: [];
+        }
+
+        if (is_array($cfgEmails)) {
+            foreach ($cfgEmails as $email) {
+                $value = trim((string) $email);
+                if ($value !== '') {
+                    $emails[] = $value;
+                }
+            }
+        }
+
+        if (empty($emails) && $this->tableExists('core', 'company_settings')) {
+            $settings = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->select('email')
+                ->first();
+
+            $companyEmail = trim((string) ($settings->email ?? ''));
+            if ($companyEmail !== '') {
+                $emails[] = $companyEmail;
+            }
+        }
+
+        return array_values(array_unique($emails));
+    }
+
     private function isEnabledForContext(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
     {
         if ($branchId !== null) {
@@ -871,6 +1559,21 @@ class TaxBridgeService
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function isOutsideSunatIssueWindow($issueAt): bool
+    {
+        if ($issueAt === null || trim((string) $issueAt) === '') {
+            return false;
+        }
+
+        try {
+            $issueDate = \Carbon\Carbon::parse((string) $issueAt)->startOfDay();
+            $deadline = $issueDate->copy()->addDays(3)->endOfDay();
+            return now()->greaterThan($deadline);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     private function updateDocumentTaxStatus(int $companyId, int $documentId, array $updates): void
@@ -946,6 +1649,176 @@ class TaxBridgeService
             ->count();
 
         return max(1, (int) $todayCount + 1);
+    }
+
+    public function settleInventoryForAcceptedDocumentIfNeeded(int $companyId, int $documentId): void
+    {
+        $document = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->select('id', 'document_kind', 'series', 'number', 'issue_at', 'warehouse_id', 'metadata', 'updated_by')
+            ->first();
+
+        if (!$document) {
+            return;
+        }
+
+        $kind = strtoupper((string) ($document->document_kind ?? ''));
+        if (!in_array($kind, ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true)) {
+            return;
+        }
+
+        $metadata = json_decode((string) ($document->metadata ?? '{}'), true);
+        $metadata = is_array($metadata) ? $metadata : [];
+
+        if (!empty($metadata['stock_already_discounted']) || !empty($metadata['inventory_sunat_settled'])) {
+            return;
+        }
+
+        $direction = in_array($kind, ['INVOICE', 'RECEIPT', 'DEBIT_NOTE'], true) ? 'OUT' : 'IN';
+
+        $items = DB::table('sales.commercial_document_items as i')
+            ->leftJoin('inventory.products as p', 'p.id', '=', 'i.product_id')
+            ->where('i.document_id', $documentId)
+            ->select('i.id', 'i.product_id', 'i.qty', 'i.qty_base', 'i.conversion_factor', 'i.unit_cost', 'p.is_stockable')
+            ->get();
+
+        $movedAt = now();
+        $createdBy = (int) ($document->updated_by ?? 0);
+        $note = 'SUNAT aceptado ' . $kind . ' ' . (string) $document->series . '-' . (string) $document->number;
+
+        foreach ($items as $item) {
+            if ((int) ($item->product_id ?? 0) <= 0) {
+                continue;
+            }
+
+            if (!(bool) ($item->is_stockable ?? false)) {
+                continue;
+            }
+
+            $lots = DB::table('sales.commercial_document_item_lots')
+                ->where('document_item_id', (int) $item->id)
+                ->get(['lot_id', 'qty']);
+
+            if ($lots->isNotEmpty()) {
+                foreach ($lots as $lot) {
+                    $qty = round((float) ($lot->qty ?? 0) * max((float) ($item->conversion_factor ?? 1), 0.00000001), 8);
+                    if ($qty <= 0) {
+                        continue;
+                    }
+
+                    DB::table('inventory.inventory_ledger')->insert([
+                        'company_id' => $companyId,
+                        'warehouse_id' => $document->warehouse_id !== null ? (int) $document->warehouse_id : null,
+                        'product_id' => (int) $item->product_id,
+                        'lot_id' => (int) ($lot->lot_id ?? 0) ?: null,
+                        'movement_type' => $direction,
+                        'quantity' => $qty,
+                        'unit_cost' => (float) ($item->unit_cost ?? 0),
+                        'ref_type' => 'COMMERCIAL_DOCUMENT',
+                        'ref_id' => $documentId,
+                        'notes' => $note,
+                        'moved_at' => $movedAt,
+                        'created_by' => $createdBy,
+                    ]);
+                }
+            } else {
+                $qty = round((float) ($item->qty_base ?? $item->qty ?? 0), 8);
+                if ($qty <= 0) {
+                    continue;
+                }
+
+                DB::table('inventory.inventory_ledger')->insert([
+                    'company_id' => $companyId,
+                    'warehouse_id' => $document->warehouse_id !== null ? (int) $document->warehouse_id : null,
+                    'product_id' => (int) $item->product_id,
+                    'lot_id' => null,
+                    'movement_type' => $direction,
+                    'quantity' => $qty,
+                    'unit_cost' => (float) ($item->unit_cost ?? 0),
+                    'ref_type' => 'COMMERCIAL_DOCUMENT',
+                    'ref_id' => $documentId,
+                    'notes' => $note,
+                    'moved_at' => $movedAt,
+                    'created_by' => $createdBy,
+                ]);
+            }
+        }
+
+        $this->updateDocumentTaxStatus($companyId, $documentId, [
+            'stock_already_discounted' => true,
+            'inventory_sunat_settled' => true,
+            'inventory_pending_sunat' => false,
+            'inventory_sunat_settled_at' => now()->toDateTimeString(),
+        ]);
+    }
+
+    public function reverseInventoryForVoidedDocumentIfNeeded(int $companyId, int $documentId): void
+    {
+        $row = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->select('metadata', 'updated_by')
+            ->first();
+
+        if (!$row) {
+            return;
+        }
+
+        $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
+        $metadata = is_array($metadata) ? $metadata : [];
+
+        if (!empty($metadata['inventory_void_reverted'])) {
+            return;
+        }
+
+        if (empty($metadata['stock_already_discounted']) && empty($metadata['inventory_sunat_settled'])) {
+            return;
+        }
+
+        $ledgerRows = DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->orderBy('id')
+            ->get();
+
+        foreach ($ledgerRows as $ledgerRow) {
+            $originalType = strtoupper((string) ($ledgerRow->movement_type ?? ''));
+            if (!in_array($originalType, ['IN', 'OUT'], true)) {
+                continue;
+            }
+
+            $qty = round((float) ($ledgerRow->quantity ?? 0), 8);
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $reverseType = $originalType === 'IN' ? 'OUT' : 'IN';
+
+            DB::table('inventory.inventory_ledger')->insert([
+                'company_id' => $companyId,
+                'warehouse_id' => $ledgerRow->warehouse_id !== null ? (int) $ledgerRow->warehouse_id : null,
+                'product_id' => (int) $ledgerRow->product_id,
+                'lot_id' => $ledgerRow->lot_id !== null ? (int) $ledgerRow->lot_id : null,
+                'movement_type' => $reverseType,
+                'quantity' => $qty,
+                'unit_cost' => (float) ($ledgerRow->unit_cost ?? 0),
+                'ref_type' => 'COMMERCIAL_DOCUMENT_VOID',
+                'ref_id' => $documentId,
+                'notes' => 'Reversa por anulacion SUNAT doc #' . $documentId,
+                'moved_at' => now(),
+                'created_by' => (int) ($row->updated_by ?? 0),
+            ]);
+        }
+
+        $this->updateDocumentTaxStatus($companyId, $documentId, [
+            'inventory_void_reverted' => true,
+            'inventory_void_reverted_at' => now()->toDateTimeString(),
+            'stock_already_discounted' => false,
+            'inventory_sunat_settled' => false,
+            'inventory_pending_sunat' => false,
+        ]);
     }
 
 }

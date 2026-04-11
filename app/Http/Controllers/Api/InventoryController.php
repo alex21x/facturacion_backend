@@ -426,7 +426,7 @@ class InventoryController extends Controller
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'warehouse_id' => 'required|integer|min:1',
-            'entry_type' => 'required|string|in:PURCHASE,ADJUSTMENT',
+            'entry_type' => 'required|string|in:PURCHASE,ADJUSTMENT,PURCHASE_ORDER',
             'reference_no' => 'nullable|string|max:60',
             'supplier_reference' => 'nullable|string|max:120',
             'payment_method_id' => 'nullable|integer|min:1',

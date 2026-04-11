@@ -19,7 +19,7 @@ Route::middleware('throttle:500,1')->group(function () {
     Route::post('/auth/refresh', 'Api\\AuthController@refresh');
 });
 
-Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
+Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
 
@@ -29,6 +29,10 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
+        Route::get('/appcfg/company-vertical-settings', 'Api\\AppConfigController@companyVerticalSettings');
+        Route::get('/appcfg/company-vertical-admin-matrix', 'Api\\AppConfigController@companyVerticalAdminMatrix')->middleware('admin.only');
+        Route::get('/appcfg/company-rate-limit-matrix', 'Api\\AppConfigController@companyRateLimitMatrix')->middleware('admin.only');
+        Route::get('/appcfg/company-operational-limit-matrix', 'Api\\AppConfigController@companyOperationalLimitMatrix')->middleware('admin.only');
         Route::get('/appcfg/igv-settings', 'Api\\AppConfigController@igvSettings');
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/cash/sessions', 'Api\\CashController@sessions');
@@ -55,6 +59,15 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
     Route::middleware('rbac.module:APPCFG,update')->group(function () {
         Route::put('/appcfg/operational-limits', 'Api\\AppConfigController@updateOperationalLimits');
         Route::put('/appcfg/commerce-settings', 'Api\\AppConfigController@updateCommerceSettings')->middleware('admin.only');
+        Route::put('/appcfg/company-vertical-settings', 'Api\\AppConfigController@updateCompanyVerticalSettings')->middleware('admin.only');
+        Route::put('/appcfg/company-vertical-admin-matrix', 'Api\\AppConfigController@updateCompanyVerticalAdminMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-vertical-admin-matrix/bulk', 'Api\\AppConfigController@updateCompanyVerticalAdminMatrixBulk')->middleware('admin.only');
+        Route::put('/appcfg/company-rate-limit-matrix', 'Api\\AppConfigController@updateCompanyRateLimitMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-rate-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyRateLimitMatrixBulk')->middleware('admin.only');
+        Route::put('/appcfg/company-operational-limit-matrix', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-operational-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrixBulk')->middleware('admin.only');
+        Route::post('/appcfg/admin-companies', 'Api\\AppConfigController@createAdminCompany')->middleware('admin.only');
+        Route::post('/appcfg/admin-companies/{id}/reset-admin-password', 'Api\\AppConfigController@resetAdminCompanyPassword')->middleware('admin.only');
         Route::put('/appcfg/igv-settings', 'Api\\AppConfigController@updateIgvSettings');
     Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
     Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
@@ -103,6 +116,27 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesController@previewTaxBridgePayload');
         Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesController@downloadSunatXml');
         Route::get('/sales/commercial-documents/{id}/download-cdr', 'Api\\SalesController@downloadSunatCdr');
+        Route::get('/sales/sunat-exceptions', 'Api\\SunatExceptionsController@index');
+        Route::get('/sales/sunat-exceptions/audit', 'Api\\SunatExceptionsController@audit');
+        Route::get('/sales/sunat-exceptions/reconcile-stats', 'Api\\SunatExceptionsController@reconcileStats');
+
+        // Daily Summary (Resumen Diario de Boletas)
+        Route::get('/sales/daily-summaries', 'Api\\DailySummaryController@index');
+        Route::get('/sales/daily-summaries/eligible-documents', 'Api\\DailySummaryController@eligibleDocuments');
+        Route::get('/sales/daily-summaries/{id}', 'Api\\DailySummaryController@show');
+
+        // GRE SUNAT (Guia de Remision Electronica)
+        Route::get('/sales/gre/lookups', 'Api\\GreGuideController@lookups');
+        Route::get('/sales/gre/ubigeos', 'Api\\GreGuideController@ubigeos');
+        Route::get('/sales/gre/prefill-document', 'Api\\GreGuideController@prefillFromDocument');
+        Route::get('/sales/gre-guides', 'Api\\GreGuideController@index');
+        Route::get('/sales/gre-guides/{id}', 'Api\\GreGuideController@show');
+        Route::get('/sales/gre-guides/{id}/print', 'Api\\GreGuideController@printable');
+
+        // Restaurant operations (comandas & orders)
+        Route::get('/restaurant/comandas', 'Api\\RestaurantController@comandas');
+        Route::get('/restaurant/tables', 'Api\\RestaurantController@tables');
+        Route::get('/restaurant/orders', 'Api\\RestaurantController@fetchOrders');
     });
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
@@ -112,8 +146,27 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
         Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesController@voidCommercialDocument');
         Route::put('/sales/commercial-documents/{id}/retry-tax-bridge', 'Api\\SalesController@retryTaxBridgeSend');
         Route::put('/sales/commercial-documents/{id}/sunat-void', 'Api\\SalesController@sunatVoidCommunication');
+        Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
+
+        // Daily Summary (Resumen Diario de Boletas)
+        Route::post('/sales/daily-summaries', 'Api\\DailySummaryController@store');
+        Route::delete('/sales/daily-summaries/{id}', 'Api\\DailySummaryController@destroy');
+        Route::delete('/sales/daily-summaries/{id}/documents/{documentId}', 'Api\\DailySummaryController@removeDocument');
+        Route::put('/sales/daily-summaries/{id}/send', 'Api\\DailySummaryController@send');
+
+        Route::post('/sales/gre-guides', 'Api\\GreGuideController@store');
+        Route::put('/sales/gre-guides/{id}', 'Api\\GreGuideController@update');
+        Route::put('/sales/gre-guides/{id}/send', 'Api\\GreGuideController@send');
+        Route::put('/sales/gre-guides/{id}/status-ticket', 'Api\\GreGuideController@statusTicket');
+        Route::put('/sales/gre-guides/{id}/cancel', 'Api\\GreGuideController@cancel');
+
+        Route::put('/restaurant/comandas/{id}/status', 'Api\\RestaurantController@updateComandaStatus');
+        Route::post('/restaurant/orders', 'Api\\RestaurantController@createOrder');
+        Route::post('/restaurant/orders/{id}/checkout', 'Api\\RestaurantController@checkoutOrder');
+        Route::post('/restaurant/tables', 'Api\\RestaurantController@createTable');
+        Route::put('/restaurant/tables/{id}', 'Api\\RestaurantController@updateTable');
     });
 
     Route::middleware('rbac.module:INVENTORY,view')->group(function () {
@@ -138,6 +191,7 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
 
     Route::middleware('rbac.module:INVENTORY,update')->group(function () {
         Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
+        Route::post('/purchases/orders/{id}/receive', 'Api\\PurchasesController@receivePurchaseOrder');
     });
 
     Route::middleware('rbac.module:INVENTORY,create')->group(function () {
@@ -155,6 +209,17 @@ Route::middleware(['auth.token', 'throttle:2000,1'])->group(function () {
 
     Route::middleware(['rbac.module:INVENTORY,update', 'throttle:500,1'])->prefix('inventory-pro')->group(function () {
         Route::post('/report-requests', 'Api\\InventoryReportsController@createRequest');
+    });
+
+    // Generic Reports API (extensible by modules)
+    Route::middleware(['rbac.module:INVENTORY,view', 'throttle:1200,1'])->prefix('reports')->group(function () {
+        Route::get('/catalog', 'Api\\ReportsController@catalog');
+        Route::get('/requests', 'Api\\ReportsController@index');
+        Route::get('/requests/{id}', 'Api\\ReportsController@show');
+    });
+
+    Route::middleware(['rbac.module:INVENTORY,update', 'throttle:500,1'])->prefix('reports')->group(function () {
+        Route::post('/requests', 'Api\\ReportsController@store');
     });
 });
 

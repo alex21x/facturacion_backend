@@ -30,4 +30,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'restaurant' => [
+        'mode' => env('RESTAURANT_SERVICE_MODE', 'embedded'),
+        'base_url' => env('RESTAURANT_SERVICE_BASE_URL', ''),
+        'api_key' => env('RESTAURANT_SERVICE_API_KEY', ''),
+        'timeout_seconds' => (int) env('RESTAURANT_SERVICE_TIMEOUT_SECONDS', 8),
+    ],
+
 ];

@@ -31,6 +31,14 @@ class Kernel extends ConsoleKernel
         $schedule->command('inventory:process-outbox-events --limit=200')
             ->everyMinute()
             ->withoutOverlapping();
+
+        $schedule->command('sales:reconcile-sunat-pending --limit=40')
+            ->everyMinute()
+            ->withoutOverlapping();
+
+        $schedule->command('sales:notify-sunat-exceptions --hours=6 --limit=120')
+            ->everyFifteenMinutes()
+            ->withoutOverlapping();
     }
 
     /**

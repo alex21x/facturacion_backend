@@ -56,6 +56,10 @@ class SalesDocumentItemPreparationService
         $processedItems = [];
 
         foreach ($items as $index => $item) {
+            if (is_array($item) && !array_key_exists('qty', $item) && array_key_exists('quantity', $item)) {
+                $item['qty'] = $item['quantity'];
+            }
+
             $productId = isset($item['product_id']) ? (int) $item['product_id'] : null;
             $product = $productId ? $productMap->get($productId) : null;
 
@@ -70,6 +74,10 @@ class SalesDocumentItemPreparationService
             $itemUnitId = isset($item['unit_id']) ? (int) $item['unit_id'] : null;
             if ($product && !$itemUnitId) {
                 $itemUnitId = (int) $product->unit_id;
+            }
+
+            if ($product && (!$itemUnitId || $itemUnitId <= 0)) {
+                throw new SalesDocumentException('El producto "' . $product->name . '" no tiene una unidad de medida configurada.');
             }
 
             $conversion = $this->support->resolveLineConversion($companyId, $product, $item, $itemUnitId);
@@ -181,7 +189,9 @@ class SalesDocumentItemPreparationService
         $grandTotal = 0.0;
 
         foreach ($items as $item) {
-            $itemSubtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : ((float) $item['qty'] * (float) $item['unit_price']);
+            $qty = (float) (($item['qty'] ?? $item['quantity'] ?? 0));
+            $unitPrice = (float) ($item['unit_price'] ?? 0);
+            $itemSubtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : ($qty * $unitPrice);
             $itemTax = isset($item['tax_total']) ? (float) $item['tax_total'] : 0.0;
             $itemDiscount = isset($item['discount_total']) ? (float) $item['discount_total'] : 0.0;
             $itemTotal = isset($item['total']) ? (float) $item['total'] : ($itemSubtotal + $itemTax - $itemDiscount);

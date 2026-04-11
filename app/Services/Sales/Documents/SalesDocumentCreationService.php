@@ -6,6 +6,7 @@ use App\Application\DTOs\Sales\CreateCommercialDocumentResultDTO;
 use App\Application\Commands\Sales\CreateCommercialDocumentCommand;
 use App\Domain\Sales\Policies\CommercialDocumentPolicy;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
+use App\Services\Sales\TaxBridge\DailySummaryService;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,7 @@ class SalesDocumentCreationService
 {
     public function __construct(
         private TaxBridgeService $taxBridgeService,
+        private DailySummaryService $dailySummaryService,
         private SalesDocumentSupportService $support,
         private SalesStockProjectionService $stockProjectionService,
         private SalesDocumentTaxMetadataService $taxMetadataService,
@@ -46,6 +48,19 @@ class SalesDocumentCreationService
     {
         $authUser = $command->authUser;
         $payload = $command->payload;
+        if (is_array($payload['items'] ?? null)) {
+            $payload['items'] = array_values(array_filter(array_map(function ($item) {
+                if (!is_array($item)) {
+                    return null;
+                }
+
+                if (!array_key_exists('qty', $item) && array_key_exists('quantity', $item)) {
+                    $item['qty'] = $item['quantity'];
+                }
+
+                return $item;
+            }, $payload['items']), fn ($item) => is_array($item)));
+        }
         $companyId = $command->companyId;
         $branchId = $command->branchId;
         $warehouseId = $command->warehouseId;
@@ -93,7 +108,14 @@ class SalesDocumentCreationService
                     $stockAlreadyDiscounted = filter_var($metadata['stock_already_discounted'], FILTER_VALIDATE_BOOLEAN);
                 }
 
+                $isTributaryIssued = strtoupper((string) $documentStatus) === 'ISSUED'
+                    && in_array(strtoupper((string) $payload['document_kind']), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
+
                 $affectsStock = !$stockAlreadyDiscounted && CommercialDocumentPolicy::shouldAffectStock((string) $payload['document_kind'], (string) $documentStatus);
+                if ($isTributaryIssued && !$stockAlreadyDiscounted) {
+                    // Tributary documents are settled to inventory when SUNAT accepts them.
+                    $affectsStock = false;
+                }
                 $settings = $this->inventorySettingsForCompany($companyId);
 
                 $nextNumber = $this->seriesService->reserveNextNumber(
@@ -156,6 +178,23 @@ class SalesDocumentCreationService
                     $branchId
                 );
 
+                if ($isTributaryIssued) {
+                    if ($stockAlreadyDiscounted) {
+                        $metadata['inventory_pending_sunat'] = false;
+                        $metadata['inventory_sunat_settled'] = true;
+                    } else {
+                        $metadata['inventory_pending_sunat'] = true;
+                        $metadata['inventory_sunat_settled'] = false;
+                    }
+                    $metadata['stock_already_discounted'] = $stockAlreadyDiscounted;
+                } else {
+                    $metadata['inventory_pending_sunat'] = false;
+                    $metadata['inventory_sunat_settled'] = $affectsStock;
+                    if ($affectsStock) {
+                        $metadata['stock_already_discounted'] = true;
+                    }
+                }
+
                 $payload['metadata'] = $metadata;
 
                 $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
@@ -181,15 +220,23 @@ class SalesDocumentCreationService
                     'discount_total' => round($discountTotal, 2),
                     'status' => $documentStatus,
                     'notes' => $payload['notes'] ?? null,
-                    'metadata' => json_encode(array_merge($payload['metadata'] ?? [], [
+                    'metadata' => array_merge($payload['metadata'] ?? [], [
                         'cash_register_id' => $cashRegisterId !== null ? (int) $cashRegisterId : null,
-                    ])),
+                    ]),
                     'seller_user_id' => $authUser->id,
                     'created_by' => $authUser->id,
                     'updated_by' => $authUser->id,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+
+                $this->syncRestaurantTableOnSalesOrderCreate(
+                    $companyId,
+                    $branchId,
+                    (string) $payload['document_kind'],
+                    (string) $documentStatus,
+                    is_array($payload['metadata'] ?? null) ? $payload['metadata'] : []
+                );
 
                 $this->linePersistenceService->persistItemsAndStockMovements(
                     $processedItems,
@@ -245,16 +292,92 @@ class SalesDocumentCreationService
             throw new SalesDocumentException($e->getMessage(), 422);
         }
 
+        $documentKind = strtoupper((string) ($result['document_kind'] ?? ''));
+        $documentStatus = strtoupper((string) ($result['status'] ?? ''));
+        $receiptSendMode = strtoupper(trim((string) (($payload['metadata']['receipt_send_mode'] ?? 'DIRECT'))));
+        if (!in_array($receiptSendMode, ['DIRECT', 'SUMMARY'], true)) {
+            $receiptSendMode = 'DIRECT';
+        }
+
         if ($this->taxBridgeService->supportsDocumentKind((string) ($result['document_kind'] ?? ''))
-            && strtoupper((string) ($result['status'] ?? '')) === 'ISSUED') {
-            $this->taxBridgeService->dispatchOnIssue(
-                (int) $companyId,
-                $result['branch_id'] !== null ? (int) $result['branch_id'] : null,
-                (int) $result['id']
-            );
+            && $documentStatus === 'ISSUED') {
+            if ($documentKind === 'RECEIPT' && $receiptSendMode === 'SUMMARY') {
+                $issueDate = isset($payload['issue_at']) && trim((string) $payload['issue_at']) !== ''
+                    ? date('Y-m-d', strtotime((string) $payload['issue_at']))
+                    : now()->toDateString();
+
+                $this->dailySummaryService->appendDocumentToOpenSummary(
+                    (int) $companyId,
+                    DailySummaryService::TYPE_DECLARATION,
+                    (int) $result['id'],
+                    (int) $authUser->id,
+                    $result['branch_id'] !== null ? (int) $result['branch_id'] : null,
+                    $issueDate
+                );
+            } else {
+                $this->taxBridgeService->dispatchOnIssue(
+                    (int) $companyId,
+                    $result['branch_id'] !== null ? (int) $result['branch_id'] : null,
+                    (int) $result['id']
+                );
+            }
         }
 
         return $result;
+    }
+
+    private function syncRestaurantTableOnSalesOrderCreate(
+        int $companyId,
+        ?int $branchId,
+        string $documentKind,
+        string $documentStatus,
+        array $metadata
+    ): void {
+        if (strtoupper($documentKind) !== 'SALES_ORDER') {
+            return;
+        }
+
+        if (in_array(strtoupper($documentStatus), ['VOID', 'CANCELED'], true)) {
+            return;
+        }
+
+        $tableLabel = trim((string) ($metadata['table_label'] ?? ''));
+        if ($tableLabel === '' || !$this->restaurantTablesStorageExists()) {
+            return;
+        }
+
+        $table = DB::table('restaurant.tables')
+            ->where('company_id', $companyId)
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where('branch_id', $branchId);
+            })
+            ->where(function ($query) use ($tableLabel) {
+                $query->whereRaw('UPPER(name) = ?', [mb_strtoupper($tableLabel)])
+                    ->orWhereRaw('UPPER(code) = ?', [mb_strtoupper($tableLabel)]);
+            })
+            ->first(['id', 'status']);
+
+        $currentStatus = $table ? strtoupper((string) $table->status) : '';
+
+        if (!$table || in_array($currentStatus, ['DISABLED', 'RESERVED'], true)) {
+            return;
+        }
+
+        DB::table('restaurant.tables')
+            ->where('id', (int) $table->id)
+            ->where('company_id', $companyId)
+            ->update([
+                'status' => 'OCCUPIED',
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function restaurantTablesStorageExists(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'restaurant')
+            ->where('table_name', 'tables')
+            ->exists();
     }
 
     private function resolveIssueAtForStorage($issueAt)

@@ -5,6 +5,7 @@ namespace App\Services\Sales\Documents;
 use App\Application\Commands\Sales\VoidCommercialDocumentCommand;
 use App\Domain\Sales\Entities\CommercialDocumentEntity;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
+use App\Services\Sales\TaxBridge\DailySummaryService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +14,7 @@ class SalesDocumentVoidService
     public function __construct(
         private SalesDocumentSupportService $support,
         private SalesStockProjectionService $stockProjectionService,
+        private DailySummaryService $dailySummaryService,
         private CommercialDocumentRepositoryInterface $documentRepository
     )
     {
@@ -99,18 +101,68 @@ class SalesDocumentVoidService
                     $allowInventoryReverseOnVoid && $stockWasAffected
                 );
 
+                $dailySummaryId = null;
+                $isReceiptGoingToRa = false;
+                
+                if (strtoupper((string) ($document->document_kind ?? '')) === 'RECEIPT') {
+                    $voidDate = isset($payload['void_at']) && trim((string) $payload['void_at']) !== ''
+                        ? date('Y-m-d', strtotime((string) $payload['void_at']))
+                        : now()->toDateString();
+
+                    $summary = $this->dailySummaryService->appendDocumentToOpenSummary(
+                        $companyId,
+                        DailySummaryService::TYPE_CANCELLATION,
+                        $documentId,
+                        (int) $authUser->id,
+                        $document->branch_id !== null ? (int) $document->branch_id : null,
+                        $voidDate
+                    );
+
+                    $dailySummaryId = (int) ($summary['id'] ?? 0) ?: null;
+                    $isReceiptGoingToRa = true;
+
+                    // Merge the freshest metadata written by the summary service
+                    // and then re-apply void metadata fields from this operation.
+                    $currentRow = DB::table('sales.commercial_documents')
+                        ->where('id', $documentId)
+                        ->where('company_id', $companyId)
+                        ->select('metadata')
+                        ->first();
+
+                    $currentMeta = json_decode((string) ($currentRow->metadata ?? '{}'), true);
+                    $currentMeta = is_array($currentMeta) ? $currentMeta : [];
+
+                    $metadata = array_merge($currentMeta, $metadata);
+                    $metadata['sunat_void_status'] = 'PENDING_SUMMARY';
+                    $metadata['sunat_void_label'] = 'Pendiente por resumen RA';
+                    if ($dailySummaryId !== null) {
+                        $metadata['sunat_void_summary_id'] = $dailySummaryId;
+                    }
+                }
+
+                // Actualizar documento: mantener ISSUED para boletas en RA, VOID para otros
                 $this->documentRepository->update($documentId, $companyId, [
-                    'status' => 'VOID',
+                    'status' => $isReceiptGoingToRa ? 'ISSUED' : 'VOID',
                     'notes' => isset($payload['notes']) ? (string) $payload['notes'] : $documentEntity->notes(),
                     'metadata' => json_encode($metadata),
                     'updated_by' => $authUser->id,
                     'updated_at' => now(),
                 ]);
 
+                if (!$isReceiptGoingToRa) {
+                    $this->releaseRestaurantTableOnVoid(
+                        $companyId,
+                        $document->branch_id !== null ? (int) $document->branch_id : null,
+                        (string) ($document->document_kind ?? ''),
+                        $metadata
+                    );
+                }
+
                 return [
                     'id' => $documentId,
-                    'status' => 'VOID',
+                    'status' => $isReceiptGoingToRa ? 'ISSUED' : 'VOID',
                     'inventory_reverted' => $allowInventoryReverseOnVoid && $stockWasAffected,
+                    'daily_summary_id' => $dailySummaryId,
                 ];
             });
         } catch (\RuntimeException $e) {
@@ -179,6 +231,49 @@ class SalesDocumentVoidService
         return [
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
         ];
+    }
+
+    private function releaseRestaurantTableOnVoid(int $companyId, ?int $branchId, string $documentKind, array $metadata): void
+    {
+        if (strtoupper(trim($documentKind)) !== 'SALES_ORDER') {
+            return;
+        }
+
+        $tableLabel = trim((string) ($metadata['table_label'] ?? ''));
+        if ($tableLabel === '' || !$this->restaurantTablesStorageExists()) {
+            return;
+        }
+
+        $table = DB::table('restaurant.tables')
+            ->where('company_id', $companyId)
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where('branch_id', $branchId);
+            })
+            ->where(function ($query) use ($tableLabel) {
+                $query->whereRaw('UPPER(name) = ?', [mb_strtoupper($tableLabel)])
+                    ->orWhereRaw('UPPER(code) = ?', [mb_strtoupper($tableLabel)]);
+            })
+            ->first(['id', 'status']);
+
+        if (!$table || strtoupper((string) $table->status) === 'DISABLED') {
+            return;
+        }
+
+        DB::table('restaurant.tables')
+            ->where('id', (int) $table->id)
+            ->where('company_id', $companyId)
+            ->update([
+                'status' => 'AVAILABLE',
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function restaurantTablesStorageExists(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'restaurant')
+            ->where('table_name', 'tables')
+            ->exists();
     }
 
     private function canActorVoidDocuments(int $companyId, ?int $branchId, string $roleProfile, string $roleCode): bool

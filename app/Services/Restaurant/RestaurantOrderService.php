@@ -203,6 +203,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 'd.status',
                 'd.total',
                 'd.notes',
+                'd.customer_id',
                 DB::raw("COALESCE(c.legal_name, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,''))) AS customer_name"),
                 DB::raw("COALESCE(d.metadata->>'restaurant_order_status','PENDING') AS kitchen_status"),
                 DB::raw("COALESCE(d.metadata->>'table_label','') AS table_label"),
@@ -215,6 +216,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
         // Enrich with item count per order
         $ids = $rows->pluck('id')->all();
         $itemCounts = [];
+        $itemMap = [];
         if (!empty($ids)) {
             DB::table('sales.commercial_document_items')
                 ->whereIn('document_id', $ids)
@@ -227,13 +229,45 @@ class RestaurantOrderService implements VerticalSalesPolicy
                         'total_qty'  => (float) $row->total_qty,
                     ];
                 });
+
+            DB::table('sales.commercial_document_items')
+                ->whereIn('document_id', $ids)
+                ->orderBy('document_id')
+                ->orderBy('line_no')
+                ->get([
+                    'document_id',
+                    'line_no',
+                    'product_id',
+                    'unit_id',
+                    'description',
+                    'qty',
+                    'unit_price',
+                    'tax_total',
+                    'subtotal',
+                    'total',
+                ])
+                ->each(function ($row) use (&$itemMap) {
+                    $documentId = (int) $row->document_id;
+                    $itemMap[$documentId][] = [
+                        'line_no' => (int) $row->line_no,
+                        'product_id' => $row->product_id !== null ? (int) $row->product_id : null,
+                        'unit_id' => $row->unit_id !== null ? (int) $row->unit_id : null,
+                        'description' => (string) $row->description,
+                        'quantity' => (float) $row->qty,
+                        'unit_price' => (float) $row->unit_price,
+                        'tax_total' => (float) $row->tax_total,
+                        'subtotal' => (float) $row->subtotal,
+                        'total' => (float) $row->total,
+                    ];
+                });
         }
 
-        $data = $rows->map(function ($row) use ($itemCounts) {
+        $data = $rows->map(function ($row) use ($itemCounts, $itemMap) {
             $arr = (array) $row;
             $counts = $itemCounts[(int) $row->id] ?? ['line_count' => 0, 'total_qty' => 0.0];
             $arr['line_count'] = $counts['line_count'];
             $arr['total_qty']  = $counts['total_qty'];
+            $arr['items'] = $itemMap[(int) $row->id] ?? [];
             return $arr;
         });
 

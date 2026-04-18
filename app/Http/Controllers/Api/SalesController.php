@@ -23,6 +23,10 @@ class SalesController extends Controller
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
     private array $featureContextResolutionCache = [];
+    private array $tableExistsCache = [];
+    private array $companyFeatureToggleMap = [];  // companyId:FEATURE_CODE => stdClass|null
+    private array $branchFeatureToggleMap = [];   // companyId:branchId:FEATURE_CODE => stdClass|null
+    private array $featureTogglePrewarmed = [];    // companyId => true, companyId:branchId => true
 
     public function __construct(
         private CompanyIgvRateService $companyIgvRateService,
@@ -93,6 +97,9 @@ class SalesController extends Controller
             }
         }
 
+        // Pre-warm toggle maps once — all subsequent feature lookups use the in-memory cache (2 DB queries total)
+        $this->prewarmFeatureToggles($companyId, $branchId);
+
         $currencies = DB::table('core.currencies')
             ->select('id', 'code', 'name', 'symbol', 'is_default')
             ->where('status', 1)
@@ -115,14 +122,11 @@ class SalesController extends Controller
 
         $catalog = $this->documentKindCatalog();
 
-        $featureCodes = $catalog->map(function ($row) {
-            return 'DOC_KIND_' . $row['code'];
-        })->values()->all();
-
-        $enabledToggles = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', $featureCodes)
-            ->pluck('is_enabled', 'feature_code');
+        // Use pre-warmed company toggle map instead of a separate query
+        $ck = (string) $companyId;
+        $enabledToggles = collect($this->companyFeatureToggleMap)
+            ->filter(fn ($row, $key) => str_starts_with($key, $ck . ':DOC_KIND_'))
+            ->mapWithKeys(fn ($row, $key) => [substr($key, strlen($ck) + 1) => $row->is_enabled]);
 
         $documentKinds = $catalog->filter(function ($row) use ($enabledToggles) {
             $featureCode = 'DOC_KIND_' . $row['code'];
@@ -2918,19 +2922,17 @@ class SalesController extends Controller
             return $this->featureContextResolutionCache[$cacheKey];
         }
 
+        // Pre-warm toggle maps in 2 bulk queries (company + branch) instead of 1 query per feature
+        $this->prewarmFeatureToggles($companyId, $branchId);
+
+        $ck = (string) $companyId;
+        $companyRow = $this->companyFeatureToggleMap[$ck . ':' . $normalizedFeatureCode] ?? null;
+
         $branchRow = null;
         if ($branchId !== null) {
-            $branchRow = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
-                ->first(['is_enabled', 'config']);
+            $bk = $ck . ':' . $branchId;
+            $branchRow = $this->branchFeatureToggleMap[$bk . ':' . $normalizedFeatureCode] ?? null;
         }
-
-        $companyRow = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
-            ->first(['is_enabled', 'config']);
 
         $branchEnabled = $branchRow && $branchRow->is_enabled !== null ? (bool) $branchRow->is_enabled : null;
         $companyEnabled = $companyRow && $companyRow->is_enabled !== null ? (bool) $companyRow->is_enabled : null;
@@ -3091,6 +3093,10 @@ class SalesController extends Controller
 
     private function tableExists(string $qualifiedTable): bool
     {
+        if (array_key_exists($qualifiedTable, $this->tableExistsCache)) {
+            return $this->tableExistsCache[$qualifiedTable];
+        }
+
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
         $row = DB::selectOne(
@@ -3098,7 +3104,42 @@ class SalesController extends Controller
             [$schema, $table]
         );
 
-        return isset($row->present) && (bool) $row->present;
+        $result = isset($row->present) && (bool) $row->present;
+        $this->tableExistsCache[$qualifiedTable] = $result;
+        return $result;
+    }
+
+    private function prewarmFeatureToggles(int $companyId, ?int $branchId): void
+    {
+        $ck = (string) $companyId;
+
+        if (!isset($this->featureTogglePrewarmed[$ck])) {
+            $rows = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->get(['feature_code', 'is_enabled', 'config']);
+
+            foreach ($rows as $row) {
+                $fk = $ck . ':' . strtoupper(trim($row->feature_code));
+                $this->companyFeatureToggleMap[$fk] = $row;
+            }
+            $this->featureTogglePrewarmed[$ck] = true;
+        }
+
+        if ($branchId !== null) {
+            $bk = $ck . ':' . $branchId;
+            if (!isset($this->featureTogglePrewarmed[$bk])) {
+                $rows = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->get(['feature_code', 'is_enabled', 'config']);
+
+                foreach ($rows as $row) {
+                    $fk = $bk . ':' . strtoupper(trim($row->feature_code));
+                    $this->branchFeatureToggleMap[$fk] = $row;
+                }
+                $this->featureTogglePrewarmed[$bk] = true;
+            }
+        }
     }
 
     private function tableColumns(string $qualifiedTable): array
@@ -3126,8 +3167,6 @@ class SalesController extends Controller
 
     private function enabledUnits(int $companyId)
     {
-        $this->ensureCompanyUnitsTable();
-
         return DB::table('core.units as u')
             ->join('appcfg.company_units as cu', function ($join) use ($companyId) {
                 $join->on('cu.unit_id', '=', 'u.id')
@@ -3141,31 +3180,12 @@ class SalesController extends Controller
 
     private function ensureCompanyUnitsTable(): void
     {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_units (
-                company_id BIGINT NOT NULL,
-                unit_id BIGINT NOT NULL,
-                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, unit_id)
-            )'
-        );
+        // Table is now guaranteed by migration 2026_04_18_000006. No-op.
     }
 
     private function ensureCustomerPriceProfilesTable(): void
     {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS sales.customer_price_profiles (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL,
-                customer_id BIGINT NOT NULL,
-                default_tier_id BIGINT NULL,
-                discount_percent NUMERIC(8,4) NOT NULL DEFAULT 0,
-                status SMALLINT NOT NULL DEFAULT 1,
-                UNIQUE(company_id, customer_id)
-            )'
-        );
+        // Table is now guaranteed by migration 2026_04_18_000006. No-op.
     }
 
     private function resolveValidatedTierId(int $companyId, $tierId): ?int

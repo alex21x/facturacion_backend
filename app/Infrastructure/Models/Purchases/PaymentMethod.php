@@ -7,18 +7,22 @@ use Illuminate\Database\Eloquent\Model;
 
 class PaymentMethod extends Model
 {
-    protected $table = 'core.payment_methods';
+    protected $table = 'master.payment_types';
     protected $connection = 'pgsql';
     public $timestamps = false;
 
     protected $fillable = [
-        'code',
         'name',
+        'comment',
+        'is_active',
         'status',
     ];
 
     public function scopeEnabled(Builder $query): Builder
     {
-        return $query->where('status', 1);
+        return $query->where(function (Builder $nested) {
+            $nested->where('is_active', 1)
+                ->orWhereIn('status', [1, 2]);
+        });
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
+use App\Services\FeatureConfigService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -31,13 +32,52 @@ class AppConfigController extends Controller
         'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
         'SALES_ANTICIPO_ENABLED',
         'SALES_TAX_BRIDGE',
+        'SALES_TAX_BRIDGE_DEBUG_VIEW',
+        'SALES_GLOBAL_DISCOUNT_ENABLED',
+        'SALES_ITEM_DISCOUNT_ENABLED',
+        'SALES_FREE_ITEMS_ENABLED',
         'SALES_DETRACCION_ENABLED',
         'SALES_RETENCION_ENABLED',
         'SALES_PERCEPCION_ENABLED',
+        'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
+        'PURCHASES_ITEM_DISCOUNT_ENABLED',
+        'PURCHASES_FREE_ITEMS_ENABLED',
         'PURCHASES_DETRACCION_ENABLED',
         'PURCHASES_RETENCION_COMPRADOR_ENABLED',
         'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
         'PURCHASES_PERCEPCION_ENABLED',
+    ];
+
+    private const FEATURE_LABELS_FALLBACK = [
+        'DOC_KIND_CREDIT_NOTE' => 'Notas de crédito',
+        'DOC_KIND_CREDIT_NOTE_' => 'Notas de crédito',
+        'DOC_KIND_DEBIT_NOTE' => 'Notas de débito',
+        'DOC_KIND_DEBIT_NOTE_' => 'Notas de débito',
+        'RESTAURANT_MENU_IGV_INCLUDED' => 'Menú con IGV incluido',
+        'PRODUCT_MULTI_UOM' => 'Múltiples unidades por producto',
+        'PRODUCT_UOM_CONVERSIONS' => 'Conversión de unidades',
+        'PRODUCT_WHOLESALE_PRICING' => 'Precios por volumen',
+        'INVENTORY_PRODUCTS_BY_PROFILE' => 'Productos según perfil',
+        'INVENTORY_PRODUCT_MASTERS_BY_PROFILE' => 'Catálogo según perfil',
+        'SALES_CUSTOMER_PRICE_PROFILE' => 'Precios por cliente',
+        'SALES_SELLER_TO_CASHIER' => 'Flujo vendedor a caja',
+        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => 'Editar emitidos antes de respuesta final SUNAT',
+        'SALES_ANTICIPO_ENABLED' => 'Cobro con anticipo',
+        'SALES_TAX_BRIDGE' => 'Envío a SUNAT',
+        'SALES_TAX_BRIDGE_DEBUG_VIEW' => 'Ver diagnóstico SUNAT',
+        'SALES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en ventas',
+        'SALES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en ventas',
+        'SALES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en ventas',
+        'SALES_DETRACCION_ENABLED' => 'Usar detracción en ventas',
+        'SALES_RETENCION_ENABLED' => 'Usar retención en ventas',
+        'SALES_PERCEPCION_ENABLED' => 'Usar percepción en ventas',
+        'PURCHASES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en compras',
+        'PURCHASES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en compras',
+        'PURCHASES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en compras',
+        'PURCHASES_DETRACCION_ENABLED' => 'Usar detracción en compras',
+        'PURCHASES_RETENCION_COMPRADOR_ENABLED' => 'Retención compra por comprador',
+        'PURCHASES_RETENCION_PROVEEDOR_ENABLED' => 'Retención compra por proveedor',
+        'PURCHASES_PERCEPCION_ENABLED' => 'Usar percepción en compras',
     ];
 
     public function operationalContext(Request $request)
@@ -212,7 +252,13 @@ class AppConfigController extends Controller
 
         $featureCodes = $companyFeatures->keys()->merge($branchFeatures->keys())->unique()->values();
 
-        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures) {
+        // Guarantee user-facing labels are persisted in DB for known feature codes
+        // so new options appear translated immediately in AppConfig cards.
+        $this->ensureFeatureLabelsPersisted($featureCodes->all());
+
+        $labelsByCode = $this->resolveFeatureLabels($featureCodes->all());
+
+        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode) {
             $company = $companyFeatures->get($featureCode);
             $branch = $branchFeatures->get($featureCode);
 
@@ -239,6 +285,7 @@ class AppConfigController extends Controller
 
             return [
                 'feature_code' => $featureCode,
+                'feature_label' => $labelsByCode[(string) $featureCode] ?? (string) $featureCode,
                 'is_enabled' => $isEnabled,
                 'company_enabled' => $company ? (bool) $company->is_enabled : null,
                 'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
@@ -1743,59 +1790,9 @@ class AppConfigController extends Controller
             }
         }
 
-        $companyRows = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', self::COMMERCE_FEATURE_CODES)
-            ->get()
-            ->keyBy('feature_code');
-
-        $branchRows = collect();
-        if ($branchId !== null) {
-            $branchRows = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->whereIn('feature_code', self::COMMERCE_FEATURE_CODES)
-                ->get()
-                ->keyBy('feature_code');
-        }
-
-        $features = collect(self::COMMERCE_FEATURE_CODES)->map(function ($code) use ($companyId, $companyRows, $branchRows) {
-            $companyRow = $companyRows->get($code);
-            $branchRow = $branchRows->get($code);
-            $companyConfig = $companyRow ? $this->decodeJsonConfig($companyRow->config) : null;
-            $branchConfig = $branchRow ? $this->decodeJsonConfig($branchRow->config) : null;
-
-            $isEnabled = $branchRow && $branchRow->is_enabled !== null
-                ? (bool) $branchRow->is_enabled
-                : ($companyRow ? (bool) $companyRow->is_enabled : false);
-
-            $resolvedConfig = is_array($companyConfig) || is_array($branchConfig)
-                ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
-                : ($branchConfig ?? $companyConfig);
-
-            $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $code);
-            if ($verticalPreference['resolved']) {
-                if ($verticalPreference['is_enabled'] !== null) {
-                    $isEnabled = (bool) $verticalPreference['is_enabled'];
-                }
-                if ($verticalPreference['config'] !== null) {
-                    $resolvedConfig = $verticalPreference['config'];
-                }
-            }
-
-            return [
-                'feature_code' => $code,
-                'is_enabled' => $isEnabled,
-                'config' => $resolvedConfig,
-                'vertical_source' => $verticalPreference['source'],
-            ];
-        })->values();
-
-        return response()->json([
-            'company_id' => $companyId,
-            'branch_id' => $branchId,
-            'features' => $features,
-        ]);
+        // Use optimized service (2 queries, Redis cached)
+        $service = new FeatureConfigService();
+        return response()->json($service->getCommerceSettings($companyId, $branchId));
     }
 
     public function updateCommerceSettings(Request $request)
@@ -1806,7 +1803,7 @@ class AppConfigController extends Controller
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
+            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);
@@ -1841,38 +1838,11 @@ class AppConfigController extends Controller
             }
         }
 
-        foreach ($payload['features'] as $feature) {
-            $match = [
-                'company_id' => $companyId,
-                'feature_code' => $feature['feature_code'],
-            ];
+        // Use optimized service (config merge + cache invalidation)
+        $service = new FeatureConfigService();
+        $result = $service->updateCommerceSettings($companyId, $branchId, $payload['features'], $authUser->id);
 
-            if ($branchId !== null) {
-                $match['branch_id'] = $branchId;
-                DB::table('appcfg.branch_feature_toggles')->updateOrInsert(
-                    $match,
-                    [
-                        'is_enabled' => (bool) $feature['is_enabled'],
-                        'config' => array_key_exists('config', $feature) ? $this->encodeJsonConfig($feature['config']) : null,
-                        'updated_by' => $authUser->id,
-                        'updated_at' => now(),
-                    ]
-                );
-                continue;
-            }
-
-            DB::table('appcfg.company_feature_toggles')->updateOrInsert(
-                $match,
-                [
-                    'is_enabled' => (bool) $feature['is_enabled'],
-                    'config' => array_key_exists('config', $feature) ? $this->encodeJsonConfig($feature['config']) : null,
-                    'updated_by' => $authUser->id,
-                    'updated_at' => now(),
-                ]
-            );
-        }
-
-        return $this->commerceSettings($request);
+        return response()->json($result);
     }
 
     private function decodeJsonConfig($value)
@@ -2096,6 +2066,93 @@ class AppConfigController extends Controller
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function resolveFeatureLabels(array $featureCodes): array
+    {
+        $codes = collect($featureCodes)
+            ->filter(function ($code) {
+                return is_string($code) && $code !== '';
+            })
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return [];
+        }
+
+        $labels = [];
+
+        if ($this->tableExists('appcfg', 'feature_labels')) {
+            $rows = DB::table('appcfg.feature_labels')
+                ->whereIn('feature_code', $codes->all())
+                ->where('status', 1)
+                ->get(['feature_code', 'label_es']);
+
+            foreach ($rows as $row) {
+                $code = (string) ($row->feature_code ?? '');
+                $label = trim((string) ($row->label_es ?? ''));
+                if ($code !== '' && $label !== '' && strcasecmp($label, $code) !== 0) {
+                    $labels[$code] = $label;
+                }
+            }
+        }
+
+        foreach ($codes as $code) {
+            $code = (string) $code;
+            if (!array_key_exists($code, $labels)) {
+                $labels[$code] = self::FEATURE_LABELS_FALLBACK[$code] ?? $code;
+            }
+        }
+
+        return $labels;
+    }
+
+    private function ensureFeatureLabelsPersisted(array $featureCodes): void
+    {
+        if (!$this->tableExists('appcfg', 'feature_labels')) {
+            return;
+        }
+
+        $codes = collect($featureCodes)
+            ->filter(fn ($code) => is_string($code) && trim($code) !== '')
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return;
+        }
+
+        $existing = DB::table('appcfg.feature_labels')
+            ->whereIn('feature_code', $codes->all())
+            ->get(['feature_code', 'label_es'])
+            ->keyBy('feature_code');
+
+        foreach ($codes as $code) {
+            $fallbackLabel = self::FEATURE_LABELS_FALLBACK[$code] ?? null;
+            if ($fallbackLabel === null) {
+                continue;
+            }
+
+            $current = $existing->get($code);
+            $currentLabel = trim((string) ($current->label_es ?? ''));
+            $shouldReplace = $current === null || $currentLabel === '' || strcasecmp($currentLabel, $code) === 0;
+
+            if (!$shouldReplace) {
+                continue;
+            }
+
+            DB::table('appcfg.feature_labels')->updateOrInsert(
+                ['feature_code' => $code],
+                [
+                    'label_es' => $fallbackLabel,
+                    'description' => $fallbackLabel,
+                    'status' => 1,
+                    'updated_at' => now(),
+                ]
+            );
+        }
     }
 
     private function ensureCompanyAccessLinksForCompanies($companies): void

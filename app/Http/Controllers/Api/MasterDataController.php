@@ -42,6 +42,7 @@ class MasterDataController extends Controller
     public function dashboard(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $this->ensureDocumentKindsTable();
         $units = $this->companyUnits($companyId);
         $options = $this->getMasterDataOptionsUseCase->execute($companyId);
 
@@ -57,8 +58,13 @@ class MasterDataController extends Controller
             ->orderBy('name')
             ->get();
 
-        $paymentMethods = DB::table('core.payment_methods')
-            ->select('id', 'code', 'name', 'status')
+        $paymentMethods = DB::table('master.payment_types')
+            ->select([
+                'id',
+                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                'name',
+                DB::raw('CASE WHEN COALESCE(is_active, 0) = 1 OR COALESCE(status, 0) IN (1, 2) THEN 1 ELSE 0 END as status'),
+            ])
             ->orderBy('name')
             ->get();
 
@@ -149,14 +155,17 @@ class MasterDataController extends Controller
             ->whereIn('feature_code', $this->documentKindFeatureCodes())
             ->pluck('is_enabled', 'feature_code');
 
-        $documentKinds = collect(self::DOCUMENT_KIND_CATALOG)->map(function ($row) use ($toggles) {
-            $featureCode = 'DOC_KIND_' . $row['code'];
+        $catalog = $this->documentKindCatalog();
+        $documentKinds = $catalog->map(function ($row) use ($toggles) {
+            $featureCode = 'DOC_KIND_' . (string) $row['code'];
 
             return [
-                'code' => $row['code'],
-                'label' => $row['label'],
+                'id' => (int) ($row['id'] ?? 0),
+                'code' => (string) $row['code'],
+                'label' => (string) $row['label'],
                 'feature_code' => $featureCode,
-                'is_enabled' => $toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true,
+                'is_enabled' => ((bool) ($row['is_enabled'] ?? true))
+                    && ($toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true),
             ];
         })->values();
 
@@ -834,8 +843,13 @@ class MasterDataController extends Controller
 
     public function paymentMethods()
     {
-        $rows = DB::table('core.payment_methods')
-            ->select('id', 'code', 'name', 'status')
+        $rows = DB::table('master.payment_types')
+            ->select([
+                'id',
+                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                'name',
+                DB::raw('CASE WHEN COALESCE(is_active, 0) = 1 OR COALESCE(status, 0) IN (1, 2) THEN 1 ELSE 0 END as status'),
+            ])
             ->orderBy('name')
             ->get();
 
@@ -856,11 +870,20 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
 
-        $id = DB::table('core.payment_methods')->insertGetId([
-            'code' => strtoupper(trim($payload['code'])),
-            'name' => trim($payload['name']),
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
+        $id = DB::transaction(function () use ($payload) {
+            $nextId = (int) DB::table('master.payment_types')->lockForUpdate()->max('id') + 1;
+            $normalizedStatus = (int) ($payload['status'] ?? 1);
+
+            DB::table('master.payment_types')->insert([
+                'id' => $nextId,
+                'name' => trim($payload['name']),
+                'comment' => strtoupper(trim($payload['code'])),
+                'is_active' => $normalizedStatus === 1 ? 1 : 0,
+                'status' => $normalizedStatus,
+            ]);
+
+            return $nextId;
+        });
 
         return response()->json(['message' => 'Payment method created', 'id' => (int) $id], 201);
     }
@@ -877,7 +900,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('core.payment_methods')->where('id', $id)->exists();
+        $exists = DB::table('master.payment_types')->where('id', $id)->exists();
         if (!$exists) {
             return response()->json(['message' => 'Payment method not found'], 404);
         }
@@ -886,17 +909,18 @@ class MasterDataController extends Controller
         $updates = [];
 
         if (!empty($payload['code'])) {
-            $updates['code'] = strtoupper(trim($payload['code']));
+            $updates['comment'] = strtoupper(trim($payload['code']));
         }
         if (!empty($payload['name'])) {
             $updates['name'] = trim($payload['name']);
         }
         if (array_key_exists('status', $payload)) {
             $updates['status'] = (int) $payload['status'];
+            $updates['is_active'] = ((int) $payload['status']) === 1 ? 1 : 0;
         }
 
         if (!empty($updates)) {
-            DB::table('core.payment_methods')->where('id', $id)->update($updates);
+            DB::table('master.payment_types')->where('id', $id)->update($updates);
         }
 
         return response()->json(['message' => 'Payment method updated']);
@@ -906,22 +930,24 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $rows = DB::table('sales.series_numbers')
+        $rows = DB::table('sales.series_numbers as sn')
+            ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
             ->select([
-                'id',
-                'company_id',
-                'branch_id',
-                'warehouse_id',
-                'document_kind',
-                'series',
-                'current_number',
-                'number_padding',
-                'reset_policy',
-                'is_enabled',
+                'sn.id',
+                'sn.company_id',
+                'sn.branch_id',
+                'sn.warehouse_id',
+                'sn.document_kind_id',
+                DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                'sn.series',
+                'sn.current_number',
+                'sn.number_padding',
+                'sn.reset_policy',
+                'sn.is_enabled',
             ])
-            ->where('company_id', $companyId)
+            ->where('sn.company_id', $companyId)
             ->orderBy('document_kind')
-            ->orderBy('series')
+            ->orderBy('sn.series')
             ->get();
 
         return response()->json(['data' => $rows]);
@@ -945,11 +971,12 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
+        $documentKindRule = 'required|string|in:' . implode(',', $this->documentKindCodes());
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
             'warehouse_id' => 'nullable|integer|min:1',
-            'document_kind' => 'required|string|in:QUOTATION,SALES_ORDER,INVOICE,RECEIPT,CREDIT_NOTE,DEBIT_NOTE',
+            'document_kind' => $documentKindRule,
             'series' => 'required|string|max:10',
             'current_number' => 'nullable|integer|min:0',
             'number_padding' => 'nullable|integer|min:4|max:12',
@@ -962,12 +989,18 @@ class MasterDataController extends Controller
         }
 
         $payload = $validator->validated();
+        $documentKindCode = strtoupper(trim((string) $payload['document_kind']));
+        $documentKindId = $this->resolveDocumentKindIdByCode($documentKindCode);
+        if ($documentKindId === null) {
+            return response()->json(['message' => 'Document kind not found'], 422);
+        }
 
         $id = DB::table('sales.series_numbers')->insertGetId([
             'company_id' => $companyId,
             'branch_id' => $payload['branch_id'] ?? null,
             'warehouse_id' => $payload['warehouse_id'] ?? null,
-            'document_kind' => $payload['document_kind'],
+            'document_kind' => $documentKindCode,
+            'document_kind_id' => $documentKindId,
             'series' => strtoupper(trim($payload['series'])),
             'current_number' => (int) ($payload['current_number'] ?? 0),
             'number_padding' => (int) ($payload['number_padding'] ?? 8),
@@ -984,11 +1017,12 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
+        $documentKindRule = 'nullable|string|in:' . implode(',', $this->documentKindCodes());
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
             'warehouse_id' => 'nullable|integer|min:1',
-            'document_kind' => 'nullable|string|in:QUOTATION,SALES_ORDER,INVOICE,RECEIPT,CREDIT_NOTE,DEBIT_NOTE',
+            'document_kind' => $documentKindRule,
             'series' => 'nullable|string|max:10',
             'current_number' => 'nullable|integer|min:0',
             'number_padding' => 'nullable|integer|min:4|max:12',
@@ -1012,10 +1046,21 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
         $updates = ['updated_by' => $authUser->id, 'updated_at' => now()];
 
-        foreach (['branch_id', 'warehouse_id', 'document_kind', 'current_number', 'number_padding', 'reset_policy'] as $field) {
+        foreach (['branch_id', 'warehouse_id', 'current_number', 'number_padding', 'reset_policy'] as $field) {
             if (array_key_exists($field, $payload)) {
                 $updates[$field] = $payload[$field];
             }
+        }
+
+        if (array_key_exists('document_kind', $payload)) {
+            $documentKindCode = strtoupper(trim((string) $payload['document_kind']));
+            $documentKindId = $this->resolveDocumentKindIdByCode($documentKindCode);
+            if ($documentKindId === null) {
+                return response()->json(['message' => 'Document kind not found'], 422);
+            }
+
+            $updates['document_kind'] = $documentKindCode;
+            $updates['document_kind_id'] = $documentKindId;
         }
 
         if (!empty($payload['series'])) {
@@ -1384,20 +1429,23 @@ class MasterDataController extends Controller
     public function documentKinds(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
+        $this->ensureDocumentKindsTable();
 
         $toggles = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->whereIn('feature_code', $this->documentKindFeatureCodes())
             ->pluck('is_enabled', 'feature_code');
 
-        $rows = collect(self::DOCUMENT_KIND_CATALOG)->map(function ($row) use ($toggles) {
-            $featureCode = 'DOC_KIND_' . $row['code'];
+        $rows = $this->documentKindCatalog()->map(function ($row) use ($toggles) {
+            $featureCode = 'DOC_KIND_' . (string) $row['code'];
 
             return [
-                'code' => $row['code'],
-                'label' => $row['label'],
+                'id' => (int) ($row['id'] ?? 0),
+                'code' => (string) $row['code'],
+                'label' => (string) $row['label'],
                 'feature_code' => $featureCode,
-                'is_enabled' => $toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true,
+                'is_enabled' => ((bool) ($row['is_enabled'] ?? true))
+                    && ($toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true),
             ];
         })->values();
 
@@ -1408,10 +1456,13 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
+        $this->ensureDocumentKindsTable();
 
         $validator = Validator::make($request->all(), [
             'kinds' => 'required|array|min:1',
-            'kinds.*.code' => 'required|string|in:QUOTATION,SALES_ORDER,INVOICE,RECEIPT,CREDIT_NOTE,DEBIT_NOTE',
+            'kinds.*.original_code' => 'nullable|string|max:30',
+            'kinds.*.code' => ['required', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
+            'kinds.*.label' => 'nullable|string|max:120',
             'kinds.*.is_enabled' => 'required|boolean',
         ]);
 
@@ -1422,10 +1473,65 @@ class MasterDataController extends Controller
         $items = $validator->validated()['kinds'];
 
         foreach ($items as $item) {
+            $sourceCode = strtoupper(trim((string) ($item['original_code'] ?? $item['code'])));
+            $targetCode = strtoupper(trim((string) $item['code']));
+
+            $sourceExists = DB::table('sales.document_kinds')->where('code', $sourceCode)->exists();
+            if (!$sourceExists) {
+                return response()->json(['message' => 'Document kind code not found: ' . $sourceCode], 422);
+            }
+
+            if ($sourceCode !== $targetCode) {
+                $targetExists = DB::table('sales.document_kinds')->where('code', $targetCode)->exists();
+                if ($targetExists) {
+                    return response()->json(['message' => 'Document kind code already exists: ' . $targetCode], 422);
+                }
+
+                DB::table('sales.document_kinds')
+                    ->where('code', $sourceCode)
+                    ->update([
+                        'code' => $targetCode,
+                        'updated_at' => now(),
+                    ]);
+
+                if (DB::table('information_schema.tables')->where('table_schema', 'sales')->where('table_name', 'document_sequences')->exists()) {
+                    DB::table('sales.document_sequences')
+                        ->where('document_kind', $sourceCode)
+                        ->update(['document_kind' => $targetCode]);
+                }
+
+                if (DB::table('information_schema.tables')->where('table_schema', 'sales')->where('table_name', 'commercial_documents')->exists()) {
+                    DB::table('sales.commercial_documents')
+                        ->where('document_kind', $sourceCode)
+                        ->update(['document_kind' => $targetCode]);
+                }
+
+                DB::table('appcfg.company_feature_toggles')
+                    ->where('feature_code', 'DOC_KIND_' . $sourceCode)
+                    ->update(['feature_code' => 'DOC_KIND_' . $targetCode]);
+            }
+
+            if (array_key_exists('label', $item) && trim((string) $item['label']) !== '') {
+                DB::table('sales.document_kinds')
+                    ->where('code', $targetCode)
+                    ->update([
+                        'label' => trim((string) $item['label']),
+                        'is_enabled' => (bool) $item['is_enabled'],
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('sales.document_kinds')
+                    ->where('code', $targetCode)
+                    ->update([
+                        'is_enabled' => (bool) $item['is_enabled'],
+                        'updated_at' => now(),
+                    ]);
+            }
+
             DB::table('appcfg.company_feature_toggles')->updateOrInsert(
                 [
                     'company_id' => $companyId,
-                    'feature_code' => 'DOC_KIND_' . $item['code'],
+                    'feature_code' => 'DOC_KIND_' . $targetCode,
                 ],
                 [
                     'is_enabled' => (bool) $item['is_enabled'],
@@ -1437,6 +1543,176 @@ class MasterDataController extends Controller
         }
 
         return response()->json(['message' => 'Document kinds updated']);
+    }
+
+    public function updateDocumentKind(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+        $this->ensureDocumentKindsTable();
+
+        $validator = Validator::make($request->all(), [
+            'code' => ['nullable', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
+            'label' => 'nullable|string|max:120',
+            'is_enabled' => 'nullable|boolean',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $kind = DB::table('sales.document_kinds')->where('id', $id)->first(['id', 'code']);
+        if (!$kind) {
+            return response()->json(['message' => 'Document kind not found'], 404);
+        }
+
+        $payload = $validator->validated();
+        $sourceCode = strtoupper(trim((string) $kind->code));
+        $targetCode = array_key_exists('code', $payload)
+            ? strtoupper(trim((string) $payload['code']))
+            : $sourceCode;
+
+        if ($targetCode !== $sourceCode) {
+            $targetExists = DB::table('sales.document_kinds')
+                ->where('code', $targetCode)
+                ->where('id', '<>', $id)
+                ->exists();
+
+            if ($targetExists) {
+                return response()->json(['message' => 'Document kind code already exists: ' . $targetCode], 422);
+            }
+
+            DB::table('sales.series_numbers')
+                ->where('document_kind_id', $id)
+                ->update(['document_kind' => $targetCode]);
+
+            DB::table('sales.series_numbers')
+                ->whereNull('document_kind_id')
+                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
+                ->update([
+                    'document_kind' => $targetCode,
+                    'document_kind_id' => $id,
+                ]);
+
+            DB::table('sales.document_sequences')
+                ->where('document_kind_id', $id)
+                ->update(['document_kind' => $targetCode]);
+
+            DB::table('sales.document_sequences')
+                ->whereNull('document_kind_id')
+                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
+                ->update([
+                    'document_kind' => $targetCode,
+                    'document_kind_id' => $id,
+                ]);
+
+            DB::table('sales.commercial_documents')
+                ->where('document_kind_id', $id)
+                ->update(['document_kind' => $targetCode]);
+
+            DB::table('sales.commercial_documents')
+                ->whereNull('document_kind_id')
+                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
+                ->update([
+                    'document_kind' => $targetCode,
+                    'document_kind_id' => $id,
+                ]);
+
+            if (DB::table('information_schema.tables')->where('table_schema', 'billing')->where('table_name', 'documents')->exists()) {
+                DB::table('billing.documents')
+                    ->whereRaw("UPPER(TRIM(COALESCE(doc_type, ''))) = ?", [$sourceCode])
+                    ->update(['doc_type' => $targetCode]);
+            }
+
+            DB::table('appcfg.company_feature_toggles')
+                ->where('feature_code', 'DOC_KIND_' . $sourceCode)
+                ->update(['feature_code' => 'DOC_KIND_' . $targetCode]);
+        }
+
+        $updates = ['updated_at' => now()];
+        if (array_key_exists('code', $payload)) {
+            $updates['code'] = $targetCode;
+        }
+        if (array_key_exists('label', $payload) && trim((string) $payload['label']) !== '') {
+            $updates['label'] = trim((string) $payload['label']);
+        }
+        if (array_key_exists('is_enabled', $payload)) {
+            $updates['is_enabled'] = (bool) $payload['is_enabled'];
+            DB::table('appcfg.company_feature_toggles')->updateOrInsert(
+                [
+                    'company_id' => $companyId,
+                    'feature_code' => 'DOC_KIND_' . $targetCode,
+                ],
+                [
+                    'is_enabled' => (bool) $payload['is_enabled'],
+                    'config' => json_encode(['managed_by' => 'masters']),
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                ]
+            );
+        }
+        if (array_key_exists('sort_order', $payload)) {
+            $updates['sort_order'] = (int) $payload['sort_order'];
+        }
+
+        DB::table('sales.document_kinds')->where('id', $id)->update($updates);
+
+        return response()->json(['message' => 'Document kind updated']);
+    }
+
+    public function createDocumentKind(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+        $this->ensureDocumentKindsTable();
+
+        $validator = Validator::make($request->all(), [
+            'code' => ['required', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
+            'label' => 'required|string|max:120',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
+            'is_enabled' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $code = strtoupper(trim((string) $payload['code']));
+        $label = trim((string) $payload['label']);
+        $sortOrder = isset($payload['sort_order']) ? (int) $payload['sort_order'] : 999;
+        $isEnabled = array_key_exists('is_enabled', $payload) ? (bool) $payload['is_enabled'] : true;
+
+        $exists = DB::table('sales.document_kinds')->where('code', $code)->exists();
+        if ($exists) {
+            return response()->json(['message' => 'Document kind code already exists'], 422);
+        }
+
+        DB::table('sales.document_kinds')->insert([
+            'id' => DB::raw("nextval('sales.document_kinds_id_seq')"),
+            'code' => $code,
+            'label' => $label,
+            'sort_order' => $sortOrder,
+            'is_enabled' => $isEnabled,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('appcfg.company_feature_toggles')->updateOrInsert(
+            [
+                'company_id' => $companyId,
+                'feature_code' => 'DOC_KIND_' . $code,
+            ],
+            [
+                'is_enabled' => $isEnabled,
+                'config' => json_encode(['managed_by' => 'masters']),
+                'updated_by' => $authUser->id,
+                'updated_at' => now(),
+            ]
+        );
+
+        return response()->json(['message' => 'Document kind created'], 201);
     }
 
     public function updateUnits(Request $request)
@@ -1667,11 +1943,80 @@ class MasterDataController extends Controller
 
     private function documentKindFeatureCodes(): array
     {
-        return collect(self::DOCUMENT_KIND_CATALOG)
+        return $this->documentKindCatalog()
             ->map(function ($row) {
-                return 'DOC_KIND_' . $row['code'];
+                return 'DOC_KIND_' . (string) $row['code'];
             })
             ->values()
             ->all();
+    }
+
+    private function documentKindCodes(): array
+    {
+        return $this->documentKindCatalog()
+            ->map(function ($row) {
+                return (string) $row['code'];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function documentKindCatalog()
+    {
+        $this->ensureDocumentKindsTable();
+
+        return DB::table('sales.document_kinds')
+            ->select('id', 'code', 'label', 'is_enabled')
+            ->orderBy('sort_order')
+            ->orderBy('code')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'id' => (int) $row->id,
+                    'code' => (string) $row->code,
+                    'label' => (string) $row->label,
+                    'is_enabled' => (bool) $row->is_enabled,
+                ];
+            })
+            ->values();
+    }
+
+    private function ensureDocumentKindsTable(): void
+    {
+        DB::statement("CREATE SEQUENCE IF NOT EXISTS sales.document_kinds_id_seq START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1");
+        DB::statement("CREATE TABLE IF NOT EXISTS sales.document_kinds (id BIGINT PRIMARY KEY DEFAULT nextval('sales.document_kinds_id_seq'), code VARCHAR(30) NOT NULL UNIQUE, label VARCHAR(120) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+
+        $defaults = [
+            ['code' => 'QUOTATION', 'label' => 'Cotizacion', 'sort_order' => 10],
+            ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta', 'sort_order' => 20],
+            ['code' => 'INVOICE', 'label' => 'Factura', 'sort_order' => 30],
+            ['code' => 'RECEIPT', 'label' => 'Boleta', 'sort_order' => 40],
+            ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito', 'sort_order' => 50],
+            ['code' => 'DEBIT_NOTE', 'label' => 'Nota de Debito', 'sort_order' => 60],
+        ];
+
+        foreach ($defaults as $row) {
+            $exists = DB::table('sales.document_kinds')->where('code', $row['code'])->exists();
+            if (!$exists) {
+                DB::table('sales.document_kinds')->insert([
+                    'code' => $row['code'],
+                    'label' => $row['label'],
+                    'sort_order' => $row['sort_order'],
+                    'is_enabled' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    }
+
+    private function resolveDocumentKindIdByCode(string $code): ?int
+    {
+        $row = DB::table('sales.document_kinds')
+            ->whereRaw('UPPER(TRIM(code)) = ?', [strtoupper(trim($code))])
+            ->select('id')
+            ->first();
+
+        return $row ? (int) $row->id : null;
     }
 }

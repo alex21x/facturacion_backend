@@ -18,8 +18,8 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		$total = $query->count();
 
 		$offset = ($page - 1) * $perPage;
-		$entries = $query->orderBy('se.issue_at', 'desc')
-			->orderBy('se.id', 'desc')
+		$entries = $query->orderBy('se.id', 'desc')
+			->orderBy('se.issue_at', 'desc')
 			->offset($offset)
 			->limit($perPage)
 			->get();
@@ -33,8 +33,8 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 	public function listForExport(int $companyId, $branchId, array $filters, bool $includeItems): array
 	{
 		$entries = $this->buildBaseEntriesQuery($companyId, $branchId, $filters)
-			->orderBy('se.issue_at', 'desc')
 			->orderBy('se.id', 'desc')
+			->orderBy('se.issue_at', 'desc')
 			->get();
 
 		if (!$includeItems) {
@@ -63,6 +63,15 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 				'se.id',
 				'se.entry_type',
 				'se.status',
+				DB::raw("CASE UPPER(COALESCE(se.status, ''))
+					WHEN 'APPLIED' THEN 'Aplicado'
+					WHEN 'OPEN' THEN 'Abierto'
+					WHEN 'PARTIAL' THEN 'Parcial'
+					WHEN 'CLOSED' THEN 'Cerrado'
+					WHEN 'VOID' THEN 'Anulado'
+					WHEN 'CANCELED' THEN 'Cancelado'
+					ELSE COALESCE(se.status, '-')
+				END as status_label"),
 				'se.reference_no',
 				'se.supplier_reference',
 				'se.issue_at',
@@ -78,7 +87,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 			->whereIn('se.status', ['APPLIED', 'OPEN', 'PARTIAL', 'CLOSED']);
 
 		if ($hasPaymentMethodId) {
-			$query->leftJoin('core.payment_methods as pm', 'se.payment_method_id', '=', 'pm.id')
+			$query->leftJoin('master.payment_types as pm', 'se.payment_method_id', '=', 'pm.id')
 				->addSelect(DB::raw('COALESCE(pm.name, \'No especificado\') as payment_method'));
 		} else {
 			$query->addSelect(DB::raw('\'No especificado\' as payment_method'));
@@ -148,6 +157,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 			->select([
 				'sei.entry_id',
 				'sei.product_id',
+				'sei.lot_id',
 				DB::raw('COALESCE(p.name, CONCAT(\'Producto #\', sei.product_id)) as product_name'),
 				'sei.qty',
 				'sei.unit_cost',
@@ -170,6 +180,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 				return [
 					'entry_id' => (int) $row->entry_id,
 					'product_id' => (int) $row->product_id,
+					'lot_id' => $row->lot_id ? (int) $row->lot_id : null,
 					'product_name' => (string) $row->product_name,
 					'qty' => (float) $row->qty,
 					'unit_cost' => (float) $row->unit_cost,

@@ -223,10 +223,10 @@ class CashController extends Controller
         // Los documentos se obtienen a través de cash_movements
             $salesByPaymentMethod = DB::table('sales.cash_movements as cm')
                 ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
-                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+                ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
                 ->select([
                     DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
-                    DB::raw("COALESCE(pm.code, 'SIN_METODO') as payment_method_code"),
+                    DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO') as payment_method_code"),
                     DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
                 DB::raw('COUNT(cd.id) as document_count'),
                 DB::raw('SUM(cd.total) as total_amount'),
@@ -235,8 +235,8 @@ class CashController extends Controller
             ->where('cm.company_id', $companyId)
             ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
             ->where('cd.status', '!=', 'CANCELED')
-                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(pm.code, 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
-                ->orderBy(DB::raw("COALESCE(pm.code, 'SIN_METODO')"))
+                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
+                ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"))
             ->get();
 
         DB::table('sales.cash_sessions')->where('id', $id)->update([
@@ -299,7 +299,7 @@ class CashController extends Controller
                     $join->on('cd.id', '=', 'cm.ref_id')
                          ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
                 })
-                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+                ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->select([
                 'cm.id',
                 'cm.cash_register_id',
@@ -410,11 +410,12 @@ class CashController extends Controller
                     ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
             })
             ->leftJoin('sales.customers as cust', 'cust.id', '=', 'cd.customer_id')
-            ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+            ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
             ->select([
                 'cd.id',
                 'cd.document_kind',
+                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = cd.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(cd.document_kind) LIMIT 1), cd.document_kind) as document_kind_label"),
                 'cd.series',
                 'cd.number',
                 DB::raw("CONCAT(cd.series, '-', cd.number) as document_number"),
@@ -451,6 +452,7 @@ class CashController extends Controller
                 'id'                  => (int) $doc->id,
                 'document_number'     => $doc->document_number,
                 'document_kind'       => $doc->document_kind,
+                'document_kind_label' => $doc->document_kind_label,
                 'customer_name'       => $doc->customer_name,
                 'payment_method_name' => $doc->payment_method_name,
                 'total'               => round((float) $doc->total, 2),
@@ -472,10 +474,10 @@ class CashController extends Controller
         // Desglose de ventas por tipo de pago
         $salesByPaymentMethod = DB::table('sales.cash_movements as cm')
             ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
-                ->leftJoin('core.payment_methods as pm', 'pm.id', '=', 'cd.payment_method_id')
+                ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
                 ->select([
                     DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
-                    DB::raw("COALESCE(pm.code, 'SIN_METODO') as payment_method_code"),
+                        DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO') as payment_method_code"),
                     DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
                 DB::raw('COUNT(cd.id) as document_count'),
                 DB::raw('SUM(cd.total) as total_amount'),
@@ -484,8 +486,8 @@ class CashController extends Controller
             ->where('cm.company_id', $companyId)
             ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
             ->where('cd.status', '!=', 'CANCELED')
-                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(pm.code, 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
-                ->orderBy(DB::raw("COALESCE(pm.code, 'SIN_METODO')"))
+                ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
+                ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"))
             ->get();
 
         $paymentMethodBreakdown = array_map(function ($record) {

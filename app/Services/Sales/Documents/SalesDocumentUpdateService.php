@@ -208,6 +208,9 @@ class SalesDocumentUpdateService
 
                     foreach ($payload['items'] as $index => $item) {
                         $productId = isset($item['product_id']) ? (int) $item['product_id'] : null;
+                        if ($productId !== null && $productId <= 0) {
+                            $productId = null;
+                        }
                         $product = $productId ? $productMap->get($productId) : null;
 
                         if ($productId !== null && !$product) {
@@ -386,6 +389,14 @@ class SalesDocumentUpdateService
                     'last_manual_update_at' => now()->toDateTimeString(),
                 ]);
 
+                if (array_key_exists('document_kind', $payload) || array_key_exists('document_kind_id', $payload)) {
+                    $requestedKind = strtoupper(trim((string) ($payload['document_kind'] ?? $document->document_kind)));
+                    $currentKind = strtoupper(trim((string) $document->document_kind));
+                    if ($requestedKind !== '' && $requestedKind !== $currentKind) {
+                        throw new SalesDocumentException('No se permite cambiar el tipo de comprobante en la edicion de documento.');
+                    }
+                }
+
                 if (!empty($payload['items']) && $documentStatus === 'ISSUED' && $isTributaryDocument) {
                     $updatedMetadata['inventory_edit_reapplied_by'] = (int) $authUser->id;
                     $updatedMetadata['inventory_edit_reapplied_at'] = now()->toDateTimeString();
@@ -405,6 +416,10 @@ class SalesDocumentUpdateService
                     'notes' => array_key_exists('notes', $payload) ? ($payload['notes'] ?? null) : $document->notes,
                     'metadata' => json_encode($updatedMetadata),
                 ];
+
+                if (array_key_exists('document_kind_id', $payload) && $payload['document_kind_id'] !== null) {
+                    $changes['document_kind_id'] = (int) $payload['document_kind_id'];
+                }
 
                 if (!empty($payload['items'])) {
                     $changes['subtotal'] = $totals['subtotal'];

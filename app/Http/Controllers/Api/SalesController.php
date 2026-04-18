@@ -12,6 +12,7 @@ use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
@@ -24,6 +25,7 @@ class SalesController extends Controller
     private array $verticalFeaturePreferenceCache = [];
     private array $featureContextResolutionCache = [];
     private array $tableExistsCache = [];
+    private array $tableColumnsCache = [];
     private array $companyFeatureToggleMap = [];  // companyId:FEATURE_CODE => stdClass|null
     private array $branchFeatureToggleMap = [];   // companyId:branchId:FEATURE_CODE => stdClass|null
     private array $featureTogglePrewarmed = [];    // companyId => true, companyId:branchId => true
@@ -96,6 +98,27 @@ class SalesController extends Controller
                 ], 422);
             }
         }
+
+        $cacheSeconds = $this->lookupsCacheTtlSeconds();
+        $cacheKey = sprintf(
+            'sales:lookups:v2:c%s:b%s',
+            $companyId,
+            $branchId === null ? 'null' : (string) $branchId
+        );
+
+        if ($cacheSeconds > 0) {
+            $payload = Cache::remember($cacheKey, now()->addSeconds($cacheSeconds), function () use ($companyId, $branchId) {
+                return $this->buildLookupsPayload($companyId, $branchId);
+            });
+
+            return response()->json($payload);
+        }
+
+        return response()->json($this->buildLookupsPayload($companyId, $branchId));
+    }
+
+    private function buildLookupsPayload(int $companyId, ?int $branchId): array
+    {
 
         // Pre-warm toggle maps once — all subsequent feature lookups use the in-memory cache (2 DB queries total)
         $this->prewarmFeatureToggles($companyId, $branchId);
@@ -186,7 +209,7 @@ class SalesController extends Controller
             $this->resolveTaxCategories($companyId)->all()
         );
 
-        return response()->json([
+        return [
             'document_kinds' => $documentKinds,
             'currencies' => $currencies,
             'payment_methods' => $paymentMethods,
@@ -206,7 +229,7 @@ class SalesController extends Controller
             'percepcion_account' => $salesPercepcionEnabled ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'SALES_PERCEPCION_ENABLED', 'PERCEPCION') : null,
             'sunat_operation_types' => ($salesDetraccionEnabled || $salesRetencionEnabled || $salesPercepcionEnabled) ? $this->resolveSunatOperationTypes($companyId, $branchId) : [],
             'commerce_features' => $commerceFeatures,
-        ]);
+        ];
     }
 
     private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
@@ -1231,6 +1254,14 @@ class SalesController extends Controller
         }
 
         $documentKind = (string) $payload['document_kind'];
+        $requestedStatus = strtoupper(trim((string) ($payload['status'] ?? 'ISSUED')));
+        if ($requestedStatus === 'ISSUED' && $documentKind !== 'QUOTATION') {
+            $cashSessionValidation = $this->validateOpenCashSessionForIssuedSale($companyId, $cashRegisterId);
+            if ($cashSessionValidation !== null) {
+                return $cashSessionValidation;
+            }
+        }
+
         $noteBaseKind = $this->resolveNoteBaseKind($documentKind);
         $metadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
         $customerIdentity = $this->fetchCustomerIdentityForSalesValidation($companyId, (int) $payload['customer_id']);
@@ -2100,6 +2131,19 @@ class SalesController extends Controller
             }
         }
 
+        $resolvedCashRegisterId = isset($payload['cash_register_id'])
+            ? (int) $payload['cash_register_id']
+            : (isset($sourceMetadata['cash_register_id']) && $sourceMetadata['cash_register_id'] !== null
+                ? (int) $sourceMetadata['cash_register_id']
+                : null);
+
+        if (strtoupper($targetStatus) === 'ISSUED') {
+            $cashSessionValidation = $this->validateOpenCashSessionForIssuedSale($companyId, $resolvedCashRegisterId);
+            if ($cashSessionValidation !== null) {
+                return $cashSessionValidation;
+            }
+        }
+
         $sourceHadStockImpact = $this->shouldAffectStock((string) $source->document_kind, (string) $source->status);
 
         $allProductIds = $sourceItems
@@ -2177,11 +2221,7 @@ class SalesController extends Controller
             'company_id' => $companyId,
             'branch_id' => $source->branch_id !== null ? (int) $source->branch_id : null,
             'warehouse_id' => $source->warehouse_id !== null ? (int) $source->warehouse_id : null,
-            'cash_register_id' => isset($payload['cash_register_id'])
-                ? (int) $payload['cash_register_id']
-                : (isset($sourceMetadata['cash_register_id']) && $sourceMetadata['cash_register_id'] !== null
-                    ? (int) $sourceMetadata['cash_register_id']
-                    : null),
+            'cash_register_id' => $resolvedCashRegisterId,
             'document_kind' => $targetDocumentKind,
             'series' => $series,
             'issue_at' => $this->resolveIssueAtForStorage($payload['issue_at'] ?? null),
@@ -2488,6 +2528,35 @@ class SalesController extends Controller
             ->update([
                 'expected_balance' => round((float) $session->opening_balance + $totalIn - $totalOut, 4),
             ]);
+    }
+
+    private function validateOpenCashSessionForIssuedSale(int $companyId, ?int $cashRegisterId): ?\Illuminate\Http\JsonResponse
+    {
+        if ($cashRegisterId === null) {
+            return response()->json([
+                'message' => 'Debe seleccionar una caja antes de realizar una venta.',
+            ], 422);
+        }
+
+        if (!$this->tableExists('sales.cash_sessions')) {
+            return response()->json([
+                'message' => 'No existe configuración de sesiones de caja. Contacte a soporte.',
+            ], 422);
+        }
+
+        $openSessionExists = DB::table('sales.cash_sessions')
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
+            ->where('status', 'OPEN')
+            ->exists();
+
+        if (!$openSessionExists) {
+            return response()->json([
+                'message' => 'Debe aperturar caja antes de realizar una venta.',
+            ], 422);
+        }
+
+        return null;
     }
 
     private function resolveTaxCategories(int $companyId)
@@ -3099,12 +3168,25 @@ class SalesController extends Controller
 
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        $row = DB::selectOne(
-            'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
-            [$schema, $table]
-        );
+        $cacheSeconds = $this->schemaMetadataCacheTtlSeconds();
+        $cacheKey = sprintf('sales:schema:table-exists:%s.%s', $schema, $table);
 
-        $result = isset($row->present) && (bool) $row->present;
+        if ($cacheSeconds > 0) {
+            $result = Cache::remember($cacheKey, now()->addSeconds($cacheSeconds), function () use ($schema, $table) {
+                $row = DB::selectOne(
+                    'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
+                    [$schema, $table]
+                );
+                return isset($row->present) && (bool) $row->present;
+            });
+        } else {
+            $row = DB::selectOne(
+                'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
+                [$schema, $table]
+            );
+            $result = isset($row->present) && (bool) $row->present;
+        }
+
         $this->tableExistsCache[$qualifiedTable] = $result;
         return $result;
     }
@@ -3144,14 +3226,45 @@ class SalesController extends Controller
 
     private function tableColumns(string $qualifiedTable): array
     {
+        if (array_key_exists($qualifiedTable, $this->tableColumnsCache)) {
+            return $this->tableColumnsCache[$qualifiedTable];
+        }
+
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        return collect(DB::select(
-            'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
-            [$schema, $table]
-        ))->map(function ($row) {
-            return (string) $row->column_name;
-        })->all();
+        $cacheSeconds = $this->schemaMetadataCacheTtlSeconds();
+        $cacheKey = sprintf('sales:schema:table-columns:%s.%s', $schema, $table);
+
+        if ($cacheSeconds > 0) {
+            $columns = Cache::remember($cacheKey, now()->addSeconds($cacheSeconds), function () use ($schema, $table) {
+                return collect(DB::select(
+                    'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
+                    [$schema, $table]
+                ))->map(function ($row) {
+                    return (string) $row->column_name;
+                })->all();
+            });
+        } else {
+            $columns = collect(DB::select(
+                'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
+                [$schema, $table]
+            ))->map(function ($row) {
+                return (string) $row->column_name;
+            })->all();
+        }
+
+        $this->tableColumnsCache[$qualifiedTable] = $columns;
+        return $columns;
+    }
+
+    private function lookupsCacheTtlSeconds(): int
+    {
+        return max(0, (int) env('SALES_LOOKUPS_CACHE_SECONDS', 30));
+    }
+
+    private function schemaMetadataCacheTtlSeconds(): int
+    {
+        return max(0, (int) env('SALES_SCHEMA_CACHE_SECONDS', 3600));
     }
 
     private function firstExistingColumn(array $columns, array $candidates): ?string

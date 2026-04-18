@@ -70,6 +70,7 @@ class InventoryController extends Controller
         $search = trim((string) $request->query('search', ''));
         $status = $request->query('status');
         $limit = (int) $request->query('limit', 100);
+        $autocomplete = filter_var($request->query('autocomplete', false), FILTER_VALIDATE_BOOLEAN);
 
         $this->ensureProductCatalogSchema();
 
@@ -80,45 +81,81 @@ class InventoryController extends Controller
             $limit = 500;
         }
 
-        $query = DB::table('inventory.products as p')
-            ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
-            ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
-            ->leftJoin('inventory.product_lines as pl', 'pl.id', '=', 'p.line_id')
-            ->leftJoin('inventory.product_brands as pb', 'pb.id', '=', 'p.brand_id')
-            ->leftJoin('inventory.product_locations as plo', 'plo.id', '=', 'p.location_id')
-            ->leftJoin('inventory.product_warranties as pw', 'pw.id', '=', 'p.warranty_id')
-            ->select([
-                'p.id',
-                'p.sku',
-                'p.barcode',
-                'p.unit_id',
-                'p.name',
-                'p.sale_price',
-                'p.cost_price',
-                'p.line_id',
-                'p.brand_id',
-                'p.location_id',
-                'p.warranty_id',
-                'p.product_nature',
-                'p.sunat_code',
-                'p.image_url',
-                'p.seller_commission_percent',
-                'p.is_stockable',
-                'p.lot_tracking',
-                'p.has_expiration',
-                'p.status',
-                DB::raw('c.name as category_name'),
-                DB::raw('pl.name as line_name'),
-                DB::raw('pb.name as brand_name'),
-                DB::raw('plo.name as location_name'),
-                DB::raw('pw.name as warranty_name'),
-                DB::raw('u.code as unit_code'),
-                DB::raw('u.name as unit_name'),
-            ])
-            ->where('p.company_id', $companyId)
-            ->whereNull('p.deleted_at')
-            ->orderBy('p.name')
-            ->limit($limit);
+        if ($autocomplete) {
+            $query = DB::table('inventory.products as p')
+                ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
+                ->select([
+                    'p.id',
+                    'p.sku',
+                    'p.barcode',
+                    'p.unit_id',
+                    'p.name',
+                    'p.sale_price',
+                    'p.cost_price',
+                    'p.line_id',
+                    'p.brand_id',
+                    'p.location_id',
+                    'p.warranty_id',
+                    'p.product_nature',
+                    'p.sunat_code',
+                    'p.image_url',
+                    'p.seller_commission_percent',
+                    'p.is_stockable',
+                    'p.lot_tracking',
+                    'p.has_expiration',
+                    'p.status',
+                    DB::raw('NULL::text as category_name'),
+                    DB::raw('NULL::text as line_name'),
+                    DB::raw('NULL::text as brand_name'),
+                    DB::raw('NULL::text as location_name'),
+                    DB::raw('NULL::text as warranty_name'),
+                    DB::raw('u.code as unit_code'),
+                    DB::raw('u.name as unit_name'),
+                ])
+                ->where('p.company_id', $companyId)
+                ->whereNull('p.deleted_at')
+                ->limit($limit);
+        } else {
+            $query = DB::table('inventory.products as p')
+                ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
+                ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
+                ->leftJoin('inventory.product_lines as pl', 'pl.id', '=', 'p.line_id')
+                ->leftJoin('inventory.product_brands as pb', 'pb.id', '=', 'p.brand_id')
+                ->leftJoin('inventory.product_locations as plo', 'plo.id', '=', 'p.location_id')
+                ->leftJoin('inventory.product_warranties as pw', 'pw.id', '=', 'p.warranty_id')
+                ->select([
+                    'p.id',
+                    'p.sku',
+                    'p.barcode',
+                    'p.unit_id',
+                    'p.name',
+                    'p.sale_price',
+                    'p.cost_price',
+                    'p.line_id',
+                    'p.brand_id',
+                    'p.location_id',
+                    'p.warranty_id',
+                    'p.product_nature',
+                    'p.sunat_code',
+                    'p.image_url',
+                    'p.seller_commission_percent',
+                    'p.is_stockable',
+                    'p.lot_tracking',
+                    'p.has_expiration',
+                    'p.status',
+                    DB::raw('c.name as category_name'),
+                    DB::raw('pl.name as line_name'),
+                    DB::raw('pb.name as brand_name'),
+                    DB::raw('plo.name as location_name'),
+                    DB::raw('pw.name as warranty_name'),
+                    DB::raw('u.code as unit_code'),
+                    DB::raw('u.name as unit_name'),
+                ])
+                ->where('p.company_id', $companyId)
+                ->whereNull('p.deleted_at')
+                ->orderBy('p.name')
+                ->limit($limit);
+        }
 
         if ($search !== '') {
             $query->where(function ($nested) use ($search) {
@@ -126,10 +163,31 @@ class InventoryController extends Controller
                     ->orWhere('p.sku', 'ilike', '%' . $search . '%')
                     ->orWhere('p.barcode', 'ilike', '%' . $search . '%');
             });
+
+            if ($autocomplete) {
+                $likePrefix = $search . '%';
+                $likeExact = $search;
+                $query->orderByRaw(
+                    "CASE
+                        WHEN p.sku ILIKE ? THEN 0
+                        WHEN p.name ILIKE ? THEN 1
+                        WHEN p.barcode ILIKE ? THEN 2
+                        WHEN p.sku ILIKE ? THEN 3
+                        WHEN p.name ILIKE ? THEN 4
+                        WHEN p.barcode ILIKE ? THEN 5
+                        ELSE 6
+                    END",
+                    [$likeExact, $likeExact, $likeExact, $likePrefix, $likePrefix, $likePrefix]
+                );
+            }
         }
 
         if ($status !== null && $status !== '') {
             $query->where('p.status', (int) $status);
+        }
+
+        if ($autocomplete) {
+            $query->orderBy('p.name');
         }
 
         return response()->json([

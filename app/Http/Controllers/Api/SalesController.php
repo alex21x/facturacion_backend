@@ -1565,15 +1565,52 @@ class SalesController extends Controller
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
+            // Join document_kinds by id (primary) and by code string (fallback) — replaces 6 correlated subqueries
+            ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'd.document_kind_id')
+            ->leftJoin(DB::raw('sales.document_kinds as dk_code ON UPPER(dk_code.code) = UPPER(d.document_kind)'))
             ->select([
                 'd.id',
                 'd.company_id',
                 'd.branch_id',
                 'd.document_kind',
                 'd.document_kind_id',
-                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
-                DB::raw("COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) as document_kind_base"),
-                DB::raw("CASE WHEN COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE') THEN true ELSE false END as is_tributary_document"),
+                DB::raw("COALESCE(dk.label, dk_code.label, d.document_kind) as document_kind_label"),
+                DB::raw("
+                    COALESCE(
+                        CASE WHEN dk.code IS NOT NULL THEN
+                            CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                                 WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                                 ELSE UPPER(dk.code) END
+                        END,
+                        CASE WHEN dk_code.code IS NOT NULL THEN
+                            CASE WHEN UPPER(dk_code.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                                 WHEN UPPER(dk_code.code) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                                 ELSE UPPER(dk_code.code) END
+                        END,
+                        CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                             WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                             ELSE UPPER(d.document_kind) END
+                    ) as document_kind_base
+                "),
+                DB::raw("
+                    CASE WHEN
+                        COALESCE(
+                            CASE WHEN dk.code IS NOT NULL THEN
+                                CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                                     WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                                     ELSE UPPER(dk.code) END
+                            END,
+                            CASE WHEN dk_code.code IS NOT NULL THEN
+                                CASE WHEN UPPER(dk_code.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                                     WHEN UPPER(dk_code.code) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                                     ELSE UPPER(dk_code.code) END
+                            END,
+                            CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                                 WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%'  THEN 'DEBIT_NOTE'
+                                 ELSE UPPER(d.document_kind) END
+                        ) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE')
+                    THEN true ELSE false END as is_tributary_document
+                "),
                 'd.series',
                 'd.number',
                 'd.issue_at',
@@ -3259,7 +3296,7 @@ class SalesController extends Controller
 
     private function lookupsCacheTtlSeconds(): int
     {
-        return max(0, (int) env('SALES_LOOKUPS_CACHE_SECONDS', 30));
+        return max(0, (int) env('SALES_LOOKUPS_CACHE_SECONDS', 300));
     }
 
     private function schemaMetadataCacheTtlSeconds(): int

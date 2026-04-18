@@ -2345,7 +2345,7 @@ class AppConfigController extends Controller
         $logoUrl = null;
         if ($settings && $settings->logo_path) {
             $logoUrl = Storage::disk('public')->exists($settings->logo_path)
-                ? Storage::disk('public')->url($settings->logo_path)
+                ? '/storage/' . $settings->logo_path
                 : null;
         }
 
@@ -2580,7 +2580,7 @@ class AppConfigController extends Controller
 
         return response()->json([
             'message'  => 'Logo actualizado',
-            'logo_url' => Storage::disk('public')->url($path),
+            'logo_url' => '/storage/' . $path,
         ]);
     }
 

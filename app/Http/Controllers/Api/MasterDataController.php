@@ -658,8 +658,8 @@ class MasterDataController extends Controller
         if (!empty($payload['code'])) {
             $updates['code'] = strtoupper(trim($payload['code']));
         }
-        if (!empty($payload['name'])) {
-            $updates['name'] = trim($payload['name']);
+        if (array_key_exists('name', $payload)) {
+            $updates['name'] = trim((string) $payload['name']);
         }
         if (array_key_exists('address', $payload)) {
             $updates['address'] = $payload['address'];

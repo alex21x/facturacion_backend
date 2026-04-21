@@ -61,6 +61,9 @@ class SalesDocumentItemPreparationService
             }
 
             $productId = isset($item['product_id']) ? (int) $item['product_id'] : null;
+            if ($productId !== null && $productId <= 0) {
+                $productId = null;
+            }
             $product = $productId ? $productMap->get($productId) : null;
 
             if ($productId !== null && !$product) {

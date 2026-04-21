@@ -17,7 +17,11 @@ class PurchasesLookupRepository implements PurchasesLookupRepositoryInterface
     public function getPaymentMethods(): array
     {
         return PaymentMethod::query()
-            ->select('id', 'code', 'name')
+            ->select([
+                'id',
+                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                'name',
+            ])
             ->enabled()
             ->orderBy('name')
             ->get()

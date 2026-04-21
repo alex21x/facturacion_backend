@@ -101,15 +101,28 @@ class SalesDocumentCreationService
                 }
 
                 $documentStatus = $payload['status'] ?? 'DRAFT';
+                $normalizedDocumentKind = $this->normalizeDocumentKind((string) $payload['document_kind']);
                 $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument((string) $payload['document_kind']);
                 $stockAlreadyDiscounted = false;
+
+                $requiresOpenCashSession = !$isPreDocument
+                    && $stockDirection < 0
+                    && strtoupper((string) $documentStatus) === 'ISSUED';
+
+                if ($requiresOpenCashSession) {
+                    $this->assertOpenCashSessionForIssuedSale(
+                        (int) $companyId,
+                        $branchId !== null ? (int) $branchId : null,
+                        $cashRegisterId !== null ? (int) $cashRegisterId : null
+                    );
+                }
 
                 if (array_key_exists('stock_already_discounted', $metadata)) {
                     $stockAlreadyDiscounted = filter_var($metadata['stock_already_discounted'], FILTER_VALIDATE_BOOLEAN);
                 }
 
                 $isTributaryIssued = strtoupper((string) $documentStatus) === 'ISSUED'
-                    && in_array(strtoupper((string) $payload['document_kind']), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
+                    && in_array($normalizedDocumentKind, ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
 
                 $affectsStock = !$stockAlreadyDiscounted && CommercialDocumentPolicy::shouldAffectStock((string) $payload['document_kind'], (string) $documentStatus);
                 if ($isTributaryIssued && !$stockAlreadyDiscounted) {
@@ -198,12 +211,14 @@ class SalesDocumentCreationService
                 $payload['metadata'] = $metadata;
 
                 $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
+                $resolvedDocumentKindId = $this->resolveDocumentKindId((string) $payload['document_kind']);
 
                 $documentId = $this->documentRepository->create([
                     'company_id' => $companyId,
                     'branch_id' => $branchId,
                     'warehouse_id' => $warehouseId,
                     'document_kind' => $payload['document_kind'],
+                    'document_kind_id' => $resolvedDocumentKindId,
                     'series' => $payload['series'],
                     'number' => $nextNumber,
                     'issue_at' => $resolvedIssueAt,
@@ -273,6 +288,7 @@ class SalesDocumentCreationService
                     documentKind: (string) $payload['document_kind'],
                     series: (string) $payload['series'],
                     number: (int) $nextNumber,
+                    issueAt: (string) $resolvedIssueAt,
                     total: round($grandTotal, 2),
                     paidTotal: round($paidTotal, 2),
                     balanceDue: round($grandTotal - $paidTotal, 2),
@@ -292,19 +308,26 @@ class SalesDocumentCreationService
             throw new SalesDocumentException($e->getMessage(), 422);
         }
 
-        $documentKind = strtoupper((string) ($result['document_kind'] ?? ''));
+        $documentKind = $this->normalizeDocumentKind((string) ($result['document_kind'] ?? ''));
         $documentStatus = strtoupper((string) ($result['status'] ?? ''));
         $receiptSendMode = strtoupper(trim((string) (($payload['metadata']['receipt_send_mode'] ?? 'DIRECT'))));
         if (!in_array($receiptSendMode, ['DIRECT', 'SUMMARY'], true)) {
             $receiptSendMode = 'DIRECT';
         }
+        $deferSunatSend = filter_var($payload['metadata']['defer_sunat_send'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-        if ($this->taxBridgeService->supportsDocumentKind((string) ($result['document_kind'] ?? ''))
+        if ($this->taxBridgeService->supportsDocumentKind(
+            (string) ($result['document_kind'] ?? ''),
+            isset($payload['document_kind_id']) && $payload['document_kind_id'] !== null ? (int) $payload['document_kind_id'] : null
+        )
             && $documentStatus === 'ISSUED') {
-            if ($documentKind === 'RECEIPT' && $receiptSendMode === 'SUMMARY') {
-                $issueDate = isset($payload['issue_at']) && trim((string) $payload['issue_at']) !== ''
-                    ? date('Y-m-d', strtotime((string) $payload['issue_at']))
-                    : now()->toDateString();
+            if ($deferSunatSend) {
+                $this->taxBridgeService->deferDispatch(
+                    (int) $companyId,
+                    (int) $result['id']
+                );
+            } elseif ($documentKind === 'RECEIPT' && $receiptSendMode === 'SUMMARY') {
+                $issueDate = $this->resolveIssueDateForSummary($payload['issue_at'] ?? null);
 
                 $this->dailySummaryService->appendDocumentToOpenSummary(
                     (int) $companyId,
@@ -383,14 +406,67 @@ class SalesDocumentCreationService
     private function resolveIssueAtForStorage($issueAt)
     {
         if ($issueAt === null || $issueAt === '') {
-            return now();
+            return now('America/Lima')->format('Y-m-d H:i:sP');
         }
+
         $text = trim((string) $issueAt);
+
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $text) === 1) {
             $limaNow = now('America/Lima');
-            return $text . ' ' . $limaNow->format('H:i:s') . '-05:00';
+            return $text . ' ' . $limaNow->format('H:i:sP');
         }
-        return $issueAt;
+
+        try {
+            return \Carbon\Carbon::parse($text)->setTimezone('America/Lima')->format('Y-m-d H:i:sP');
+        } catch (\Throwable $e) {
+            return $issueAt;
+        }
+    }
+
+    private function resolveIssueDateForSummary($issueAt): string
+    {
+        if ($issueAt === null || $issueAt === '') {
+            return now('America/Lima')->toDateString();
+        }
+
+        $text = trim((string) $issueAt);
+
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $text, $matches) === 1) {
+            return $matches[1];
+        }
+
+        try {
+            return \Carbon\Carbon::parse($text, 'America/Lima')
+                ->setTimezone('America/Lima')
+                ->toDateString();
+        } catch (\Throwable $e) {
+            return now('America/Lima')->toDateString();
+        }
+    }
+
+    private function resolveDocumentKindId(string $documentKind): ?int
+    {
+        $row = DB::table('sales.document_kinds')
+            ->whereRaw('UPPER(TRIM(code)) = ?', [strtoupper(trim($documentKind))])
+            ->select('id')
+            ->first();
+
+        return $row ? (int) $row->id : null;
+    }
+
+    private function normalizeDocumentKind(string $documentKind): string
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized === 'CREDIT_NOTE' || str_starts_with($normalized, 'CREDIT_NOTE_')) {
+            return 'CREDIT_NOTE';
+        }
+
+        if ($normalized === 'DEBIT_NOTE' || str_starts_with($normalized, 'DEBIT_NOTE_')) {
+            return 'DEBIT_NOTE';
+        }
+
+        return $normalized;
     }
 
     private function inventorySettingsForCompany(int $companyId): array
@@ -454,6 +530,41 @@ class SalesDocumentCreationService
     private function resolveAuthRoleContext(int $userId, int $companyId): array
     {
         return $this->support->resolveAuthRoleContext($userId, $companyId);
+    }
+
+    private function assertOpenCashSessionForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): void
+    {
+        if (!$this->cashSessionsTableExists()) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+
+        if ($cashRegisterId === null || $cashRegisterId <= 0) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+
+        $openSessionExists = DB::table('sales.cash_sessions')
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
+            ->where('status', 'OPEN')
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where(function ($nested) use ($branchId) {
+                    $nested->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                });
+            })
+            ->exists();
+
+        if (!$openSessionExists) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+    }
+
+    private function cashSessionsTableExists(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'sales')
+            ->where('table_name', 'cash_sessions')
+            ->exists();
     }
 
 }

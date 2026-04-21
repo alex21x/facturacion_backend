@@ -2,9 +2,11 @@
 
 namespace App\Services\Sales\TaxBridge;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 class GreGuideService
 {
@@ -15,18 +17,26 @@ class GreGuideService
     private const STATUS_REJECTED = 'REJECTED';
     private const STATUS_ERROR = 'ERROR';
     private const STATUS_CANCELLED = 'CANCELLED';
+    private const AUDIT_DOCUMENT_KIND = 'GRE_GUIDE';
+    private const AUDIT_TRIBUTARY_TYPE = 'GRE';
+    private const INVENTORY_REF_TYPE_GRE_GUIDE = 'GRE_GUIDE';
+    private const INVENTORY_REF_TYPE_GRE_GUIDE_CANCEL = 'GRE_GUIDE_CANCEL';
 
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
     private array $featureResolutionCache = [];
 
-    public function __construct(private TaxBridgeService $taxBridgeService)
+    public function __construct(
+        private TaxBridgeService $taxBridgeService,
+        private TaxBridgeAuditService $taxBridgeAuditService
+    )
     {
     }
 
-    public function lookups(int $companyId): array
+    public function lookups(int $companyId, ?int $branchId = null): array
     {
-        $taxBridgeFeature = $this->resolveFeatureResolutionForCompany($companyId, 'SALES_TAX_BRIDGE', false);
+        $taxBridgeFeature = $this->resolveFeatureResolutionForContext($companyId, $branchId, 'SALES_TAX_BRIDGE', false);
+        $taxBridgeDebugFeature = $this->resolveFeatureResolutionForContext($companyId, $branchId, 'SALES_TAX_BRIDGE_DEBUG_VIEW', false);
 
         $guideTypes = DB::table('sales.gre_guide_types')
             ->where('is_enabled', true)
@@ -49,9 +59,14 @@ class GreGuideService
             ->values()
             ->all();
 
-        $documentTypes = DB::table('sales.customer_types')
-            ->where('status', 1)
-            ->orderBy('id')
+        $documentTypesQuery = DB::table('sales.customer_types')
+            ->orderBy('id');
+
+        if ($this->columnExists('sales.customer_types', 'status')) {
+            $documentTypesQuery->where('status', 1);
+        }
+
+        $documentTypes = $documentTypesQuery
             ->get([
                 DB::raw("COALESCE(NULLIF(TRIM(CAST(sunat_code as text)), ''), '0') as code"),
                 'name',
@@ -59,14 +74,18 @@ class GreGuideService
             ->values()
             ->all();
 
-        $series = DB::table('core.series')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->whereRaw("UPPER(COALESCE(document_kind, '')) IN ('GUIDE', 'GRE', 'GUIA', 'GUIA_REMISION')")
-            ->orderBy('series')
-            ->get(['id', 'series', 'name'])
-            ->values()
-            ->all();
+        if ($this->tableExists('core.series')) {
+            $series = DB::table('core.series')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->whereRaw("UPPER(COALESCE(document_kind, '')) IN ('GUIDE', 'GRE', 'GUIA', 'GUIA_REMISION')")
+                ->orderBy('series')
+                ->get(['id', 'series', 'name'])
+                ->values()
+                ->all();
+        } else {
+            $series = [];
+        }
 
         if (empty($guideTypes)) {
             $guideTypes = [
@@ -115,6 +134,11 @@ class GreGuideService
                     'feature_code' => 'SALES_TAX_BRIDGE',
                     'is_enabled' => (bool) $taxBridgeFeature['is_enabled'],
                     'vertical_source' => $taxBridgeFeature['vertical_source'],
+                ],
+                [
+                    'feature_code' => 'SALES_TAX_BRIDGE_DEBUG_VIEW',
+                    'is_enabled' => (bool) $taxBridgeDebugFeature['is_enabled'],
+                    'vertical_source' => $taxBridgeDebugFeature['vertical_source'],
                 ],
             ],
         ];
@@ -319,6 +343,8 @@ class GreGuideService
                 'gg.sunat_cdr_desc',
                 'gg.raw_response',
                 DB::raw("CASE
+                    WHEN gg.status = 'ACCEPTED' THEN 'ACEPTADO'
+                    WHEN gg.status = 'REJECTED' THEN 'RECHAZADO'
                     WHEN COALESCE(gg.sunat_cdr_code,'') <> '' THEN
                         CASE WHEN COALESCE(NULLIF(regexp_replace(gg.sunat_cdr_code, '[^0-9]', '', 'g'), ''), '0')::int BETWEEN 2000 AND 3999 THEN 'RECHAZADO'
                              ELSE 'ACEPTADO'
@@ -328,6 +354,7 @@ class GreGuideService
                     ELSE 'SIN_ENVIO'
                  END as sunat_status"),
                 DB::raw("COALESCE(jsonb_array_length(COALESCE(gg.items, '[]'::jsonb)), 0) as item_count"),
+                'gg.destinatario',
                 'gg.sent_at',
                 'gg.cancelled_at',
                 'gg.created_at',
@@ -357,6 +384,12 @@ class GreGuideService
                             'updated_at' => now(),
                         ]);
                 }
+            }
+
+            // Parse destinatario JSON so frontend receives an object, not a string.
+            if (isset($row->destinatario) && is_string($row->destinatario)) {
+                $parsed = json_decode($row->destinatario, true);
+                $row->destinatario = is_array($parsed) ? $parsed : null;
             }
 
             unset($row->raw_response);
@@ -478,7 +511,7 @@ class GreGuideService
         return $this->show($companyId, $guideId) ?? [];
     }
 
-    public function send(int $companyId, int $guideId): array
+    public function send(int $companyId, int $guideId, ?int $userId = null, ?string $username = null): array
     {
         $row = DB::table('sales.gre_guides')
             ->where('company_id', $companyId)
@@ -527,6 +560,7 @@ class GreGuideService
                 'updated_at' => now(),
             ]);
 
+        $requestStartedAt = microtime(true);
         try {
             $httpReq = Http::timeout((int) ($config['timeout_seconds'] ?? 30))->acceptJson();
             if (($config['auth_scheme'] ?? '') === 'bearer' && !empty($config['token'])) {
@@ -552,18 +586,19 @@ class GreGuideService
             $cdrCode = $this->extractBridgeCode($decoded);
             $cdrDesc = $this->extractBridgeMessage($decoded);
 
+            $resolvedBridgeStatus = $this->resolveGreOutcomeStatus($cdrCode, $cdrDesc);
+
             if ($response->successful() && $bridgeRes === 0 && $ticket === null) {
                 $status = self::STATUS_ERROR;
                 $label = 'Error de envio';
             } elseif ($response->successful() && $ticket !== null && $ticket !== '') {
                 $status = self::STATUS_SENT;
                 $label = 'Ticket generado';
-            } elseif ($response->successful() && $cdrCode !== null && ctype_digit($cdrCode)) {
-                $cdrCodeInt = (int) $cdrCode;
-                if ($cdrCodeInt === 0 || $cdrCodeInt >= 4000) {
+            } elseif ($response->successful() && $resolvedBridgeStatus !== null) {
+                if ($resolvedBridgeStatus === self::STATUS_ACCEPTED) {
                     $status = self::STATUS_ACCEPTED;
                     $label = 'Guia aceptada';
-                } elseif ($cdrCodeInt >= 2000 && $cdrCodeInt <= 3999) {
+                } elseif ($resolvedBridgeStatus === self::STATUS_REJECTED) {
                     $status = self::STATUS_REJECTED;
                     $label = 'Guia rechazada';
                 }
@@ -587,6 +622,45 @@ class GreGuideService
                     'raw_response' => json_encode(is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]),
                     'updated_at' => now(),
                 ]);
+
+            if ($row->related_document_id === null && in_array($status, [self::STATUS_SENT, self::STATUS_ACCEPTED], true)) {
+                $this->applyManualGuideInventoryImpact($companyId, $row, $userId);
+            }
+
+            $this->taxBridgeAuditService->logDispatch(
+                $companyId,
+                $row->branch_id !== null ? (int) $row->branch_id : null,
+                self::AUDIT_TRIBUTARY_TYPE,
+                $guideId,
+                self::AUDIT_DOCUMENT_KIND,
+                (string) ($row->series ?? ''),
+                str_pad((string) ($row->number ?? 0), 8, '0', STR_PAD_LEFT),
+                [
+                    'bridge_mode' => (string) ($config['bridge_mode'] ?? 'PRODUCTION'),
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => (string) ($config['auth_scheme'] ?? 'none'),
+                ],
+                $payloadJson,
+                $raw !== '' ? $raw : null,
+                $response->status(),
+                round((microtime(true) - $requestStartedAt) * 1000, 2),
+                [
+                    'code' => $cdrCode,
+                    'ticket' => $ticket,
+                    'cdr_code' => $cdrCode,
+                    'message' => $cdrDesc,
+                ],
+                [
+                    'sunat_status' => $this->mapGreStatusToAuditSunatStatus($status),
+                    'error_kind' => $status === self::STATUS_ERROR ? 'BRIDGE_ERROR' : null,
+                    'error_message' => $status === self::STATUS_ERROR ? ($cdrDesc ?? 'Error de envio GRE') : null,
+                    'user_id' => $userId,
+                    'username' => $username,
+                    'is_retry' => true,
+                    'is_manual' => true,
+                    'attempt_number' => $this->nextGreAuditAttemptNumber($companyId, $guideId),
+                ]
+            );
 
             return [
                 'status' => $status,
@@ -612,11 +686,46 @@ class GreGuideService
                     'updated_at' => now(),
                 ]);
 
+            $this->taxBridgeAuditService->logDispatch(
+                $companyId,
+                $row->branch_id !== null ? (int) $row->branch_id : null,
+                self::AUDIT_TRIBUTARY_TYPE,
+                $guideId,
+                self::AUDIT_DOCUMENT_KIND,
+                (string) ($row->series ?? ''),
+                str_pad((string) ($row->number ?? 0), 8, '0', STR_PAD_LEFT),
+                [
+                    'bridge_mode' => (string) ($config['bridge_mode'] ?? 'PRODUCTION'),
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => (string) ($config['auth_scheme'] ?? 'none'),
+                ],
+                $payloadJson,
+                null,
+                null,
+                round((microtime(true) - $requestStartedAt) * 1000, 2),
+                [
+                    'code' => null,
+                    'ticket' => null,
+                    'cdr_code' => null,
+                    'message' => null,
+                ],
+                [
+                    'sunat_status' => 'ERROR',
+                    'error_kind' => 'EXCEPTION',
+                    'error_message' => $e->getMessage(),
+                    'user_id' => $userId,
+                    'username' => $username,
+                    'is_retry' => true,
+                    'is_manual' => true,
+                    'attempt_number' => $this->nextGreAuditAttemptNumber($companyId, $guideId),
+                ]
+            );
+
             throw new TaxBridgeException('No se pudo enviar la GRE: ' . $e->getMessage(), 500);
         }
     }
 
-    public function queryTicketStatus(int $companyId, int $guideId): array
+    public function queryTicketStatus(int $companyId, int $guideId, ?int $userId = null, ?string $username = null): array
     {
         $row = DB::table('sales.gre_guides')
             ->where('company_id', $companyId)
@@ -662,6 +771,7 @@ class GreGuideService
             $httpReq = $httpReq->withToken((string) $config['token']);
         }
 
+        $requestStartedAt = microtime(true);
         $response = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
         $raw = (string) $response->body();
         $decoded = json_decode($raw, true);
@@ -682,12 +792,12 @@ class GreGuideService
 
         $status = self::STATUS_SENT;
         $label = 'Ticket en proceso';
-        if ($cdrCode !== '' && ctype_digit($cdrCode)) {
-            $codeInt = (int) $cdrCode;
-            if ($codeInt === 0 || $codeInt >= 4000) {
+        $resolvedBridgeStatus = $this->resolveGreOutcomeStatus($cdrCode !== '' ? $cdrCode : null, $cdrDesc !== '' ? $cdrDesc : null);
+        if ($resolvedBridgeStatus !== null) {
+            if ($resolvedBridgeStatus === self::STATUS_ACCEPTED) {
                 $status = self::STATUS_ACCEPTED;
                 $label = 'Guia aceptada';
-            } elseif ($codeInt >= 2000 && $codeInt <= 3999) {
+            } elseif ($resolvedBridgeStatus === self::STATUS_REJECTED) {
                 $status = self::STATUS_REJECTED;
                 $label = 'Guia rechazada';
             }
@@ -707,6 +817,41 @@ class GreGuideService
                 'updated_at' => now(),
             ]);
 
+        $this->taxBridgeAuditService->logDispatch(
+            $companyId,
+            $row->branch_id !== null ? (int) $row->branch_id : null,
+            self::AUDIT_TRIBUTARY_TYPE,
+            $guideId,
+            self::AUDIT_DOCUMENT_KIND,
+            (string) ($row->series ?? ''),
+            str_pad((string) ($row->number ?? 0), 8, '0', STR_PAD_LEFT),
+            [
+                'bridge_mode' => (string) ($config['bridge_mode'] ?? 'PRODUCTION'),
+                'endpoint_url' => $endpoint,
+                'auth_scheme' => (string) ($config['auth_scheme'] ?? 'none'),
+            ],
+            $payloadJson,
+            $raw !== '' ? $raw : null,
+            $response->status(),
+            round((microtime(true) - $requestStartedAt) * 1000, 2),
+            [
+                'code' => $cdrCode !== '' ? $cdrCode : null,
+                'ticket' => $ticket,
+                'cdr_code' => $cdrCode !== '' ? $cdrCode : null,
+                'message' => $cdrDesc !== '' ? $cdrDesc : null,
+            ],
+            [
+                'sunat_status' => $this->mapGreStatusToAuditSunatStatus($status),
+                'error_kind' => $status === self::STATUS_REJECTED ? 'SUNAT_REJECTED' : null,
+                'error_message' => $status === self::STATUS_REJECTED ? ($cdrDesc !== '' ? $cdrDesc : null) : null,
+                'user_id' => $userId,
+                'username' => $username,
+                'is_retry' => true,
+                'is_manual' => true,
+                'attempt_number' => $this->nextGreAuditAttemptNumber($companyId, $guideId),
+            ]
+        );
+
         return [
             'status' => $status,
             'label' => $label,
@@ -721,6 +866,35 @@ class GreGuideService
                 'payload' => $payload,
             ],
         ];
+    }
+
+    private function nextGreAuditAttemptNumber(int $companyId, int $guideId): int
+    {
+        if (!$this->tableExists('sales.tax_bridge_audit_logs')) {
+            return 1;
+        }
+
+        $last = DB::table('sales.tax_bridge_audit_logs')
+            ->where('company_id', $companyId)
+            ->where('document_id', $guideId)
+            ->where('document_kind', self::AUDIT_DOCUMENT_KIND)
+            ->where('tributary_type', self::AUDIT_TRIBUTARY_TYPE)
+            ->max('attempt_number');
+
+        return max(1, (int) $last + 1);
+    }
+
+    private function mapGreStatusToAuditSunatStatus(string $status): string
+    {
+        $normalized = strtoupper(trim($status));
+
+        return match ($normalized) {
+            self::STATUS_ACCEPTED => 'ACCEPTED',
+            self::STATUS_REJECTED => 'REJECTED',
+            self::STATUS_SENT, self::STATUS_SENDING => 'PENDING_CONFIRMATION',
+            self::STATUS_ERROR => 'ERROR',
+            default => 'UNKNOWN',
+        };
     }
 
     private function buildCompanyStatusAuthBlock(int $companyId, array $config): array
@@ -820,7 +994,223 @@ class GreGuideService
                 'updated_at' => now(),
             ]);
 
+        if ($row->related_document_id === null) {
+            $this->reverseManualGuideInventoryImpact($companyId, (int) $guideId, $userId);
+        }
+
         return $this->show($companyId, $guideId) ?? [];
+    }
+
+    private function applyManualGuideInventoryImpact(int $companyId, object $guideRow, ?int $userId = null): void
+    {
+        if (!$this->tableExists('inventory.inventory_ledger') || !$this->tableExists('inventory.products') || !$this->tableExists('inventory.warehouses')) {
+            return;
+        }
+
+        $guideId = (int) ($guideRow->id ?? 0);
+        if ($guideId <= 0) {
+            return;
+        }
+
+        $alreadyApplied = DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', self::INVENTORY_REF_TYPE_GRE_GUIDE)
+            ->where('ref_id', $guideId)
+            ->exists();
+
+        if ($alreadyApplied) {
+            return;
+        }
+
+        $warehouseId = $this->resolveWarehouseIdForGuide($companyId, isset($guideRow->branch_id) ? (int) $guideRow->branch_id : null);
+        if ($warehouseId === null) {
+            return;
+        }
+
+        $allowNegativeStock = $this->resolveAllowNegativeStock($companyId);
+        $items = $this->decodeGuideItems($guideRow->items ?? null);
+        $movedAt = (string) (($guideRow->issue_date ?? '') !== '' ? $guideRow->issue_date : now());
+        $identifier = trim((string) ($guideRow->identifier ?? ('GRE #' . $guideId)));
+
+        foreach ($items as $index => $item) {
+            $qty = round((float) ($item['qty'] ?? 0), 8);
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $product = $this->resolveInventoryProductForGuideItem($companyId, $item);
+            if ($product === null) {
+                continue;
+            }
+
+            if (!$allowNegativeStock) {
+                $available = $this->resolveCurrentWarehouseStock($companyId, $warehouseId, (int) $product->id);
+                if ($available < $qty) {
+                    continue;
+                }
+            }
+
+            DB::table('inventory.inventory_ledger')->insert([
+                'company_id' => $companyId,
+                'warehouse_id' => $warehouseId,
+                'product_id' => (int) $product->id,
+                'lot_id' => null,
+                'movement_type' => 'OUT',
+                'quantity' => $qty,
+                'unit_cost' => (float) ($product->cost_price ?? 0),
+                'ref_type' => self::INVENTORY_REF_TYPE_GRE_GUIDE,
+                'ref_id' => $guideId,
+                'notes' => sprintf('Salida por guia manual %s (item %d)', $identifier, $index + 1),
+                'moved_at' => $movedAt,
+                'created_by' => $userId,
+            ]);
+        }
+    }
+
+    private function reverseManualGuideInventoryImpact(int $companyId, int $guideId, int $userId): void
+    {
+        if (!$this->tableExists('inventory.inventory_ledger')) {
+            return;
+        }
+
+        $rows = DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', self::INVENTORY_REF_TYPE_GRE_GUIDE)
+            ->where('ref_id', $guideId)
+            ->orderBy('id')
+            ->get();
+
+        foreach ($rows as $row) {
+            $qty = round((float) ($row->quantity ?? 0), 8);
+            if ($qty <= 0) {
+                continue;
+            }
+
+            DB::table('inventory.inventory_ledger')->insert([
+                'company_id' => $companyId,
+                'warehouse_id' => $row->warehouse_id !== null ? (int) $row->warehouse_id : null,
+                'product_id' => $row->product_id !== null ? (int) $row->product_id : null,
+                'lot_id' => null,
+                'movement_type' => 'IN',
+                'quantity' => $qty,
+                'unit_cost' => (float) ($row->unit_cost ?? 0),
+                'ref_type' => self::INVENTORY_REF_TYPE_GRE_GUIDE_CANCEL,
+                'ref_id' => $guideId,
+                'notes' => 'Reversa por anulacion de guia manual #' . $guideId,
+                'moved_at' => now(),
+                'created_by' => $userId,
+            ]);
+        }
+    }
+
+    private function decodeGuideItems($rawItems): array
+    {
+        if (is_array($rawItems)) {
+            return $rawItems;
+        }
+
+        if (is_string($rawItems) && trim($rawItems) !== '') {
+            $decoded = json_decode($rawItems, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    private function resolveWarehouseIdForGuide(int $companyId, ?int $branchId): ?int
+    {
+        $query = DB::table('inventory.warehouses')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->orderBy('id');
+
+        if ($branchId !== null) {
+            $warehouse = (clone $query)
+                ->where('branch_id', $branchId)
+                ->select('id')
+                ->first();
+
+            if ($warehouse && isset($warehouse->id)) {
+                return (int) $warehouse->id;
+            }
+        }
+
+        $fallback = $query->select('id')->first();
+        return $fallback && isset($fallback->id) ? (int) $fallback->id : null;
+    }
+
+    private function resolveAllowNegativeStock(int $companyId): bool
+    {
+        if (!$this->tableExists('inventory.inventory_settings')) {
+            return false;
+        }
+
+        $allow = DB::table('inventory.inventory_settings')
+            ->where('company_id', $companyId)
+            ->value('allow_negative_stock');
+
+        return (bool) $allow;
+    }
+
+    private function resolveCurrentWarehouseStock(int $companyId, int $warehouseId, int $productId): float
+    {
+        $inQty = (float) (DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('product_id', $productId)
+            ->where('movement_type', 'IN')
+            ->sum('quantity') ?? 0);
+
+        $outQty = (float) (DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('product_id', $productId)
+            ->where('movement_type', 'OUT')
+            ->sum('quantity') ?? 0);
+
+        return round($inQty - $outQty, 8);
+    }
+
+    private function resolveInventoryProductForGuideItem(int $companyId, array $item): ?object
+    {
+        $code = strtoupper(trim((string) ($item['code'] ?? '')));
+        $description = strtoupper(trim((string) ($item['description'] ?? '')));
+
+        $baseQuery = DB::table('inventory.products')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->where('is_stockable', true)
+            ->whereNull('deleted_at');
+
+        if ($code !== '') {
+            $byCode = (clone $baseQuery)
+                ->where(function ($q) use ($code) {
+                    $q->whereRaw("UPPER(TRIM(COALESCE(sku, ''))) = ?", [$code])
+                        ->orWhereRaw("UPPER(TRIM(COALESCE(barcode, ''))) = ?", [$code]);
+                })
+                ->select('id', 'cost_price', 'name')
+                ->first();
+
+            if ($byCode) {
+                return $byCode;
+            }
+        }
+
+        if ($description === '') {
+            return null;
+        }
+
+        $matches = (clone $baseQuery)
+            ->whereRaw("UPPER(TRIM(COALESCE(name, ''))) = ?", [$description])
+            ->select('id', 'cost_price', 'name')
+            ->limit(2)
+            ->get();
+
+        if ($matches->count() === 1) {
+            return $matches->first();
+        }
+
+        return null;
     }
 
     public function printableHtml(int $companyId, int $guideId, string $format = 'a4'): string
@@ -832,14 +1222,24 @@ class GreGuideService
 
         // Company data
         $company        = \DB::table('core.companies')->where('id', $companyId)->first(['tax_id', 'legal_name', 'trade_name', 'address']);
+        $companySettings = \DB::table('core.company_settings')->where('company_id', $companyId)->first(['address', 'logo_path']);
         $companyRuc     = htmlspecialchars((string) ($company->tax_id ?? ''), ENT_QUOTES, 'UTF-8');
         $companyName    = htmlspecialchars((string) ($company->legal_name ?? 'EMPRESA'), ENT_QUOTES, 'UTF-8');
         $companyTrade   = htmlspecialchars((string) ($company->trade_name ?? ''), ENT_QUOTES, 'UTF-8');
-        $companyAddress = htmlspecialchars((string) ($company->address ?? ''), ENT_QUOTES, 'UTF-8');
+        $companyAddress = htmlspecialchars((string) (($companySettings->address ?? '') ?: ($company->address ?? '')), ENT_QUOTES, 'UTF-8');
+
+        $logoPath = trim((string) ($companySettings->logo_path ?? ''));
+        $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
+        $logoHtmlA4 = $logoUrl !== ''
+            ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="Logo empresa" class="brand-logo" />'
+            : '';
+        $logoHtmlTicket = $logoUrl !== ''
+            ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="Logo" class="header-logo" />'
+            : '';
 
         $items        = $guide['items'] ?? [];
         $identifier   = htmlspecialchars((string) ($guide['identifier'] ?? ''), ENT_QUOTES, 'UTF-8');
-        $issueDate    = htmlspecialchars((string) ($guide['issue_date'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $issueDateText = htmlspecialchars($this->formatIssueDateTimeForPrint($guide), ENT_QUOTES, 'UTF-8');
         $transferDate = htmlspecialchars((string) ($guide['transfer_date'] ?? $guide['issue_date'] ?? ''), ENT_QUOTES, 'UTF-8');
         $destName     = htmlspecialchars((string) (($guide['destinatario']['name'] ?? '') ?: '-'), ENT_QUOTES, 'UTF-8');
         $destDoc      = htmlspecialchars((string) (($guide['destinatario']['doc_number'] ?? '') ?: '-'), ENT_QUOTES, 'UTF-8');
@@ -859,7 +1259,13 @@ class GreGuideService
             : '';
         $weightKg     = number_format((float) ($guide['weight_kg'] ?? 0), 3);
         $packages     = (int) ($guide['packages_count'] ?? 0);
-        $motivo       = htmlspecialchars((string) ($guide['motivo_traslado'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $motivoCodigo = (string) ($guide['motivo_traslado'] ?? '');
+        $motivoDesc   = $this->resolveTransferReasonDescription($motivoCodigo);
+        $motivo       = htmlspecialchars(
+            $motivoCodigo !== '' ? "{$motivoCodigo} - {$motivoDesc}" : '',
+            ENT_QUOTES,
+            'UTF-8'
+        );
         $guideType    = htmlspecialchars((string) ($guide['guide_type'] ?? 'REMITENTE'), ENT_QUOTES, 'UTF-8');
         $modeCode     = (string) ($guide['transport_mode_code'] ?? '02');
         $modoLabel    = $modeCode === '01' ? 'Publico' : 'Privado';
@@ -927,7 +1333,8 @@ class GreGuideService
   .print-bar { background: linear-gradient(120deg, #0f172a 0%, #1e3a8a 100%); color: #fff; padding: 6px 8px; font-family: sans-serif; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; border-radius: 8px; white-space: nowrap; }
   .print-bar .print-bar-title { font-weight: 700; letter-spacing: 0.2px; font-size: 11px; }
   .print-bar button { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; padding: 4px 10px; font-size: 10px; font-weight: 700; border-radius: 8px; cursor: pointer; }
-  .sheet { width: 80mm; margin: 0; padding: 2mm 3mm; }
+    .sheet { width: 80mm; margin: 0; padding: 2mm 3mm; }
+    .header-logo { width: 18mm; height: 18mm; object-fit: contain; border: 1px solid #111; border-radius: 4px; display: block; margin: 0 auto 1mm; background: #fff; }
   .divider { border-top: 1px dashed #000; margin: 2mm 0; opacity: 0.6; }
   .c { text-align: center; }
   .b { font-weight: bold; }
@@ -949,6 +1356,7 @@ class GreGuideService
   <button onclick="window.print()">Imprimir</button>
 </div>
 <div class="sheet">
+    {$logoHtmlTicket}
   <div class="c b" style="font-size:11px">{$companyName}</div>
   <div class="c" style="font-size:8px;color:#555">R.U.C. {$companyRuc}</div>
   <div class="c" style="font-size:8px;color:#555">{$companyAddress}</div>
@@ -962,7 +1370,7 @@ class GreGuideService
   <div class="info-row"><span class="info-label">DOC:</span><span class="info-value">{$destDoc}</span></div>
   <div class="divider"></div>
   <div class="section-title">Traslado</div>
-  <div class="info-row"><span class="info-label">EMISION:</span><span class="info-value">{$issueDate}</span></div>
+    <div class="info-row"><span class="info-label">EMISION:</span><span class="info-value">{$issueDateText}</span></div>
   <div class="info-row"><span class="info-label">TRASLADO:</span><span class="info-value">{$transferDate}</span></div>
   <div class="info-row"><span class="info-label">MOTIVO:</span><span class="info-value">{$motivo}</span></div>
   <div class="info-row"><span class="info-label">MODO:</span><span class="info-value">{$modoLabel}</span></div>
@@ -1041,6 +1449,7 @@ HTML;
   .sheet { width: 100%; border: 1.5px solid #1f2937; min-height: 277mm; padding: 8mm; }
   .head { display: grid; grid-template-columns: 1.1fr 1fr; gap: 10px; align-items: stretch; }
   .brand { border: 1px solid #9ca3af; border-radius: 8px; padding: 10px; }
+    .brand-logo { width: 82px; height: 82px; object-fit: contain; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; margin-bottom: 8px; }
   .brand h1 { margin: 0; font-size: 22px; letter-spacing: 0.6px; }
   .brand p { margin: 2px 0; font-size: 11px; color: #4b5563; }
   .voucher { border: 1px solid #9ca3af; border-radius: 8px; padding: 10px; text-align: center; }
@@ -1073,11 +1482,12 @@ HTML;
 <section class="sheet">
   <section class="head">
     <article class="brand">
+            {$logoHtmlA4}
       <h1>{$companyName}</h1>
       <p>R.U.C.: {$companyRuc}</p>
       <p>{$companyTrade}</p>
       <p>{$companyAddress}</p>
-      <p>Fecha emision: {$issueDate}</p>
+            <p>Fecha emision: {$issueDateText}</p>
     </article>
     <article class="voucher">
       <div class="ruc">R.U.C.: {$companyRuc}</div>
@@ -1095,7 +1505,7 @@ HTML;
       <p class="kv"><b>Direccion:</b> {$destAddress}</p>
     </article>
     <article>
-      <p class="kv"><b>Fecha Emision:</b> {$issueDate}</p>
+            <p class="kv"><b>Fecha Emision:</b> {$issueDateText}</p>
       <p class="kv"><b>Fecha Traslado:</b> {$transferDate}</p>
       <p class="kv"><b>Motivo:</b> {$motivo}</p>
     </article>
@@ -1281,6 +1691,122 @@ HTML;
         return $fallback[$code] ?? $code;
     }
 
+    private function resolveGreOutcomeStatus(?string $cdrCode, ?string $cdrDesc): ?string
+    {
+        $code = trim((string) ($cdrCode ?? ''));
+        if ($code !== '' && ctype_digit($code)) {
+            $codeInt = (int) $code;
+            if ($codeInt === 0 || $codeInt >= 4000) {
+                return self::STATUS_ACCEPTED;
+            }
+            if ($codeInt >= 2000 && $codeInt <= 3999) {
+                return self::STATUS_REJECTED;
+            }
+        }
+
+        $desc = mb_strtoupper(trim((string) ($cdrDesc ?? '')), 'UTF-8');
+        if ($desc === '') {
+            return null;
+        }
+
+        if (str_contains($desc, 'ACEPTAD') || str_contains($desc, 'APROBAD')) {
+            return self::STATUS_ACCEPTED;
+        }
+        if (str_contains($desc, 'RECHAZ')) {
+            return self::STATUS_REJECTED;
+        }
+
+        return null;
+    }
+
+    private function formatIssueDateTimeForPrint(array $guide): string
+    {
+        $issueDate = trim((string) ($guide['issue_date'] ?? ''));
+        $createdAt = trim((string) ($guide['created_at'] ?? ''));
+
+        try {
+            if ($issueDate !== '' && $createdAt !== '') {
+                $datePart = Carbon::parse($issueDate, 'America/Lima')->toDateString();
+                $timePart = Carbon::parse($createdAt)->setTimezone('America/Lima')->format('H:i:s');
+                return Carbon::parse($datePart . ' ' . $timePart, 'America/Lima')->format('d/m/Y H:i:s');
+            }
+
+            if ($issueDate !== '') {
+                return Carbon::parse($issueDate, 'America/Lima')->format('d/m/Y H:i:s');
+            }
+
+            if ($createdAt !== '') {
+                return Carbon::parse($createdAt)->setTimezone('America/Lima')->format('d/m/Y H:i:s');
+            }
+        } catch (\Throwable $e) {
+            // Fallback below.
+        }
+
+        return $issueDate !== '' ? $issueDate : ($createdAt !== '' ? $createdAt : '-');
+    }
+
+    private function resolveCompanyLogoUrl(?string $logoPath): string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return '';
+        }
+
+        if (preg_match('#^https?://#i', $raw) === 1 || str_starts_with($raw, 'data:image/')) {
+            return $raw;
+        }
+
+        $normalized = ltrim(str_replace('\\', '/', $raw), '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+        if (str_starts_with($normalized, 'public/')) {
+            $normalized = ltrim(substr($normalized, strlen('public/')), '/');
+        }
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        try {
+            if (Storage::disk('public')->exists($normalized)) {
+                $absolutePath = Storage::disk('public')->path($normalized);
+                $logoBinary = @file_get_contents($absolutePath);
+                if ($logoBinary !== false && $logoBinary !== '') {
+                    $mimeType = $this->resolveImageMimeType($absolutePath);
+                    if ($mimeType !== '') {
+                        return 'data:' . $mimeType . ';base64,' . base64_encode($logoBinary);
+                    }
+                }
+                return Storage::disk('public')->url($normalized);
+            }
+        } catch (\Throwable $e) {
+            // Ignore and fall back.
+        }
+
+        $appUrl = rtrim((string) config('app.url', ''), '/');
+        if ($appUrl !== '') {
+            return $appUrl . '/storage/' . ltrim($normalized, '/');
+        }
+
+        return '/storage/' . ltrim($normalized, '/');
+    }
+
+    private function resolveImageMimeType(string $path): string
+    {
+        $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+        return match ($extension) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            'bmp' => 'image/bmp',
+            default => '',
+        };
+    }
+
     private function resolveBridgeEndpoint(string $rawBaseUrl, string $methodName): string
     {
         $url = trim($rawBaseUrl);
@@ -1373,6 +1899,21 @@ HTML;
         return DB::table('information_schema.tables')
             ->where('table_schema', $schema)
             ->where('table_name', $table)
+            ->exists();
+    }
+
+    private function columnExists(string $qualifiedTable, string $column): bool
+    {
+        if (strpos($qualifiedTable, '.') === false) {
+            return Schema::hasColumn($qualifiedTable, $column);
+        }
+
+        [$schema, $table] = explode('.', $qualifiedTable, 2);
+
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->whereRaw('LOWER(column_name) = ?', [strtolower($column)])
             ->exists();
     }
 
@@ -1565,6 +2106,29 @@ HTML;
 
         $this->featureResolutionCache[$cacheKey] = $resolved;
         return $resolved;
+    }
+
+    private function resolveFeatureResolutionForContext(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled = false): array
+    {
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+
+        if ($branchId !== null && $this->tableExists('appcfg.branch_feature_toggles')) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
+                ->first(['is_enabled']);
+
+            if ($branchRow && $branchRow->is_enabled !== null) {
+                $base = $this->resolveFeatureResolutionForCompany($companyId, $normalizedFeatureCode, $defaultEnabled);
+                return [
+                    'is_enabled' => (bool) $branchRow->is_enabled,
+                    'vertical_source' => $base['vertical_source'] ?? null,
+                ];
+            }
+        }
+
+        return $this->resolveFeatureResolutionForCompany($companyId, $normalizedFeatureCode, $defaultEnabled);
     }
 
     private function resolveVerticalFeaturePreference(int $companyId, string $featureCode): array

@@ -10,8 +10,8 @@ class GetInventoryKardexUseCase
     {
     }
 
-    public function execute(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $limit): array
+    public function execute(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array
     {
-        return $this->repository->getKardex($companyId, $productId, $warehouseId, $dateFrom, $dateTo, $limit);
+        return $this->repository->getKardex($companyId, $productId, $warehouseId, $dateFrom, $dateTo, $perPage, $page);
     }
 }

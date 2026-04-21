@@ -40,6 +40,7 @@ class Kernel extends HttpKernel
 
         'api' => [
             'throttle:3000,1',
+            \App\Http\Middleware\CaptureEndpointLatency::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
     ];

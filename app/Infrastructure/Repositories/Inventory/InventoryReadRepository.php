@@ -128,12 +128,16 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
         return $query->get()->all();
     }
 
-    public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $limit): array
+    public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array
     {
-        $query = DB::table('inventory.inventory_ledger as il')
+        $baseQuery = DB::table('inventory.inventory_ledger as il')
             ->leftJoin('inventory.products as p', 'p.id', '=', 'il.product_id')
             ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'il.warehouse_id')
             ->leftJoin('inventory.product_lots as pl', 'pl.id', '=', 'il.lot_id')
+            ->leftJoin('inventory.stock_entries as se', function ($join) {
+                $join->on('se.id', '=', 'il.ref_id')
+                    ->whereIn('il.ref_type', ['STOCK_ENTRY', 'STOCK_ENTRY_EDIT']);
+            })
             ->select([
                 'il.id',
                 'il.warehouse_id',
@@ -146,32 +150,57 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
                 DB::raw('pl.lot_code'),
                 'il.movement_type',
                 'il.quantity',
-                'il.unit_cost',
-                DB::raw('(il.quantity * il.unit_cost) as line_total'),
+                DB::raw('COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0) as unit_cost'),
+                DB::raw('(il.quantity * COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0)) as line_total'),
+                DB::raw("SUM(CASE WHEN il.movement_type = 'IN' THEN il.quantity ELSE -il.quantity END)
+                    OVER (
+                        PARTITION BY il.company_id, il.warehouse_id, il.product_id
+                        ORDER BY il.moved_at ASC, il.id ASC
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) as stock_balance"),
                 'il.ref_type',
                 'il.ref_id',
+                DB::raw('se.entry_type as stock_entry_type'),
+                DB::raw('se.reference_no as stock_entry_reference_no'),
+                DB::raw('se.supplier_reference as stock_entry_supplier_reference'),
                 'il.notes',
                 'il.moved_at',
             ])
-            ->where('il.company_id', $companyId)
-            ->orderByDesc('il.moved_at')
-            ->orderByDesc('il.id')
-            ->limit($limit);
+            ->where('il.company_id', $companyId);
 
         if ($productId !== null && $productId !== '') {
-            $query->where('il.product_id', (int) $productId);
+            $baseQuery->where('il.product_id', (int) $productId);
         }
         if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('il.warehouse_id', (int) $warehouseId);
-        }
-        if ($dateFrom !== null && $dateFrom !== '') {
-            $query->where('il.moved_at', '>=', $dateFrom);
-        }
-        if ($dateTo !== null && $dateTo !== '') {
-            $query->where('il.moved_at', '<=', $dateTo . ' 23:59:59');
+            $baseQuery->where('il.warehouse_id', (int) $warehouseId);
         }
 
-        return $query->get()->all();
+        $query = DB::query()->fromSub($baseQuery, 'k');
+
+        if ($dateFrom !== null && $dateFrom !== '') {
+            $query->where('k.moved_at', '>=', $dateFrom);
+        }
+        if ($dateTo !== null && $dateTo !== '') {
+            $query->where('k.moved_at', '<=', $dateTo . ' 23:59:59');
+        }
+
+        $query
+            ->orderByDesc('k.id')
+            ->orderByDesc('k.moved_at');
+
+        $total  = (clone $query)->count();
+        $offset = ($page - 1) * $perPage;
+        $rows   = $query->offset($offset)->limit($perPage)->get()->all();
+
+        return [
+            'data' => $rows,
+            'meta' => [
+                'current_page' => $page,
+                'per_page'     => $perPage,
+                'total'        => $total,
+                'total_pages'  => (int) ceil($total / max(1, $perPage)),
+            ],
+        ];
     }
 
     private function ensureStockEntriesTables(): void

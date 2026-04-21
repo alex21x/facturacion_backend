@@ -4,6 +4,7 @@ namespace App\Infrastructure\Repositories\Inventory;
 
 use App\Domain\Inventory\Repositories\InventoryStockEntryRepositoryInterface;
 use App\Support\Inventory\OutboxEngine;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInterface
@@ -40,6 +41,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
         $hasMetadataColumn = in_array('metadata', $stockEntryColumns, true);
         $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
         $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
+        $hasItemMetadataColumn = in_array('metadata', $stockEntryItemColumns, true);
         $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
         $taxCategoriesTable = $hasItemTaxCategoryColumn ? $this->resolveTaxCategoriesTable() : null;
         $taxCategoryColumns = $taxCategoriesTable ? $this->tableColumns($taxCategoriesTable) : [];
@@ -76,6 +78,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             $hasMetadataColumn,
             $hasItemTaxCategoryColumn,
             $hasItemTaxRateColumn,
+            $hasItemMetadataColumn,
             $hasLedgerTaxRateColumn,
             $taxCategoriesTable,
             $taxCategoryStatusColumn,
@@ -85,14 +88,16 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true);
             $isPurchaseOrder = $entryType === 'PURCHASE_ORDER';
             $entryStatus = $isPurchaseOrder ? 'OPEN' : 'APPLIED';
+            $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
             $inventoryProEnabled = (bool) ($settings['enable_inventory_pro'] ?? false);
             $lotTrackingEnabled = $inventoryProEnabled && (bool) ($settings['enable_lot_tracking'] ?? false);
             $expiryTrackingEnabled = $lotTrackingEnabled && (bool) ($settings['enable_expiry_tracking'] ?? false);
 
+            $rawEntryMetadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
             $purchaseTaxMetadata = null;
             if ($entryType === 'PURCHASE') {
                 $purchaseTaxMetadata = $this->normalizePurchaseTributaryMetadata(
-                    is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [],
+                    $rawEntryMetadata,
                     $companyId,
                     $branchId,
                     $payload['items']
@@ -106,7 +111,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 'entry_type' => $entryType,
                 'reference_no' => $payload['reference_no'] ?? null,
                 'supplier_reference' => $payload['supplier_reference'] ?? null,
-                'issue_at' => $payload['issue_at'] ?? now(),
+                'issue_at' => $resolvedIssueAt,
                 'status' => $entryStatus,
                 'notes' => $payload['notes'] ?? null,
                 'created_by' => $authUser->id,
@@ -119,7 +124,10 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 $entryInsert['payment_method_id'] = isset($payload['payment_method_id']) ? (int) $payload['payment_method_id'] : null;
             }
             if ($hasMetadataColumn) {
-                $entryInsert['metadata'] = $purchaseTaxMetadata ? json_encode($purchaseTaxMetadata) : null;
+                $entryMetadata = $entryType === 'PURCHASE'
+                    ? $purchaseTaxMetadata
+                    : (!empty($rawEntryMetadata) ? $rawEntryMetadata : null);
+                $entryInsert['metadata'] = $entryMetadata ? json_encode($entryMetadata) : null;
             }
 
             $entryId = DB::table('inventory.stock_entries')->insertGetId($entryInsert);
@@ -217,7 +225,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                         'lot_code' => $lotCode,
                         'manufacture_at' => $manufactureAt,
                         'expires_at' => $expiresAt,
-                        'received_at' => $payload['issue_at'] ?? now(),
+                        'received_at' => $resolvedIssueAt,
                         'status' => 1,
                         'created_by' => $authUser->id,
                         'created_at' => now(),
@@ -266,6 +274,11 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                     $entryItemInsert['tax_rate'] = $taxRate;
                 }
 
+                if ($hasItemMetadataColumn) {
+                    $itemMetadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : null;
+                    $entryItemInsert['metadata'] = $itemMetadata ? json_encode($itemMetadata) : null;
+                }
+
                 DB::table('inventory.stock_entry_items')->insert($entryItemInsert);
 
                 if ($appliesStock) {
@@ -280,7 +293,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                         'ref_type' => 'STOCK_ENTRY',
                         'ref_id' => $entryId,
                         'notes' => $payload['notes'] ?? null,
-                        'moved_at' => $payload['issue_at'] ?? now(),
+                        'moved_at' => $resolvedIssueAt,
                         'created_by' => $authUser->id,
                     ];
 
@@ -310,7 +323,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                             'tax_rate' => $taxRate,
                             'ref_type' => 'STOCK_ENTRY',
                             'ref_id' => (int) $entryId,
-                            'moved_at' => $payload['issue_at'] ?? now(),
+                            'moved_at' => $resolvedIssueAt,
                             'created_by' => $authUser->id,
                         ]
                     );
@@ -335,6 +348,25 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 'metadata' => $purchaseTaxMetadata,
             ];
         });
+    }
+
+    private function resolveIssueAtForStorage($issueAt): string
+    {
+        if ($issueAt === null || $issueAt === '') {
+            return now('America/Lima')->format('Y-m-d H:i:sP');
+        }
+
+        $text = trim((string) $issueAt);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $text) === 1) {
+            $limaNow = now('America/Lima');
+            return $text . ' ' . $limaNow->format('H:i:sP');
+        }
+
+        try {
+            return Carbon::parse($text)->setTimezone('America/Lima')->format('Y-m-d H:i:sP');
+        } catch (\Throwable $e) {
+            return now('America/Lima')->format('Y-m-d H:i:sP');
+        }
     }
 
     private function inventorySettingsForCompany(int $companyId): array
@@ -472,10 +504,12 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
 
         DB::statement('ALTER TABLE inventory.stock_entry_items ADD COLUMN IF NOT EXISTS tax_category_id BIGINT NULL');
         DB::statement('ALTER TABLE inventory.stock_entry_items ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(8,4) NOT NULL DEFAULT 0');
+        DB::statement('ALTER TABLE inventory.stock_entry_items ADD COLUMN IF NOT EXISTS metadata JSONB NULL');
     }
 
     private function normalizePurchaseTributaryMetadata(array $rawMetadata, int $companyId, $branchId, array $items): ?array
     {
+        $metadata = $rawMetadata;
         $hasDetraccion = !empty($rawMetadata['has_detraccion']);
         $hasRetencion = !empty($rawMetadata['has_retencion']);
         $hasPercepcion = !empty($rawMetadata['has_percepcion']);
@@ -485,7 +519,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             throw new \RuntimeException('Solo se puede aplicar una condicion tributaria por compra.');
         }
         if ($selected === 0) {
-            return null;
+            return !empty($metadata) ? $metadata : null;
         }
 
         $grandTotal = 0.0;
@@ -499,11 +533,9 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
         }
         $grandTotal = round($grandTotal, 2);
 
-        $metadata = [
-            'has_detraccion' => $hasDetraccion,
-            'has_retencion' => $hasRetencion,
-            'has_percepcion' => $hasPercepcion,
-        ];
+        $metadata['has_detraccion'] = $hasDetraccion;
+        $metadata['has_retencion'] = $hasRetencion;
+        $metadata['has_percepcion'] = $hasPercepcion;
 
         if ($hasDetraccion) {
             if (!($this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED')

@@ -4,13 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\Sales\TaxBridge\GreGuideService;
+use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class GreGuideController extends Controller
 {
-    public function __construct(private GreGuideService $service)
+    public function __construct(
+        private GreGuideService $service,
+        private TaxBridgeAuditService $auditService
+    )
     {
     }
 
@@ -56,12 +61,31 @@ class GreGuideController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchId = $request->query('branch_id', $authUser->branch_id);
+
+        if ($branchId !== null && $branchId !== '') {
+            $branchId = (int) $branchId;
+        } else {
+            $branchId = null;
+        }
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        return response()->json($this->service->lookups($companyId), 200);
+        if ($branchId !== null) {
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json(['message' => 'Invalid branch scope'], 422);
+            }
+        }
+
+        return response()->json($this->service->lookups($companyId, $branchId), 200);
     }
 
     public function ubigeos(Request $request)
@@ -155,6 +179,46 @@ class GreGuideController extends Controller
         }
 
         return response()->json($guide, 200);
+    }
+
+    public function taxBridgeAuditHistory(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $guide = DB::table('sales.gre_guides')
+            ->where('id', $id)
+            ->select('id', 'company_id', 'branch_id')
+            ->first();
+
+        if (!$guide) {
+            return response()->json(['message' => 'Guia GRE no encontrada'], 404);
+        }
+
+        if ((int) $guide->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $traceabilityGate = $this->ensureTraceabilityFeatureEnabled(
+            $companyId,
+            $guide->branch_id !== null ? (int) $guide->branch_id : null
+        );
+        if ($traceabilityGate !== null) {
+            return $traceabilityGate;
+        }
+
+        $limit = min((int) $request->query('limit', 50), 500);
+        $history = $this->auditService->getDocumentHistoryByScope($id, 'GRE_GUIDE', 'GRE', $limit);
+
+        return response()->json([
+            'guide_id' => $id,
+            'count' => count($history),
+            'logs' => $history,
+        ]);
     }
 
     public function store(Request $request)
@@ -267,7 +331,7 @@ class GreGuideController extends Controller
         }
 
         try {
-            $result = $this->service->send($companyId, $id);
+            $result = $this->service->send($companyId, $id, (int) $authUser->id, (string) ($authUser->username ?? ''));
             return response()->json([
                 'message' => 'Guia procesada',
                 'guide_id' => $id,
@@ -295,7 +359,7 @@ class GreGuideController extends Controller
         }
 
         try {
-            $result = $this->service->queryTicketStatus($companyId, $id);
+            $result = $this->service->queryTicketStatus($companyId, $id, (int) $authUser->id, (string) ($authUser->username ?? ''));
             return response()->json([
                 'message' => 'Ticket procesado',
                 'guide_id' => $id,
@@ -360,5 +424,43 @@ class GreGuideController extends Controller
         } catch (TaxBridgeException $e) {
             return response($e->getMessage(), $e->httpStatus());
         }
+    }
+
+    private function ensureTraceabilityFeatureEnabled(int $companyId, ?int $branchId)
+    {
+        $featureCode = 'SALES_TAX_BRIDGE_DEBUG_VIEW';
+
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->select('is_enabled')
+                ->first();
+
+            if ($branchRow && isset($branchRow->is_enabled)) {
+                if (!(bool) $branchRow->is_enabled) {
+                    return response()->json([
+                        'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
+                    ], 403);
+                }
+
+                return null;
+            }
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->select('is_enabled')
+            ->first();
+
+        if (!$companyRow || !(bool) ($companyRow->is_enabled ?? false)) {
+            return response()->json([
+                'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
+            ], 403);
+        }
+
+        return null;
     }
 }

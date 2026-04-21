@@ -10,5 +10,5 @@ interface InventoryReadRepositoryInterface
 
     public function getStockEntries(int $companyId, $warehouseId, $entryType, int $limit): array;
 
-    public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $limit): array;
+    public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array;
 }

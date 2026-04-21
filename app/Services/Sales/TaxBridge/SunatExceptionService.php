@@ -30,7 +30,6 @@ class SunatExceptionService
             ->where('d.company_id', $companyId)
             ->where('d.status', 'ISSUED')
             ->whereNotIn(DB::raw("UPPER(COALESCE(d.metadata->>'sunat_status',''))"), self::FINAL_SUNAT_STATUSES)
-            ->whereIn(DB::raw('UPPER(d.document_kind)'), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
             ->select([
                 'd.id',
                 'd.branch_id',
@@ -50,6 +49,8 @@ class SunatExceptionService
                 DB::raw("COALESCE((d.metadata->>'sunat_needs_manual_confirmation')::boolean, false) as needs_manual_confirmation"),
                 DB::raw("GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - d.updated_at)) / 3600))::int as pending_hours"),
             ]);
+
+            $this->applyTributaryDocumentKindFilter($query, 'd.document_kind');
 
         if ($branchId !== null) {
             $query->where('d.branch_id', $branchId);
@@ -142,7 +143,6 @@ class SunatExceptionService
     ): array {
         $query = DB::table('sales.commercial_documents as d')
             ->where('d.company_id', $companyId)
-            ->whereIn(DB::raw('UPPER(d.document_kind)'), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
             ->where('d.status', 'ISSUED')
             ->select([
                 'd.id',
@@ -157,6 +157,8 @@ class SunatExceptionService
                 DB::raw("COALESCE((d.metadata->>'inventory_sunat_settled')::boolean, false) as inventory_sunat_settled"),
                 DB::raw("COALESCE((d.metadata->>'inventory_pending_sunat')::boolean, false) as inventory_pending_sunat"),
             ]);
+
+            $this->applyTributaryDocumentKindFilter($query, 'd.document_kind');
 
         if ($branchId !== null) {
             $query->where('d.branch_id', $branchId);
@@ -224,6 +226,18 @@ class SunatExceptionService
             'summary' => $summary,
             'data' => $mismatches,
         ];
+    }
+
+    private function applyTributaryDocumentKindFilter($query, string $column): void
+    {
+        $query->where(function ($nested) use ($column) {
+            $nested->whereRaw("UPPER($column) = 'INVOICE'")
+                ->orWhereRaw("UPPER($column) = 'RECEIPT'")
+                ->orWhereRaw("UPPER($column) = 'CREDIT_NOTE'")
+                ->orWhereRaw("UPPER($column) = 'DEBIT_NOTE'")
+                ->orWhereRaw("UPPER($column) LIKE 'CREDIT_NOTE_%'")
+                ->orWhereRaw("UPPER($column) LIKE 'DEBIT_NOTE_%'");
+        });
     }
 
     public function manualConfirm(

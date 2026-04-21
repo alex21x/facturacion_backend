@@ -27,7 +27,10 @@ class DailySummaryService
     public const STATUS_REJECTED = 'REJECTED';
     public const STATUS_ERROR    = 'ERROR';
 
-    public function __construct(private TaxBridgeService $taxBridgeService)
+    public function __construct(
+        private TaxBridgeService $taxBridgeService,
+        private TaxBridgeAuditService $auditService
+    )
     {
     }
 
@@ -415,7 +418,7 @@ class DailySummaryService
         $effectiveBranchId = $branchId ?? ($document->branch_id !== null ? (int) $document->branch_id : null);
         $effectiveSummaryDate = $summaryDate !== null && trim($summaryDate) !== ''
             ? trim($summaryDate)
-            : now()->toDateString();
+            : now('America/Lima')->toDateString();
 
         $openDraftSummary = DB::table('sales.daily_summaries')
             ->where('company_id', $companyId)
@@ -564,6 +567,10 @@ class DailySummaryService
             );
         }
 
+        $responseStartAt = null;
+        $payloadJson = '{}';
+        $endpoint = '';
+
         try {
             $branchId = $summary->branch_id !== null ? (int) $summary->branch_id : null;
             $config   = $this->resolveConfig($companyId, $branchId);
@@ -605,6 +612,7 @@ class DailySummaryService
                 $httpReq = $httpReq->withToken($config['token']);
             }
 
+            $responseStartAt = microtime(true);
             $response = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
 
             $raw     = (string) $response->body();
@@ -621,6 +629,7 @@ class DailySummaryService
                 $decoded,
                 $raw
             );
+            $responseTimeMs = $responseStartAt !== null ? round((microtime(true) - $responseStartAt) * 1000, 2) : null;
             $diagnostic = $this->summarizeSummaryDiagnostic($decoded, (string) ($cdrCode ?? ''), (string) ($cdrDesc ?? ''));
 
             $responseData = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)];
@@ -653,6 +662,38 @@ class DailySummaryService
                 'status'       => $status,
                 'http_code'    => $response->status(),
             ]);
+
+            $this->auditService->logDispatch(
+                $companyId,
+                $branchId,
+                $summaryType === self::TYPE_DECLARATION ? 'SUMMARY_RC' : 'SUMMARY_RA',
+                null,
+                $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA',
+                (string) ($summary->summary_date ?? ''),
+                (string) ($summary->identifier ?? $summaryId),
+                [
+                    'bridge_mode' => $config['bridge_mode'] ?? 'PRODUCTION',
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => $config['auth_scheme'] ?? 'none',
+                ],
+                $payloadJson,
+                substr($raw, 0, 100000),
+                (int) $response->status(),
+                $responseTimeMs,
+                [
+                    'code' => $diagnostic['code'],
+                    'ticket' => $ticket,
+                    'cdr_code' => $cdrCode,
+                    'message' => $diagnostic['message'] ?: $cdrDesc,
+                ],
+                [
+                    'sunat_status' => $status,
+                    'error_kind' => !$response->successful() ? 'HTTP_ERROR' : null,
+                    'attempt_number' => 1,
+                    'is_retry' => false,
+                    'is_manual' => true,
+                ]
+            );
 
             return [
                 'status'           => $status,
@@ -698,6 +739,40 @@ class DailySummaryService
                     'exception'  => $updateError->getMessage(),
                 ]);
             }
+
+            $summaryType = (int) ($summary->summary_type ?? self::TYPE_DECLARATION);
+            $this->auditService->logDispatch(
+                $companyId,
+                isset($summary->branch_id) && $summary->branch_id !== null ? (int) $summary->branch_id : null,
+                $summaryType === self::TYPE_DECLARATION ? 'SUMMARY_RC' : 'SUMMARY_RA',
+                null,
+                $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA',
+                (string) ($summary->summary_date ?? ''),
+                (string) ($summary->identifier ?? $summaryId),
+                [
+                    'bridge_mode' => 'UNKNOWN',
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => 'none',
+                ],
+                $payloadJson,
+                null,
+                null,
+                null,
+                [
+                    'code' => null,
+                    'ticket' => null,
+                    'cdr_code' => null,
+                    'message' => substr($e->getMessage(), 0, 400),
+                ],
+                [
+                    'sunat_status' => self::STATUS_ERROR,
+                    'error_kind' => 'NETWORK_ERROR',
+                    'error_message' => $e->getMessage(),
+                    'attempt_number' => 1,
+                    'is_retry' => false,
+                    'is_manual' => true,
+                ]
+            );
 
             throw new TaxBridgeException(
                 'No se pudo preparar o enviar el resumen. Revisa la configuracion tributaria y los datos relacionados al comprobante.',

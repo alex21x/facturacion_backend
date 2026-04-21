@@ -11,13 +11,36 @@ class TaxBridgeService
 {
     private const RECONCILE_WARN_ATTEMPTS = 8;
 
-    public function __construct(private TaxBridgePayloadBuilder $payloadBuilder)
+    public function __construct(
+        private TaxBridgePayloadBuilder $payloadBuilder,
+        private TaxBridgeAuditService $auditService
+    )
     {
     }
 
-    public function supportsDocumentKind(string $documentKind): bool
+    public function supportsDocumentKind(string $documentKind, ?int $documentKindId = null): bool
     {
-        return in_array(strtoupper($documentKind), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
+        if ($documentKindId !== null && $documentKindId > 0) {
+            $catalogCode = DB::table('sales.document_kinds')
+                ->where('id', $documentKindId)
+                ->value('code');
+
+            if (is_string($catalogCode) && trim($catalogCode) !== '') {
+                $documentKind = $catalogCode;
+            }
+        }
+
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized === 'CREDIT_NOTE' || str_starts_with($normalized, 'CREDIT_NOTE_')) {
+            return true;
+        }
+
+        if ($normalized === 'DEBIT_NOTE' || str_starts_with($normalized, 'DEBIT_NOTE_')) {
+            return true;
+        }
+
+        return in_array($normalized, ['INVOICE', 'RECEIPT'], true);
     }
 
     public function dispatchOnIssue(int $companyId, ?int $branchId, int $documentId): void
@@ -43,7 +66,39 @@ class TaxBridgeService
             return;
         }
 
+        if ((bool) ($config['force_async_on_issue'] ?? false)) {
+            $this->updateDocumentTaxStatus($companyId, $documentId, [
+                'sunat_status' => 'QUEUED',
+                'sunat_status_label' => 'En cola de envio',
+                'sunat_bridge_mode' => $config['bridge_mode'],
+                'sunat_bridge_note' => 'Envio SUNAT programado en segundo plano',
+            ]);
+
+            app()->terminating(function () use ($companyId, $documentId, $config): void {
+                try {
+                    $this->performDispatch($companyId, $documentId, $config, false);
+                } catch (\Throwable $e) {
+                    Log::error('TaxBridge async dispatch failed', [
+                        'company_id' => $companyId,
+                        'document_id' => $documentId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            });
+
+            return;
+        }
+
         $this->performDispatch($companyId, $documentId, $config, false);
+    }
+
+    public function deferDispatch(int $companyId, int $documentId): void
+    {
+        $this->updateDocumentTaxStatus($companyId, $documentId, [
+            'sunat_status'       => 'PENDING_MANUAL',
+            'sunat_status_label' => 'Pendiente envío',
+            'sunat_bridge_note'  => 'Envío diferido por el usuario',
+        ]);
     }
 
     public function retry(int $companyId, int $documentId): array
@@ -57,7 +112,7 @@ class TaxBridgeService
             throw new TaxBridgeException('Document not found', 404);
         }
 
-        if (!$this->supportsDocumentKind((string) $document->document_kind)) {
+        if (!$this->supportsDocumentKind((string) $document->document_kind, isset($document->document_kind_id) ? (int) $document->document_kind_id : null)) {
             throw new TaxBridgeException('Document type is not tributary (INVOICE/RECEIPT/CREDIT_NOTE/DEBIT_NOTE)', 422);
         }
 
@@ -105,7 +160,7 @@ class TaxBridgeService
             throw new TaxBridgeException('Document not found', 404);
         }
 
-        if (!$this->supportsDocumentKind((string) $document->document_kind)) {
+        if (!$this->supportsDocumentKind((string) $document->document_kind, isset($document->document_kind_id) ? (int) $document->document_kind_id : null)) {
             throw new TaxBridgeException('Document type is not tributary (INVOICE/RECEIPT/CREDIT_NOTE/DEBIT_NOTE)', 422);
         }
 
@@ -215,6 +270,7 @@ class TaxBridgeService
         ]);
 
         try {
+            $requestStartedAt = microtime(true);
             $request = Http::timeout((int) $config['timeout_seconds'])->acceptJson();
 
             if ($config['auth_scheme'] === 'bearer' && $config['token'] !== '') {
@@ -224,6 +280,7 @@ class TaxBridgeService
             $response = $request->asForm()->post($endpoint, [
                 'datosJSON' => $payloadJson,
             ]);
+            $responseTimeMs = round((microtime(true) - $requestStartedAt) * 1000, 2);
 
             $raw = (string) $response->body();
             $decoded = json_decode($raw, true);
@@ -288,6 +345,38 @@ class TaxBridgeService
                 $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
             }
 
+            $this->auditService->logDispatch(
+                $companyId,
+                $document->branch_id !== null ? (int) $document->branch_id : null,
+                'SUNAT_DIRECT',
+                (int) $documentId,
+                isset($document->document_kind) ? (string) $document->document_kind : null,
+                isset($document->series) ? (string) $document->series : null,
+                isset($document->number) ? (string) $document->number : null,
+                [
+                    'bridge_mode' => $config['bridge_mode'] ?? 'PRODUCTION',
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => $config['auth_scheme'] ?? 'none',
+                ],
+                $payloadJson,
+                substr($raw, 0, 100000),
+                (int) $response->status(),
+                $responseTimeMs,
+                [
+                    'code' => $finalBridgeCode !== null ? (string) $finalBridgeCode : ($bridgeResCode !== null ? (string) $bridgeResCode : null),
+                    'ticket' => $bridgeTicket,
+                    'cdr_code' => $finalBridgeCode !== null ? (string) $finalBridgeCode : null,
+                    'message' => $bridgeMessage,
+                ],
+                [
+                    'sunat_status' => $status,
+                    'error_kind' => !$response->successful() ? 'HTTP_ERROR' : null,
+                    'attempt_number' => 1,
+                    'is_retry' => false,
+                    'is_manual' => true,
+                ]
+            );
+
             return [
                 'status' => $status,
                 'label' => $label,
@@ -312,6 +401,39 @@ class TaxBridgeService
                 'sunat_void_response' => ['error' => substr($e->getMessage(), 0, 500)],
             ]);
 
+            $this->auditService->logDispatch(
+                $companyId,
+                $document->branch_id !== null ? (int) $document->branch_id : null,
+                'SUNAT_DIRECT',
+                (int) $documentId,
+                isset($document->document_kind) ? (string) $document->document_kind : null,
+                isset($document->series) ? (string) $document->series : null,
+                isset($document->number) ? (string) $document->number : null,
+                [
+                    'bridge_mode' => $config['bridge_mode'] ?? 'PRODUCTION',
+                    'endpoint_url' => $endpoint,
+                    'auth_scheme' => $config['auth_scheme'] ?? 'none',
+                ],
+                $payloadJson,
+                null,
+                null,
+                null,
+                [
+                    'code' => null,
+                    'ticket' => null,
+                    'cdr_code' => null,
+                    'message' => substr($e->getMessage(), 0, 400),
+                ],
+                [
+                    'sunat_status' => 'NETWORK_ERROR',
+                    'error_kind' => 'NETWORK_ERROR',
+                    'error_message' => $e->getMessage(),
+                    'attempt_number' => 1,
+                    'is_retry' => false,
+                    'is_manual' => true,
+                ]
+            );
+
             throw new TaxBridgeException('SUNAT void communication failed: ' . $e->getMessage(), 500);
         }
     }
@@ -321,7 +443,7 @@ class TaxBridgeService
         $document = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
             ->where('company_id', $companyId)
-            ->select('metadata')
+            ->select('id', 'branch_id', 'document_kind', 'document_kind_id', 'metadata')
             ->first();
 
         if (!$document) {
@@ -329,16 +451,78 @@ class TaxBridgeService
         }
 
         $metadata = json_decode((string) ($document->metadata ?? '{}'), true);
-        if (!is_array($metadata)) {
-            return null;
-        }
+        $metadata = is_array($metadata) ? $metadata : [];
 
         $request = is_array($metadata['sunat_bridge_request'] ?? null)
             ? $metadata['sunat_bridge_request']
             : null;
 
         if ($request === null && empty($metadata['sunat_bridge_endpoint'])) {
-            return null;
+            try {
+                if ($this->supportsDocumentKind(
+                    (string) ($document->document_kind ?? ''),
+                    isset($document->document_kind_id) ? (int) $document->document_kind_id : null
+                )) {
+                    $preview = $this->preview($companyId, $documentId);
+
+                    return [
+                        'bridge_mode' => (string) ($metadata['sunat_bridge_mode'] ?? ($preview['bridge_mode'] ?? '')),
+                        'sunat_status' => (string) ($metadata['sunat_status'] ?? ''),
+                        'sunat_status_label' => (string) ($metadata['sunat_status_label'] ?? ''),
+                        'endpoint' => (string) ($metadata['sunat_bridge_endpoint'] ?? ($preview['endpoint'] ?? '')),
+                        'method' => (string) ($metadata['sunat_bridge_method'] ?? ($preview['method'] ?? 'POST')),
+                        'content_type' => (string) ($metadata['sunat_bridge_content_type'] ?? ($preview['content_type'] ?? 'application/x-www-form-urlencoded')),
+                        'form_key' => (string) ($preview['form_key'] ?? 'datosJSON'),
+                        'payload' => $preview['payload'] ?? null,
+                        'payload_length' => $preview['payload_length'] ?? null,
+                        'payload_sha1' => $preview['payload_sha1'] ?? null,
+                        'bridge_http_code' => $metadata['sunat_bridge_http_code'] ?? null,
+                        'bridge_response' => $metadata['sunat_bridge_response'] ?? null,
+                        'sunat_ticket' => $metadata['sunat_ticket'] ?? null,
+                        'bridge_note' => (string) ($metadata['sunat_bridge_note'] ?? 'Preview actual generado: no habia dispatch persistido para este comprobante'),
+                        'sunat_error_code' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['code'],
+                        'sunat_error_message' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['message'],
+                    ];
+                }
+            } catch (\Throwable $e) {
+                return [
+                    'bridge_mode' => (string) ($metadata['sunat_bridge_mode'] ?? ''),
+                    'sunat_status' => (string) ($metadata['sunat_status'] ?? ''),
+                    'sunat_status_label' => (string) ($metadata['sunat_status_label'] ?? ''),
+                    'endpoint' => (string) ($metadata['sunat_bridge_endpoint'] ?? ''),
+                    'method' => (string) ($metadata['sunat_bridge_method'] ?? 'POST'),
+                    'content_type' => (string) ($metadata['sunat_bridge_content_type'] ?? 'application/x-www-form-urlencoded'),
+                    'form_key' => 'datosJSON',
+                    'payload' => null,
+                    'payload_length' => null,
+                    'payload_sha1' => null,
+                    'bridge_http_code' => $metadata['sunat_bridge_http_code'] ?? null,
+                    'bridge_response' => $metadata['sunat_bridge_response'] ?? null,
+                    'sunat_ticket' => $metadata['sunat_ticket'] ?? null,
+                    'bridge_note' => 'No existe dispatch persistido y no se pudo reconstruir el preview actual: ' . substr($e->getMessage(), 0, 220),
+                    'sunat_error_code' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['code'],
+                    'sunat_error_message' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['message'],
+                ];
+            }
+
+            return [
+                'bridge_mode' => (string) ($metadata['sunat_bridge_mode'] ?? ''),
+                'sunat_status' => (string) ($metadata['sunat_status'] ?? ''),
+                'sunat_status_label' => (string) ($metadata['sunat_status_label'] ?? ''),
+                'endpoint' => (string) ($metadata['sunat_bridge_endpoint'] ?? ''),
+                'method' => (string) ($metadata['sunat_bridge_method'] ?? 'POST'),
+                'content_type' => (string) ($metadata['sunat_bridge_content_type'] ?? 'application/x-www-form-urlencoded'),
+                'form_key' => 'datosJSON',
+                'payload' => null,
+                'payload_length' => null,
+                'payload_sha1' => null,
+                'bridge_http_code' => $metadata['sunat_bridge_http_code'] ?? null,
+                'bridge_response' => $metadata['sunat_bridge_response'] ?? null,
+                'sunat_ticket' => $metadata['sunat_ticket'] ?? null,
+                'bridge_note' => (string) ($metadata['sunat_bridge_note'] ?? 'No existe dispatch persistido para este comprobante'),
+                'sunat_error_code' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['code'],
+                'sunat_error_message' => $this->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null)['message'],
+            ];
         }
 
         return [
@@ -441,7 +625,7 @@ class TaxBridgeService
         $document = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
             ->where('company_id', $companyId)
-            ->select('id', 'issue_at')
+            ->select('id', 'issue_at', 'branch_id', 'document_kind', 'series', 'number')
             ->first();
 
         if (!$document) {
@@ -536,6 +720,7 @@ class TaxBridgeService
         ]);
 
         try {
+            $requestStartedAt = microtime(true);
             $request = Http::timeout((int) $config['timeout_seconds'])->acceptJson();
 
             if ($config['auth_scheme'] === 'bearer' && $config['token'] !== '') {
@@ -604,6 +789,7 @@ class TaxBridgeService
             }
 
             $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, $status === 'PENDING_CONFIRMATION', $isRetry, !$response->successful() ? 'HTTP_ERROR' : null);
+            $responseTimeMs = round((microtime(true) - $requestStartedAt) * 1000, 2);
 
             $this->updateDocumentTaxStatus($companyId, $documentId, [
                 'sunat_status' => $status,
@@ -625,6 +811,34 @@ class TaxBridgeService
             if ($status === 'ACCEPTED') {
                 $this->settleInventoryForAcceptedDocumentIfNeeded($companyId, $documentId);
             }
+
+            $this->auditService->logDispatch(
+                $companyId,
+                $document->branch_id !== null ? (int) $document->branch_id : null,
+                'SUNAT_DIRECT',
+                (int) $documentId,
+                isset($document->document_kind) ? (string) $document->document_kind : null,
+                isset($document->series) ? (string) $document->series : null,
+                isset($document->number) ? (string) $document->number : null,
+                $config,
+                $payloadJson,
+                substr($raw, 0, 100000),
+                (int) $response->status(),
+                $responseTimeMs,
+                [
+                    'code' => $finalBridgeCode !== null ? (string) $finalBridgeCode : ($bridgeResCode !== null ? (string) $bridgeResCode : null),
+                    'ticket' => $bridgeTicket,
+                    'cdr_code' => $finalBridgeCode !== null ? (string) $finalBridgeCode : null,
+                    'message' => $bridgeMessage,
+                ],
+                [
+                    'sunat_status' => $status,
+                    'error_kind' => !$response->successful() ? 'HTTP_ERROR' : null,
+                    'attempt_number' => (int) ($attemptMeta['attempts'] ?? 1),
+                    'is_retry' => $isRetry,
+                    'is_manual' => $isRetry,
+                ]
+            );
 
             return [
                 'status' => $status,
@@ -661,6 +875,35 @@ class TaxBridgeService
                 'sunat_bridge_note' => $attemptMeta['note'] . ' | ' . substr($e->getMessage(), 0, 350),
             ]);
 
+            $this->auditService->logDispatch(
+                $companyId,
+                $document->branch_id !== null ? (int) $document->branch_id : null,
+                'SUNAT_DIRECT',
+                (int) $documentId,
+                isset($document->document_kind) ? (string) $document->document_kind : null,
+                isset($document->series) ? (string) $document->series : null,
+                isset($document->number) ? (string) $document->number : null,
+                $config,
+                $payloadJson,
+                null,
+                null,
+                null,
+                [
+                    'code' => null,
+                    'ticket' => null,
+                    'cdr_code' => null,
+                    'message' => substr($e->getMessage(), 0, 400),
+                ],
+                [
+                    'sunat_status' => 'PENDING_CONFIRMATION',
+                    'error_kind' => 'NETWORK_ERROR',
+                    'error_message' => $e->getMessage(),
+                    'attempt_number' => (int) ($attemptMeta['attempts'] ?? 1),
+                    'is_retry' => $isRetry,
+                    'is_manual' => $isRetry,
+                ]
+            );
+
             if ($isRetry) {
                 throw new TaxBridgeException('Tax bridge retry failed: ' . $e->getMessage(), 500);
             }
@@ -690,7 +933,6 @@ class TaxBridgeService
 
         $query = DB::table('sales.commercial_documents')
             ->where('status', 'ISSUED')
-            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
             ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
             ->where(function ($q) {
                 $q->whereRaw("(metadata->>'sunat_reconcile_auto_enabled') IS NULL")
@@ -700,6 +942,8 @@ class TaxBridgeService
                 $q->whereRaw("(metadata->>'sunat_reconcile_next_at') IS NULL")
                   ->orWhereRaw("(metadata->>'sunat_reconcile_next_at')::timestamp <= NOW()");
             });
+
+                $this->applyTributaryDocumentKindFilter($query, 'document_kind');
 
         if (!empty($disabledCompanyIds)) {
             $query->whereNotIn('company_id', $disabledCompanyIds);
@@ -745,27 +989,28 @@ class TaxBridgeService
     {
         $config = $this->resolveConfig($companyId, null);
 
-        $pendingCount = DB::table('sales.commercial_documents')
+        $pendingQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->where('status', 'ISSUED')
-            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
-            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
-            ->count();
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')");
+        $this->applyTributaryDocumentKindFilter($pendingQuery, 'document_kind');
+        $pendingCount = $pendingQuery->count();
 
-        $unsentCount = DB::table('sales.commercial_documents')
+        $unsentQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->where('status', 'ISSUED')
-            ->whereIn('document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
-            ->whereRaw("COALESCE(TRIM(metadata->>'sunat_status'),'') = ''")
-            ->count();
+            ->whereRaw("COALESCE(TRIM(metadata->>'sunat_status'),'') = ''");
+        $this->applyTributaryDocumentKindFilter($unsentQuery, 'document_kind');
+        $unsentCount = $unsentQuery->count();
 
         $nextAt = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->where('status', 'ISSUED')
             ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
             ->whereRaw("(metadata->>'sunat_reconcile_next_at') IS NOT NULL")
-            ->whereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'")
-            ->min(DB::raw("(metadata->>'sunat_reconcile_next_at')::timestamp"));
+            ->whereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'");
+        $this->applyTributaryDocumentKindFilter($nextAt, 'document_kind');
+        $nextAt = $nextAt->min(DB::raw("(metadata->>'sunat_reconcile_next_at')::timestamp"));
 
         return [
             'auto_reconcile_enabled' => $config['auto_reconcile_enabled'],
@@ -774,6 +1019,18 @@ class TaxBridgeService
             'unsent_count' => (int) $unsentCount,
             'next_reconcile_at' => $nextAt,
         ];
+    }
+
+    private function applyTributaryDocumentKindFilter($query, string $column): void
+    {
+        $query->where(function ($nested) use ($column) {
+            $nested->whereRaw("UPPER($column) = 'INVOICE'")
+                ->orWhereRaw("UPPER($column) = 'RECEIPT'")
+                ->orWhereRaw("UPPER($column) = 'CREDIT_NOTE'")
+                ->orWhereRaw("UPPER($column) = 'DEBIT_NOTE'")
+                ->orWhereRaw("UPPER($column) LIKE 'CREDIT_NOTE_%'")
+                ->orWhereRaw("UPPER($column) LIKE 'DEBIT_NOTE_%'");
+        });
     }
 
     private function buildReconcileAttemptMetadata(int $companyId, int $documentId, bool $pendingConfirmation, bool $isRetry, ?string $errorKind): array
@@ -1201,6 +1458,7 @@ class TaxBridgeService
                 'auth_scheme' => 'none',
                 'token' => '',
                 'auto_send_on_issue' => true,
+                'force_async_on_issue' => true,
                 'sol_user' => '',
                 'sol_pass' => '',
                 'sunat_secondary_user' => '',
@@ -1230,6 +1488,7 @@ class TaxBridgeService
             'timeout_seconds' => max(5, min(60, (int) ($cfg['timeout_seconds'] ?? 15))),
             'auth_scheme' => strtolower(trim((string) ($cfg['auth_scheme'] ?? 'none'))),
             'token' => (string) ($cfg['token'] ?? ''),
+            'force_async_on_issue' => isset($cfg['force_async_on_issue']) ? (bool) $cfg['force_async_on_issue'] : true,
             'auto_send_on_issue' => (bool) ($cfg['auto_send_on_issue'] ?? true),
             'auto_reconcile_enabled' => isset($cfg['auto_reconcile_enabled']) ? (bool) $cfg['auto_reconcile_enabled'] : true,
             'reconcile_batch_size' => max(5, min(50, (int) ($cfg['reconcile_batch_size'] ?? 20))),
@@ -1336,7 +1595,7 @@ class TaxBridgeService
             throw new TaxBridgeException('Documento no encontrado', 404);
         }
 
-        if (!$this->supportsDocumentKind((string) $document->document_kind)) {
+        if (!$this->supportsDocumentKind((string) $document->document_kind, isset($document->document_kind_id) ? (int) $document->document_kind_id : null)) {
             throw new TaxBridgeException('Solo se admite confirmacion manual para comprobantes tributarios', 422);
         }
 
@@ -1700,11 +1959,25 @@ class TaxBridgeService
                 ->where('document_item_id', (int) $item->id)
                 ->get(['lot_id', 'qty']);
 
+            $payloadUnitCost = (float) ($item->unit_cost ?? 0);
+
             if ($lots->isNotEmpty()) {
                 foreach ($lots as $lot) {
                     $qty = round((float) ($lot->qty ?? 0) * max((float) ($item->conversion_factor ?? 1), 0.00000001), 8);
                     if ($qty <= 0) {
                         continue;
+                    }
+
+                    $ledgerUnitCost = $payloadUnitCost;
+                    if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                        $ledgerUnitCost = (float) (DB::table('inventory.product_lots')
+                            ->where('id', (int) ($lot->lot_id ?? 0))
+                            ->value('unit_cost') ?? 0);
+                    }
+                    if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                        $ledgerUnitCost = (float) (DB::table('inventory.products')
+                            ->where('id', (int) $item->product_id)
+                            ->value('cost_price') ?? 0);
                     }
 
                     DB::table('inventory.inventory_ledger')->insert([
@@ -1714,7 +1987,7 @@ class TaxBridgeService
                         'lot_id' => (int) ($lot->lot_id ?? 0) ?: null,
                         'movement_type' => $direction,
                         'quantity' => $qty,
-                        'unit_cost' => (float) ($item->unit_cost ?? 0),
+                        'unit_cost' => $ledgerUnitCost,
                         'ref_type' => 'COMMERCIAL_DOCUMENT',
                         'ref_id' => $documentId,
                         'notes' => $note,
@@ -1728,6 +2001,13 @@ class TaxBridgeService
                     continue;
                 }
 
+                $ledgerUnitCost = $payloadUnitCost;
+                if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                    $ledgerUnitCost = (float) (DB::table('inventory.products')
+                        ->where('id', (int) $item->product_id)
+                        ->value('cost_price') ?? 0);
+                }
+
                 DB::table('inventory.inventory_ledger')->insert([
                     'company_id' => $companyId,
                     'warehouse_id' => $document->warehouse_id !== null ? (int) $document->warehouse_id : null,
@@ -1735,7 +2015,7 @@ class TaxBridgeService
                     'lot_id' => null,
                     'movement_type' => $direction,
                     'quantity' => $qty,
-                    'unit_cost' => (float) ($item->unit_cost ?? 0),
+                    'unit_cost' => $ledgerUnitCost,
                     'ref_type' => 'COMMERCIAL_DOCUMENT',
                     'ref_id' => $documentId,
                     'notes' => $note,

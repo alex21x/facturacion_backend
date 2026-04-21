@@ -76,7 +76,7 @@ return [
             'prefix_indexes' => true,
             'schema' => 'public',
             'sslmode' => 'prefer',
-            'timezone' => 'UTC',
+            'timezone' => env('DB_TIMEZONE', env('APP_TIMEZONE', 'America/Lima')),
         ],
 
         'sqlsrv' => [

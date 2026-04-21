@@ -11,12 +11,17 @@ use App\Application\UseCases\Purchases\GetPurchasesLookupsUseCase;
 use App\Application\UseCases\Purchases\ListPurchasesStockEntriesUseCase;
 use App\Services\AppConfig\CommerceFeatureToggleService;
 use App\Services\AppConfig\CompanyIgvRateService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 
 class PurchasesController
 {
+    private array $stockProjection = [];
+    private array $lotStockProjection = [];
+
     public function __construct(
         private CommerceFeatureToggleService $featureToggles,
         private CompanyIgvRateService $companyIgvRateService,
@@ -281,6 +286,317 @@ class PurchasesController
     }
 
     /**
+     * Edit a stock entry while preserving inventory traceability.
+     */
+    public function updateStockEntry(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'nullable|integer|min:1',
+            'reference_no' => 'nullable|string|max:60',
+            'supplier_reference' => 'nullable|string|max:120',
+            'payment_method_id' => 'nullable|integer|min:1',
+            'issue_at' => 'nullable|date',
+            'notes' => 'nullable|string|max:300',
+            'metadata' => 'nullable|array',
+            'edit_reason' => 'nullable|string|max:180',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|integer|min:1',
+            'items.*.qty' => 'required|numeric',
+            'items.*.unit_cost' => 'nullable|numeric|min:0',
+            'items.*.tax_category_id' => 'nullable|integer|min:1',
+            'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
+            'items.*.lot_id' => 'nullable|integer|min:1',
+            'items.*.lot_code' => 'nullable|string|max:80',
+            'items.*.manufacture_at' => 'nullable|date',
+            'items.*.expires_at' => 'nullable|date',
+            'items.*.notes' => 'nullable|string|max:200',
+            'items.*.metadata' => 'nullable|array',
+            'items.*.metadata' => 'nullable|array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+
+        $entry = DB::table('inventory.stock_entries')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if (!$entry) {
+            return response()->json(['message' => 'Ingreso no encontrado'], 404);
+        }
+
+        $entryType = strtoupper((string) $entry->entry_type);
+        if (!in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER'], true)) {
+            return response()->json(['message' => 'Tipo de ingreso no editable'], 422);
+        }
+
+        if (in_array(strtoupper((string) $entry->status), ['VOID', 'CANCELED'], true)) {
+            return response()->json(['message' => 'El ingreso ya no puede editarse'], 422);
+        }
+
+        $sourceMetadata = $this->decodeMetadata($entry->metadata ?? null);
+        if ($entryType === 'PURCHASE_ORDER') {
+            $receivedIds = $sourceMetadata['received_entry_ids'] ?? [];
+            if (!is_array($receivedIds)) {
+                $receivedIds = [];
+            }
+
+            if (count($receivedIds) > 0) {
+                return response()->json([
+                    'message' => 'La orden de compra ya tiene recepciones y no puede editarse para proteger la trazabilidad.'
+                ], 422);
+            }
+        }
+
+        $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? $entry->issue_at);
+        $editOccurredAt = now('America/Lima')->format('Y-m-d H:i:sP');
+        $inventorySettings = $this->inventorySettingsForCompany($companyId);
+        $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true);
+
+        $productIds = collect($payload['items'])
+            ->pluck('product_id')
+            ->map(fn ($value) => (int) $value)
+            ->unique()
+            ->values();
+
+        $products = DB::table('inventory.products')
+            ->select('id', 'status', 'is_stockable', 'lot_tracking')
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds->all())
+            ->whereNull('deleted_at')
+            ->get()
+            ->keyBy('id');
+
+        if ($products->count() !== $productIds->count()) {
+            return response()->json(['message' => 'Uno o mas productos no existen o no estan disponibles.'], 422);
+        }
+
+        $stockEntryItemColumns = $this->tableColumns('inventory.stock_entry_items');
+        $inventoryLedgerColumns = $this->tableColumns('inventory.inventory_ledger');
+        $stockEntryColumns = $this->tableColumns('inventory.stock_entries');
+
+        $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
+        $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
+        $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
+        $hasPaymentMethodColumn = in_array('payment_method_id', $stockEntryColumns, true);
+        $hasMetadataColumn = in_array('metadata', $stockEntryColumns, true);
+
+        try {
+            DB::transaction(function () use (
+                $entry,
+                $entryType,
+                $payload,
+                $resolvedIssueAt,
+                $editOccurredAt,
+                $authUser,
+                $companyId,
+                $sourceMetadata,
+                $inventorySettings,
+                $appliesStock,
+                $products,
+                $hasItemTaxCategoryColumn,
+                $hasItemTaxRateColumn,
+                $hasLedgerTaxRateColumn,
+                $hasPaymentMethodColumn,
+                $hasMetadataColumn
+            ) {
+                if ($appliesStock) {
+                    $this->clearPreviousEditLedgerForEntry($companyId, (int) $entry->id);
+
+                    $this->reverseStockLedgerForEntryEdit(
+                        $companyId,
+                        (int) $entry->id,
+                        (int) $authUser->id,
+                        $editOccurredAt,
+                        $inventorySettings,
+                        $hasLedgerTaxRateColumn
+                    );
+                }
+
+                DB::table('inventory.stock_entry_items')
+                    ->where('entry_id', (int) $entry->id)
+                    ->delete();
+
+                foreach ($payload['items'] as $index => $item) {
+                    $productId = (int) $item['product_id'];
+                    $product = $products->get($productId);
+                    $qty = round((float) $item['qty'], 8);
+                    $unitCost = isset($item['unit_cost']) ? (float) $item['unit_cost'] : 0.0;
+                    $taxCategoryId = isset($item['tax_category_id']) ? (int) $item['tax_category_id'] : null;
+                    $taxRate = isset($item['tax_rate']) ? round((float) $item['tax_rate'], 2) : 0.0;
+
+                    if (!$product || (int) $product->status !== 1 || !(bool) $product->is_stockable) {
+                        throw new \RuntimeException('Producto invalido para la linea ' . ($index + 1));
+                    }
+
+                    if ($entryType === 'PURCHASE' && $qty <= 0) {
+                        throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
+                    }
+
+                    if ($entryType === 'PURCHASE_ORDER' && $qty <= 0) {
+                        throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
+                    }
+
+                    if ($entryType === 'ADJUSTMENT' && abs($qty) < 0.00000001) {
+                        throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
+                    }
+
+                    $lotId = isset($item['lot_id']) ? (int) $item['lot_id'] : null;
+                    $lotCode = isset($item['lot_code']) ? trim((string) $item['lot_code']) : '';
+                    $lotTrackingEnabled = (bool) ($inventorySettings['enable_inventory_pro'] ?? false)
+                        && (bool) ($inventorySettings['enable_lot_tracking'] ?? false);
+
+                    if ($appliesStock && $lotTrackingEnabled && (bool) $product->lot_tracking && !$lotId && $lotCode !== '') {
+                        $lotId = (int) DB::table('inventory.product_lots')->insertGetId([
+                            'company_id' => $companyId,
+                            'warehouse_id' => (int) $entry->warehouse_id,
+                            'product_id' => $productId,
+                            'lot_code' => $lotCode,
+                            'manufacture_at' => $item['manufacture_at'] ?? null,
+                            'expires_at' => $item['expires_at'] ?? null,
+                            'received_at' => $editOccurredAt,
+                            'status' => 1,
+                            'created_by' => $authUser->id,
+                            'created_at' => now(),
+                        ]);
+                    }
+
+                    if ($appliesStock && $lotId) {
+                        $lotExists = DB::table('inventory.product_lots')
+                            ->where('id', $lotId)
+                            ->where('company_id', $companyId)
+                            ->where('warehouse_id', (int) $entry->warehouse_id)
+                            ->where('product_id', $productId)
+                            ->where('status', 1)
+                            ->exists();
+
+                        if (!$lotExists) {
+                            throw new \RuntimeException('Lote invalido para la linea ' . ($index + 1));
+                        }
+                    }
+
+                    $entryItemInsert = [
+                        'entry_id' => (int) $entry->id,
+                        'product_id' => $productId,
+                        'lot_id' => $lotId,
+                        'qty' => $qty,
+                        'unit_cost' => $unitCost,
+                        'notes' => $item['notes'] ?? null,
+                        'created_at' => now(),
+                    ];
+
+                    if ($hasItemTaxCategoryColumn) {
+                        $entryItemInsert['tax_category_id'] = $taxCategoryId;
+                    }
+
+                    if ($hasItemTaxRateColumn) {
+                        $entryItemInsert['tax_rate'] = $taxRate;
+                    }
+
+                    DB::table('inventory.stock_entry_items')->insert($entryItemInsert);
+
+                    if ($appliesStock) {
+                        $this->applyStockForEditedEntryLine(
+                            $companyId,
+                            (int) $entry->warehouse_id,
+                            (int) $entry->id,
+                            $entryType,
+                            $productId,
+                            $lotId,
+                            $qty,
+                            $unitCost,
+                            $taxRate,
+                            $editOccurredAt,
+                            (int) $authUser->id,
+                            (bool) ($inventorySettings['allow_negative_stock'] ?? false),
+                            $hasLedgerTaxRateColumn
+                        );
+
+                        if ($entryType === 'PURCHASE' && $unitCost > 0) {
+                            DB::table('inventory.products')
+                                ->where('id', $productId)
+                                ->where('company_id', $companyId)
+                                ->update([
+                                    'cost_price' => $unitCost,
+                                ]);
+                        }
+                    }
+                }
+
+                $nextMetadata = $sourceMetadata;
+                if ($hasMetadataColumn && array_key_exists('metadata', $payload) && is_array($payload['metadata'])) {
+                    $nextMetadata = $payload['metadata'];
+                }
+
+                $trail = [];
+                if (isset($nextMetadata['edit_trail']) && is_array($nextMetadata['edit_trail'])) {
+                    $trail = $nextMetadata['edit_trail'];
+                }
+
+                $trail[] = [
+                    'edited_by' => (int) $authUser->id,
+                    'edited_at' => now()->toIso8601String(),
+                    'reason' => trim((string) ($payload['edit_reason'] ?? 'Edicion de compra')),
+                ];
+
+                $nextMetadata['edit_trail'] = array_slice($trail, -20);
+                $nextMetadata['last_edited_by'] = (int) $authUser->id;
+                $nextMetadata['last_edited_at'] = now()->toIso8601String();
+
+                $entryUpdate = [
+                    'reference_no' => array_key_exists('reference_no', $payload)
+                        ? (trim((string) ($payload['reference_no'] ?? '')) !== '' ? trim((string) $payload['reference_no']) : null)
+                        : $entry->reference_no,
+                    'supplier_reference' => array_key_exists('supplier_reference', $payload)
+                        ? (trim((string) ($payload['supplier_reference'] ?? '')) !== '' ? trim((string) $payload['supplier_reference']) : null)
+                        : $entry->supplier_reference,
+                    'issue_at' => $resolvedIssueAt,
+                    'notes' => array_key_exists('notes', $payload)
+                        ? (trim((string) ($payload['notes'] ?? '')) !== '' ? trim((string) $payload['notes']) : null)
+                        : $entry->notes,
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                ];
+
+                if ($hasPaymentMethodColumn && array_key_exists('payment_method_id', $payload)) {
+                    $entryUpdate['payment_method_id'] = $payload['payment_method_id'] !== null
+                        ? (int) $payload['payment_method_id']
+                        : null;
+                }
+
+                if ($hasMetadataColumn) {
+                    $entryUpdate['metadata'] = json_encode($nextMetadata);
+                }
+
+                DB::table('inventory.stock_entries')
+                    ->where('id', (int) $entry->id)
+                    ->where('company_id', $companyId)
+                    ->update($entryUpdate);
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Ingreso actualizado correctamente',
+            'data' => [
+                'id' => (int) $entry->id,
+            ],
+        ]);
+    }
+
+    /**
      * Get lookups for purchases (payment methods, etc.)
      */
     public function lookups(Request $request)
@@ -311,6 +627,12 @@ class PurchasesController
             || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED');
         $percepcionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED')
             || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_PERCEPCION_ENABLED');
+        $globalDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED');
+        $itemDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_ITEM_DISCOUNT_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_ITEM_DISCOUNT_ENABLED');
+        $freeOperationEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_FREE_ITEMS_ENABLED')
+            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_FREE_ITEMS_ENABLED');
 
         $retencionFeatureCode = $retencionCompradorEnabled
             ? 'PURCHASES_RETENCION_COMPRADOR_ENABLED'
@@ -334,6 +656,9 @@ class PurchasesController
                 : null,
             'retencion_percentage' => 3.00,
             'percepcion_enabled' => $percepcionEnabled,
+            'global_discount_enabled' => $globalDiscountEnabled,
+            'item_discount_enabled' => $itemDiscountEnabled,
+            'free_operation_enabled' => $freeOperationEnabled,
             'percepcion_types' => $percepcionEnabled ? $this->resolvePercepcionTypes($companyId, $branchId) : [],
             'percepcion_account' => $percepcionEnabled
                 ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED', 'PERCEPCION')
@@ -463,6 +788,7 @@ class PurchasesController
         $itemColumns = $this->tableColumns('inventory.stock_entry_items');
         $hasTaxCategory = in_array('tax_category_id', $itemColumns, true);
         $hasTaxRate = in_array('tax_rate', $itemColumns, true);
+        $hasItemMetadata = in_array('metadata', $itemColumns, true);
 
         $taxById = $this->resolveTaxCategories($companyId)->keyBy('id');
 
@@ -478,6 +804,7 @@ class PurchasesController
                 'sei.unit_cost',
                 $hasTaxCategory ? 'sei.tax_category_id' : DB::raw('NULL as tax_category_id'),
                 $hasTaxRate ? 'sei.tax_rate' : DB::raw('0 as tax_rate'),
+                $hasItemMetadata ? 'sei.metadata' : DB::raw('NULL as metadata'),
                 'sei.notes',
                 'pl.lot_code',
             ])
@@ -486,9 +813,17 @@ class PurchasesController
             ->orderBy('sei.id')
             ->get()
             ->map(function ($row) use ($taxById) {
+                $itemMetadata = $this->decodeMetadata($row->metadata ?? null);
                 $subtotal = (float) $row->qty * (float) $row->unit_cost;
                 $taxRate = (float) ($row->tax_rate ?? 0);
                 $taxAmount = $subtotal * ($taxRate / 100);
+                $lineDiscount = isset($itemMetadata['discount_total']) ? (float) $itemMetadata['discount_total'] : 0.0;
+                $safeDiscount = max(0.0, min($lineDiscount, $subtotal + $taxAmount));
+                $isFreeOperation = !empty($itemMetadata['is_free_operation']);
+                if ($isFreeOperation) {
+                    $safeDiscount = $subtotal + $taxAmount;
+                    $itemMetadata['gratuitas'] = round($subtotal, 4);
+                }
                 $taxCategoryId = $row->tax_category_id ? (int) $row->tax_category_id : null;
                 $taxRow = $taxCategoryId ? $taxById->get($taxCategoryId) : null;
 
@@ -503,9 +838,11 @@ class PurchasesController
                     'tax_label' => $taxRow['label'] ?? 'Sin IGV',
                     'tax_rate' => $taxRate,
                     'tax_amount' => round($taxAmount, 4),
-                    'line_total' => round($subtotal + $taxAmount, 4),
+                    'discount_total' => round($safeDiscount, 4),
+                    'line_total' => round(max(($subtotal + $taxAmount) - $safeDiscount, 0), 4),
                     'lot_code' => $row->lot_code,
                     'notes' => $row->notes,
+                    'metadata' => $itemMetadata,
                 ];
             })
             ->groupBy('entry_id');
@@ -522,9 +859,21 @@ class PurchasesController
      */
     private function exportAsCsv($entries)
     {
-        $csv = "ID,Tipo,Referencia,Referencia_Proveedor,Fecha,Almacen,Cantidad_Items,Cantidad_Total,Importe_Total,Metodo_Pago,Notas\n";
+        $csv = "ID,Tipo,Referencia,Referencia_Proveedor,Fecha,Almacen,Cantidad_Items,Cantidad_Total,Descuento_Item,Descuento_Global,Descuento_Total,Importe_Total,Metodo_Pago,Notas\n";
 
         foreach ($entries as $entry) {
+            $metadata = [];
+            if (isset($entry->metadata) && $entry->metadata !== null && $entry->metadata !== '') {
+                $decoded = is_string($entry->metadata) ? json_decode($entry->metadata, true) : $entry->metadata;
+                if (is_array($decoded)) {
+                    $metadata = $decoded;
+                }
+            }
+
+            $itemDiscount = (float) ($metadata['item_discount_total'] ?? 0);
+            $globalDiscount = (float) ($metadata['discount_total'] ?? 0);
+            $discountTotal = $itemDiscount + $globalDiscount;
+
             $row = [
                 $entry->id,
                 $entry->entry_type === 'PURCHASE'
@@ -536,6 +885,9 @@ class PurchasesController
                 '"' . str_replace('"', '""', $entry->warehouse_name ?? $entry->warehouse_code ?? '') . '"',
                 $entry->total_items,
                 number_format($entry->total_qty, 3, '.', ''),
+                number_format($itemDiscount, 2, '.', ''),
+                number_format($globalDiscount, 2, '.', ''),
+                number_format($discountTotal, 2, '.', ''),
                 number_format($entry->total_amount, 2, '.', ''),
                 '"' . str_replace('"', '""', $entry->payment_method ?? '') . '"',
                 '"' . str_replace('"', '""', $entry->notes ?? '') . '"',
@@ -702,6 +1054,219 @@ class PurchasesController
         }
 
         return ['public', $qualifiedTable];
+    }
+
+    private function resolveIssueAtForStorage($issueAt): string
+    {
+        if ($issueAt === null || $issueAt === '') {
+            return now('America/Lima')->format('Y-m-d H:i:sP');
+        }
+
+        $text = trim((string) $issueAt);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $text) === 1) {
+            $limaNow = now('America/Lima');
+            return $text . ' ' . $limaNow->format('H:i:sP');
+        }
+
+        try {
+            return Carbon::parse($text)->setTimezone('America/Lima')->format('Y-m-d H:i:sP');
+        } catch (\Throwable $e) {
+            return now('America/Lima')->format('Y-m-d H:i:sP');
+        }
+    }
+
+    private function decodeMetadata($metadata): array
+    {
+        if (is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (is_string($metadata)) {
+            $decoded = json_decode($metadata, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        if (is_object($metadata)) {
+            $decoded = json_decode(json_encode($metadata), true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    private function reverseStockLedgerForEntryEdit(
+        int $companyId,
+        int $entryId,
+        int $userId,
+        string $movedAt,
+        array $settings,
+        bool $hasLedgerTaxRateColumn
+    ): void {
+        $rows = DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'STOCK_ENTRY')
+            ->where('ref_id', $entryId)
+            ->orderBy('id')
+            ->get();
+
+        foreach ($rows as $row) {
+            $originalType = strtoupper((string) $row->movement_type);
+            if (!in_array($originalType, ['IN', 'OUT'], true)) {
+                continue;
+            }
+
+            $reverseType = $originalType === 'IN' ? 'OUT' : 'IN';
+            $qty = round((float) ($row->quantity ?? 0), 8);
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $delta = $reverseType === 'IN' ? $qty : -$qty;
+
+            $this->applyCurrentStockDelta(
+                $companyId,
+                (int) $row->warehouse_id,
+                (int) $row->product_id,
+                $delta,
+                (bool) ($settings['allow_negative_stock'] ?? false)
+            );
+
+            if ($row->lot_id !== null) {
+                $this->applyLotStockDelta(
+                    $companyId,
+                    (int) $row->warehouse_id,
+                    (int) $row->product_id,
+                    (int) $row->lot_id,
+                    $delta,
+                    (bool) ($settings['allow_negative_stock'] ?? false)
+                );
+            }
+
+            $insert = [
+                'company_id' => $companyId,
+                'warehouse_id' => (int) $row->warehouse_id,
+                'product_id' => (int) $row->product_id,
+                'lot_id' => $row->lot_id !== null ? (int) $row->lot_id : null,
+                'movement_type' => $reverseType,
+                'quantity' => $qty,
+                'unit_cost' => (float) ($row->unit_cost ?? 0),
+                'ref_type' => 'STOCK_ENTRY_EDIT',
+                'ref_id' => $entryId,
+                'notes' => 'Reversa por edicion de ingreso #' . $entryId,
+                'moved_at' => $movedAt,
+                'created_by' => $userId,
+            ];
+
+            if ($hasLedgerTaxRateColumn) {
+                $insert['tax_rate'] = round((float) ($row->tax_rate ?? 0), 2);
+            }
+
+            DB::table('inventory.inventory_ledger')->insert($insert);
+        }
+    }
+
+    private function clearPreviousEditLedgerForEntry(int $companyId, int $entryId): void
+    {
+        DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'STOCK_ENTRY_EDIT')
+            ->where('ref_id', $entryId)
+            ->delete();
+    }
+
+    private function applyStockForEditedEntryLine(
+        int $companyId,
+        int $warehouseId,
+        int $entryId,
+        string $entryType,
+        int $productId,
+        ?int $lotId,
+        float $qty,
+        float $unitCost,
+        float $taxRate,
+        string $movedAt,
+        int $userId,
+        bool $allowNegativeStock,
+        bool $hasLedgerTaxRateColumn
+    ): void {
+        $movementType = $entryType === 'PURCHASE' ? 'IN' : ($qty >= 0 ? 'IN' : 'OUT');
+        $delta = $qty;
+
+        $this->applyCurrentStockDelta($companyId, $warehouseId, $productId, $delta, $allowNegativeStock);
+
+        if ($lotId !== null) {
+            $this->applyLotStockDelta($companyId, $warehouseId, $productId, $lotId, $delta, $allowNegativeStock);
+        }
+
+        $insert = [
+            'company_id' => $companyId,
+            'warehouse_id' => $warehouseId,
+            'product_id' => $productId,
+            'lot_id' => $lotId,
+            'movement_type' => $movementType,
+            'quantity' => round(abs($qty), 8),
+            'unit_cost' => $unitCost,
+            'ref_type' => 'STOCK_ENTRY_EDIT',
+            'ref_id' => $entryId,
+            'notes' => 'Reaplicacion por edicion de ingreso #' . $entryId,
+            'moved_at' => $movedAt,
+            'created_by' => $userId,
+        ];
+
+        if ($hasLedgerTaxRateColumn) {
+            $insert['tax_rate'] = round($taxRate, 2);
+        }
+
+        DB::table('inventory.inventory_ledger')->insert($insert);
+    }
+
+    private function applyCurrentStockDelta(int $companyId, int $warehouseId, int $productId, float $delta, bool $allowNegativeStock): void
+    {
+        $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId;
+
+        if (!array_key_exists($projectionKey, $this->stockProjection)) {
+            $row = DB::table('inventory.current_stock')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->first();
+
+            $this->stockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
+        }
+
+        $current = $this->stockProjection[$projectionKey];
+        $next = $current + $delta;
+
+        if (!$allowNegativeStock && $next < -0.00000001) {
+            throw new \RuntimeException('Stock insuficiente para producto #' . $productId);
+        }
+
+        $this->stockProjection[$projectionKey] = round($next, 8);
+    }
+
+    private function applyLotStockDelta(int $companyId, int $warehouseId, int $productId, int $lotId, float $delta, bool $allowNegativeStock): void
+    {
+        $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId . ':' . $lotId;
+
+        if (!array_key_exists($projectionKey, $this->lotStockProjection)) {
+            $row = DB::table('inventory.current_stock_by_lot')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->where('lot_id', $lotId)
+                ->first();
+
+            $this->lotStockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
+        }
+
+        $current = $this->lotStockProjection[$projectionKey];
+        $next = $current + $delta;
+
+        if (!$allowNegativeStock && $next < -0.00000001) {
+            throw new \RuntimeException('Stock insuficiente para lote #' . $lotId);
+        }
+
+        $this->lotStockProjection[$projectionKey] = round($next, 8);
     }
 
     private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
@@ -1013,5 +1578,231 @@ class PurchasesController
             })
             ->values()
             ->all();
+    }
+
+    public function supplierAutocomplete(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $search = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 12);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 30) {
+            $limit = 30;
+        }
+
+        $this->ensurePurchaseSuppliersTable();
+
+        $query = DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->where('company_id', $companyId)
+            ->orderByRaw('COALESCE(last_used_at, updated_at, created_at) DESC')
+            ->limit($limit);
+
+        if ($search !== '') {
+            $like = '%' . $search . '%';
+            $normalizedDoc = preg_replace('/\D+/', '', $search);
+
+            $query->where(function ($nested) use ($like, $normalizedDoc) {
+                $nested->where('doc_number', 'ilike', $like)
+                    ->orWhere('legal_name', 'ilike', $like)
+                    ->orWhere('address', 'ilike', $like);
+
+                if ($normalizedDoc !== '') {
+                    $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+            });
+        }
+
+        $rows = $query
+            ->get()
+            ->map(function ($row) {
+                return $this->supplierSuggestionFromRow($row);
+            })
+            ->values();
+
+        return response()->json([
+            'data' => $rows,
+        ]);
+    }
+
+    public function resolveSupplierByDocument(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $document = preg_replace('/\D+/', '', (string) $request->query('document', ''));
+        if (!is_string($document)) {
+            $document = '';
+        }
+
+        if ($document === '' || !in_array(strlen($document), [8, 11], true)) {
+            return response()->json([
+                'message' => 'Debe enviar un DNI (8) o RUC (11) valido.',
+            ], 422);
+        }
+
+        $this->ensurePurchaseSuppliersTable();
+
+        $existing = $this->fetchSupplierRowByDocument($companyId, $document);
+        if ($existing) {
+            return response()->json(array_merge(
+                $this->supplierSuggestionFromRow($existing),
+                ['message' => 'Proveedor encontrado en base local.']
+            ));
+        }
+
+        $isDni = strlen($document) === 8;
+        $source = $isDni ? 'reniec' : 'sunat';
+
+        try {
+            if ($isDni) {
+                $response = Http::timeout(10)
+                    ->acceptJson()
+                    ->get('https://mundosoftperu.com/reniec/consulta_reniec.php', ['dni' => $document]);
+
+                if (!$response->ok()) {
+                    return response()->json(['message' => 'No se pudo consultar RENIEC.'], 502);
+                }
+
+                $json = $response->json();
+                if (!is_array($json) || !isset($json[0]) || (string) $json[0] !== $document) {
+                    return response()->json(['message' => 'Numero no existe en RENIEC.'], 404);
+                }
+
+                $fullName = trim(implode(' ', array_filter([
+                    (string) ($json[2] ?? ''),
+                    (string) ($json[3] ?? ''),
+                    (string) ($json[1] ?? ''),
+                ])));
+
+                if ($fullName === '') {
+                    return response()->json(['message' => 'RENIEC no devolvio nombre valido.'], 404);
+                }
+
+                $this->upsertPurchaseSupplier($companyId, [
+                    'doc_type' => 'DNI',
+                    'doc_number' => $document,
+                    'legal_name' => $fullName,
+                    'address' => null,
+                    'source' => $source,
+                ]);
+
+                $saved = $this->fetchSupplierRowByDocument($companyId, $document);
+                return response()->json(array_merge(
+                    $this->supplierSuggestionFromRow($saved),
+                    ['message' => 'Proveedor consultado y registrado correctamente.']
+                ));
+            }
+
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->get('https://mundosoftperu.com/sunat/sunat/consulta.php', ['nruc' => $document]);
+
+            if (!$response->ok()) {
+                return response()->json(['message' => 'No se pudo consultar SUNAT.'], 502);
+            }
+
+            $json = $response->json();
+            $result  = is_array($json) ? ($json['result'] ?? null) : null;
+            $ruc     = is_array($result) ? (string) ($result['RUC'] ?? '') : '';
+            $razon   = is_array($result) ? trim((string) ($result['RazonSocial'] ?? '')) : '';
+            $direccion = is_array($result) ? trim((string) ($result['Direccion'] ?? '')) : '';
+
+            if ($ruc !== $document || $razon === '') {
+                return response()->json(['message' => 'Numero no existe en SUNAT.'], 404);
+            }
+
+            $this->upsertPurchaseSupplier($companyId, [
+                'doc_type' => 'RUC',
+                'doc_number' => $document,
+                'legal_name' => $razon,
+                'address' => $direccion !== '' ? $direccion : null,
+                'source' => $source,
+            ]);
+
+            $saved = $this->fetchSupplierRowByDocument($companyId, $document);
+            return response()->json(array_merge(
+                $this->supplierSuggestionFromRow($saved),
+                ['message' => 'Proveedor consultado y registrado correctamente.']
+            ));
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Error al consultar el padron: ' . $e->getMessage()], 500);
+        }
+    }
+
+    private function ensurePurchaseSuppliersTable(): void
+    {
+        if ($this->tableExists('inventory.purchase_suppliers')) {
+            return;
+        }
+
+        DB::statement(<<<'SQL'
+            CREATE TABLE IF NOT EXISTS inventory.purchase_suppliers (
+                id BIGSERIAL PRIMARY KEY,
+                company_id BIGINT NOT NULL,
+                doc_type VARCHAR(3) NOT NULL,
+                doc_number VARCHAR(20) NOT NULL,
+                legal_name VARCHAR(255) NOT NULL,
+                address VARCHAR(255) NULL,
+                source VARCHAR(20) NULL,
+                created_at TIMESTAMP NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NULL DEFAULT NOW(),
+                last_used_at TIMESTAMP NULL DEFAULT NOW(),
+                CONSTRAINT purchase_suppliers_company_doc_unique UNIQUE (company_id, doc_number)
+            )
+        SQL);
+
+        DB::statement('CREATE INDEX IF NOT EXISTS purchase_suppliers_company_name_idx ON inventory.purchase_suppliers (company_id, legal_name)');
+    }
+
+    private function fetchSupplierRowByDocument(int $companyId, string $document)
+    {
+        return DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->where('company_id', $companyId)
+            ->where('doc_number', $document)
+            ->first();
+    }
+
+    private function upsertPurchaseSupplier(int $companyId, array $data): void
+    {
+        DB::statement(
+            'INSERT INTO inventory.purchase_suppliers (company_id, doc_type, doc_number, legal_name, address, source, created_at, updated_at, last_used_at) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW()) '
+            . 'ON CONFLICT (company_id, doc_number) DO UPDATE SET '
+            . 'doc_type = EXCLUDED.doc_type, legal_name = EXCLUDED.legal_name, address = EXCLUDED.address, source = EXCLUDED.source, updated_at = NOW(), last_used_at = NOW()',
+            [
+                $companyId,
+                (string) ($data['doc_type'] ?? ''),
+                (string) ($data['doc_number'] ?? ''),
+                (string) ($data['legal_name'] ?? ''),
+                $data['address'] ?? null,
+                $data['source'] ?? null,
+            ]
+        );
+    }
+
+    private function supplierSuggestionFromRow($row): array
+    {
+        return [
+            'id' => isset($row->id) ? (int) $row->id : 0,
+            'doc_type' => isset($row->doc_type) ? (string) $row->doc_type : null,
+            'doc_number' => isset($row->doc_number) ? (string) $row->doc_number : '',
+            'name' => isset($row->legal_name) ? (string) $row->legal_name : '',
+            'address' => isset($row->address) ? (string) $row->address : null,
+            'source' => isset($row->source) ? (string) $row->source : 'local',
+        ];
     }
 }

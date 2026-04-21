@@ -3,6 +3,7 @@
 namespace App\Infrastructure\Repositories\Inventory;
 
 use App\Domain\Inventory\Repositories\InventoryProductCommercialRepositoryInterface;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class InventoryProductCommercialRepository implements InventoryProductCommercialRepositoryInterface
@@ -10,6 +11,7 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
     private const FEATURE_MULTI_UOM = 'PRODUCT_MULTI_UOM';
     private const FEATURE_UOM_CONVERSIONS = 'PRODUCT_UOM_CONVERSIONS';
     private const FEATURE_WHOLESALE_PRICING = 'PRODUCT_WHOLESALE_PRICING';
+    private const COMPANY_CONFIG_CACHE_MINUTES = 5;
 
     public function getProductCommercialConfig(int $companyId, int $productId): ?array
     {
@@ -24,21 +26,23 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             return null;
         }
 
-        $this->ensureProductSaleUnitsTable();
-        $this->ensureProductPriceTierValuesTable();
-        $this->ensureProductTierPricesTable();
-
         $features = $this->commerceFeatures($companyId);
 
-        $enabledUnits = DB::table('core.units as u')
-            ->join('appcfg.company_units as cu', function ($join) use ($companyId) {
-                $join->on('cu.unit_id', '=', 'u.id')
-                    ->where('cu.company_id', '=', $companyId)
-                    ->where('cu.is_enabled', '=', true);
-            })
-            ->select('u.id', 'u.code', 'u.name', 'u.sunat_uom_code')
-            ->orderBy('u.name')
-            ->get();
+        $enabledUnits = Cache::remember(
+            $this->companyCacheKey($companyId, 'enabled_units'),
+            now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
+            function () use ($companyId) {
+                return DB::table('core.units as u')
+                    ->join('appcfg.company_units as cu', function ($join) use ($companyId) {
+                        $join->on('cu.unit_id', '=', 'u.id')
+                            ->where('cu.company_id', '=', $companyId)
+                            ->where('cu.is_enabled', '=', true);
+                    })
+                    ->select('u.id', 'u.code', 'u.name', 'u.sunat_uom_code')
+                    ->orderBy('u.name')
+                    ->get();
+            }
+        );
 
         $productUnits = DB::table('inventory.product_sale_units as pu')
             ->join('core.units as u', 'u.id', '=', 'pu.unit_id')
@@ -118,13 +122,19 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             ->orderBy('pt.min_qty')
             ->get();
 
-        $priceTiers = DB::table('sales.price_tiers')
-            ->select('id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->orderBy('priority')
-            ->orderBy('min_qty')
-            ->get();
+        $priceTiers = Cache::remember(
+            $this->companyCacheKey($companyId, 'price_tiers'),
+            now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
+            function () use ($companyId) {
+                return DB::table('sales.price_tiers')
+                    ->select('id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->orderBy('priority')
+                    ->orderBy('min_qty')
+                    ->get();
+            }
+        );
 
         $profileTierPrices = DB::table('sales.product_tier_prices as ptp')
             ->join('sales.price_tiers as pt', function ($join) use ($companyId) {
@@ -253,20 +263,31 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
 
     private function commerceFeatures(int $companyId): array
     {
-        $rows = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', [
-                self::FEATURE_MULTI_UOM,
-                self::FEATURE_UOM_CONVERSIONS,
-                self::FEATURE_WHOLESALE_PRICING,
-            ])
-            ->pluck('is_enabled', 'feature_code');
+        return Cache::remember(
+            $this->companyCacheKey($companyId, 'features'),
+            now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
+            function () use ($companyId) {
+                $rows = DB::table('appcfg.company_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->whereIn('feature_code', [
+                        self::FEATURE_MULTI_UOM,
+                        self::FEATURE_UOM_CONVERSIONS,
+                        self::FEATURE_WHOLESALE_PRICING,
+                    ])
+                    ->pluck('is_enabled', 'feature_code');
 
-        return [
-            self::FEATURE_MULTI_UOM => (bool) ($rows[self::FEATURE_MULTI_UOM] ?? false),
-            self::FEATURE_UOM_CONVERSIONS => (bool) ($rows[self::FEATURE_UOM_CONVERSIONS] ?? false),
-            self::FEATURE_WHOLESALE_PRICING => (bool) ($rows[self::FEATURE_WHOLESALE_PRICING] ?? false),
-        ];
+                return [
+                    self::FEATURE_MULTI_UOM => (bool) ($rows[self::FEATURE_MULTI_UOM] ?? false),
+                    self::FEATURE_UOM_CONVERSIONS => (bool) ($rows[self::FEATURE_UOM_CONVERSIONS] ?? false),
+                    self::FEATURE_WHOLESALE_PRICING => (bool) ($rows[self::FEATURE_WHOLESALE_PRICING] ?? false),
+                ];
+            }
+        );
+    }
+
+    private function companyCacheKey(int $companyId, string $suffix): string
+    {
+        return sprintf('inventory:product-commercial:%d:%s', $companyId, $suffix);
     }
 
     private function ensureProductSaleUnitsTable(): void

@@ -1959,11 +1959,25 @@ class TaxBridgeService
                 ->where('document_item_id', (int) $item->id)
                 ->get(['lot_id', 'qty']);
 
+            $payloadUnitCost = (float) ($item->unit_cost ?? 0);
+
             if ($lots->isNotEmpty()) {
                 foreach ($lots as $lot) {
                     $qty = round((float) ($lot->qty ?? 0) * max((float) ($item->conversion_factor ?? 1), 0.00000001), 8);
                     if ($qty <= 0) {
                         continue;
+                    }
+
+                    $ledgerUnitCost = $payloadUnitCost;
+                    if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                        $ledgerUnitCost = (float) (DB::table('inventory.product_lots')
+                            ->where('id', (int) ($lot->lot_id ?? 0))
+                            ->value('unit_cost') ?? 0);
+                    }
+                    if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                        $ledgerUnitCost = (float) (DB::table('inventory.products')
+                            ->where('id', (int) $item->product_id)
+                            ->value('cost_price') ?? 0);
                     }
 
                     DB::table('inventory.inventory_ledger')->insert([
@@ -1973,7 +1987,7 @@ class TaxBridgeService
                         'lot_id' => (int) ($lot->lot_id ?? 0) ?: null,
                         'movement_type' => $direction,
                         'quantity' => $qty,
-                        'unit_cost' => (float) ($item->unit_cost ?? 0),
+                        'unit_cost' => $ledgerUnitCost,
                         'ref_type' => 'COMMERCIAL_DOCUMENT',
                         'ref_id' => $documentId,
                         'notes' => $note,
@@ -1987,6 +2001,13 @@ class TaxBridgeService
                     continue;
                 }
 
+                $ledgerUnitCost = $payloadUnitCost;
+                if ($ledgerUnitCost <= 0 && $direction === 'OUT') {
+                    $ledgerUnitCost = (float) (DB::table('inventory.products')
+                        ->where('id', (int) $item->product_id)
+                        ->value('cost_price') ?? 0);
+                }
+
                 DB::table('inventory.inventory_ledger')->insert([
                     'company_id' => $companyId,
                     'warehouse_id' => $document->warehouse_id !== null ? (int) $document->warehouse_id : null,
@@ -1994,7 +2015,7 @@ class TaxBridgeService
                     'lot_id' => null,
                     'movement_type' => $direction,
                     'quantity' => $qty,
-                    'unit_cost' => (float) ($item->unit_cost ?? 0),
+                    'unit_cost' => $ledgerUnitCost,
                     'ref_type' => 'COMMERCIAL_DOCUMENT',
                     'ref_id' => $documentId,
                     'notes' => $note,

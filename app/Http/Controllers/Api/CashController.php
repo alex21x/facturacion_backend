@@ -436,12 +436,19 @@ class CashController extends Controller
         foreach ($documents as $doc) {
             $items = DB::table('sales.commercial_document_items as cdi')
                 ->leftJoin('core.units as u', 'u.id', '=', 'cdi.unit_id')
+                ->leftJoin('inventory.products as p', function ($join) use ($companyId) {
+                    $join->on('p.id', '=', 'cdi.product_id')
+                        ->where('p.company_id', '=', $companyId);
+                })
                 ->select([
                     'cdi.id',
+                    'cdi.product_id',
                     'cdi.description',
                     'cdi.qty',
                     DB::raw('COALESCE(u.code, \'-\') as unit_code'),
                     'cdi.unit_price',
+                    'cdi.unit_cost',
+                    'p.cost_price as product_cost_price',
                     'cdi.total as line_total',
                 ])
                 ->where('cdi.document_id', $doc->id)
@@ -460,12 +467,29 @@ class CashController extends Controller
                 'created_at'          => $doc->created_at,
                 'user_name'           => $doc->user_name,
                 'items'               => array_map(function ($item) {
+                    $qty = round((float) $item->qty, 3);
+                    $unitPrice = round((float) $item->unit_price, 2);
+                    $lineTotal = round((float) $item->line_total, 2);
+                    $costMeta = $this->resolveItemCostAndMargin(
+                        $qty,
+                        $lineTotal,
+                        $unitPrice,
+                        isset($item->unit_cost) ? (float) $item->unit_cost : null,
+                        isset($item->product_cost_price) ? (float) $item->product_cost_price : null
+                    );
+
                     return [
+                        'product_id'   => $item->product_id ? (int) $item->product_id : null,
                         'description' => $item->description,
-                        'quantity'    => round((float) $item->qty, 3),
+                        'quantity'    => $qty,
                         'unit_code'   => $item->unit_code,
-                        'unit_price'  => round((float) $item->unit_price, 2),
-                        'line_total'  => round((float) $item->line_total, 2),
+                        'unit_price'  => $unitPrice,
+                        'line_total'  => $lineTotal,
+                        'unit_cost'   => $costMeta['unit_cost'],
+                        'cost_total'  => $costMeta['cost_total'],
+                        'margin_total' => $costMeta['margin_total'],
+                        'margin_percent' => $costMeta['margin_percent'],
+                        'margin_source' => $costMeta['margin_source'],
                     ];
                 }, $items->toArray()),
             ];
@@ -616,6 +640,60 @@ class CashController extends Controller
     // ─────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────
+
+    private function resolveItemCostAndMargin(
+        float $qty,
+        float $lineTotal,
+        float $unitPrice,
+        ?float $itemUnitCost,
+        ?float $productCostPrice
+    ): array {
+        $qtySafe = $qty > 0 ? $qty : 0.0;
+        $lineTotalSafe = max(0.0, $lineTotal);
+
+        $realUnitCost = null;
+        if ($itemUnitCost !== null && $itemUnitCost > 0) {
+            $realUnitCost = $itemUnitCost;
+        } elseif ($productCostPrice !== null && $productCostPrice > 0) {
+            $realUnitCost = $productCostPrice;
+        }
+
+        if ($realUnitCost !== null) {
+            $costTotal = $qtySafe > 0 ? $realUnitCost * $qtySafe : 0.0;
+            $marginTotal = $lineTotalSafe - $costTotal;
+            $marginPercent = $lineTotalSafe > 0 ? ($marginTotal / $lineTotalSafe) * 100 : 0.0;
+
+            return [
+                'unit_cost' => round($realUnitCost, 4),
+                'cost_total' => round($costTotal, 2),
+                'margin_total' => round($marginTotal, 2),
+                'margin_percent' => round($marginPercent, 2),
+                'margin_source' => 'REAL',
+            ];
+        }
+
+        // Fallback conservador para items sin costo trazable:
+        // usa un margen objetivo controlado para evitar sobreestimar ganancias.
+        $estimatedMarginRate = 0.22;
+        $maxEstimatedMarginRate = 0.35;
+
+        $targetMargin = $lineTotalSafe * $estimatedMarginRate;
+        $maxMargin = $lineTotalSafe * $maxEstimatedMarginRate;
+        $marginTotal = min(max(0.0, $targetMargin), max(0.0, $maxMargin));
+        $costTotal = max(0.0, $lineTotalSafe - $marginTotal);
+
+        $referenceUnitPrice = $qtySafe > 0 ? ($lineTotalSafe / $qtySafe) : max(0.0, $unitPrice);
+        $estimatedUnitCost = $qtySafe > 0 ? ($costTotal / $qtySafe) : ($referenceUnitPrice * (1 - $estimatedMarginRate));
+        $marginPercent = $lineTotalSafe > 0 ? ($marginTotal / $lineTotalSafe) * 100 : 0.0;
+
+        return [
+            'unit_cost' => round(max(0.0, $estimatedUnitCost), 4),
+            'cost_total' => round($costTotal, 2),
+            'margin_total' => round($marginTotal, 2),
+            'margin_percent' => round($marginPercent, 2),
+            'margin_source' => 'ESTIMATED',
+        ];
+    }
 
     private function recalcExpectedBalance(int $sessionId): void
     {

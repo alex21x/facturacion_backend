@@ -96,6 +96,31 @@ class TaxBridgeAuditService
     }
 
     /**
+     * Obtener historico por documento filtrando por tipo de documento/tributo.
+     */
+    public function getDocumentHistoryByScope(
+        int $documentId,
+        ?string $documentKind = null,
+        ?string $tributaryType = null,
+        int $limit = 50
+    ) {
+        $query = TaxBridgeAuditLog::forDocument($documentId);
+
+        if ($documentKind !== null && trim($documentKind) !== '') {
+            $query->where('document_kind', trim($documentKind));
+        }
+
+        if ($tributaryType !== null && trim($tributaryType) !== '') {
+            $query->where('tributary_type', trim($tributaryType));
+        }
+
+        return $query
+            ->limit($limit)
+            ->get()
+            ->map(fn ($log) => $this->formatLogForApi($log));
+    }
+
+    /**
      * Obtener histórico de envíos para empresa/rama
      */
     public function getBranchHistory(int $companyId, ?int $branchId = null, array $filters = [], int $limit = 100)

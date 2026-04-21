@@ -105,6 +105,18 @@ class SalesDocumentCreationService
                 $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument((string) $payload['document_kind']);
                 $stockAlreadyDiscounted = false;
 
+                $requiresOpenCashSession = !$isPreDocument
+                    && $stockDirection < 0
+                    && strtoupper((string) $documentStatus) === 'ISSUED';
+
+                if ($requiresOpenCashSession) {
+                    $this->assertOpenCashSessionForIssuedSale(
+                        (int) $companyId,
+                        $branchId !== null ? (int) $branchId : null,
+                        $cashRegisterId !== null ? (int) $cashRegisterId : null
+                    );
+                }
+
                 if (array_key_exists('stock_already_discounted', $metadata)) {
                     $stockAlreadyDiscounted = filter_var($metadata['stock_already_discounted'], FILTER_VALIDATE_BOOLEAN);
                 }
@@ -276,6 +288,7 @@ class SalesDocumentCreationService
                     documentKind: (string) $payload['document_kind'],
                     series: (string) $payload['series'],
                     number: (int) $nextNumber,
+                    issueAt: (string) $resolvedIssueAt,
                     total: round($grandTotal, 2),
                     paidTotal: round($paidTotal, 2),
                     balanceDue: round($grandTotal - $paidTotal, 2),
@@ -517,6 +530,41 @@ class SalesDocumentCreationService
     private function resolveAuthRoleContext(int $userId, int $companyId): array
     {
         return $this->support->resolveAuthRoleContext($userId, $companyId);
+    }
+
+    private function assertOpenCashSessionForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): void
+    {
+        if (!$this->cashSessionsTableExists()) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+
+        if ($cashRegisterId === null || $cashRegisterId <= 0) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+
+        $openSessionExists = DB::table('sales.cash_sessions')
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
+            ->where('status', 'OPEN')
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where(function ($nested) use ($branchId) {
+                    $nested->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                });
+            })
+            ->exists();
+
+        if (!$openSessionExists) {
+            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+        }
+    }
+
+    private function cashSessionsTableExists(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'sales')
+            ->where('table_name', 'cash_sessions')
+            ->exists();
     }
 
 }

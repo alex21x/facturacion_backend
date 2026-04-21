@@ -150,8 +150,8 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
                 DB::raw('pl.lot_code'),
                 'il.movement_type',
                 'il.quantity',
-                DB::raw('COALESCE(il.unit_cost, 0) as unit_cost'),
-                DB::raw('(il.quantity * COALESCE(il.unit_cost, 0)) as line_total'),
+                DB::raw('COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0) as unit_cost'),
+                DB::raw('(il.quantity * COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0)) as line_total'),
                 DB::raw("SUM(CASE WHEN il.movement_type = 'IN' THEN il.quantity ELSE -il.quantity END)
                     OVER (
                         PARTITION BY il.company_id, il.warehouse_id, il.product_id

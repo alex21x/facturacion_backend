@@ -27,6 +27,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::get('/appcfg/modules', 'Api\\AppConfigController@modules');
         Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
         Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
+        Route::get('/appcfg/home-metrics-summary', 'Api\\AppConfigController@homeMetricsSummary');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
         Route::get('/appcfg/company-vertical-settings', 'Api\\AppConfigController@companyVerticalSettings');
@@ -69,6 +70,10 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::put('/appcfg/company-operational-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrixBulk')->middleware('admin.only');
         Route::post('/appcfg/admin-companies', 'Api\\AppConfigController@createAdminCompany')->middleware('admin.only');
         Route::post('/appcfg/admin-companies/{id}/reset-admin-password', 'Api\\AppConfigController@resetAdminCompanyPassword')->middleware('admin.only');
+        Route::get('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@companyCommerceAdminMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@updateCompanyCommerceAdminMatrix')->middleware('admin.only');
+        Route::get('/appcfg/company-inventory-settings-admin-matrix', 'Api\\AppConfigController@companyInventorySettingsAdminMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-inventory-settings-admin-matrix', 'Api\\AppConfigController@updateCompanyInventorySettingsAdminMatrix')->middleware('admin.only');
         Route::put('/appcfg/igv-settings', 'Api\\AppConfigController@updateIgvSettings');
     Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
     Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
@@ -137,6 +142,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::get('/sales/gre/prefill-document', 'Api\\GreGuideController@prefillFromDocument');
         Route::get('/sales/gre-guides', 'Api\\GreGuideController@index');
         Route::get('/sales/gre-guides/{id}', 'Api\\GreGuideController@show');
+        Route::get('/sales/gre-guides/{id}/tax-bridge-audit', 'Api\\GreGuideController@taxBridgeAuditHistory');
         Route::get('/sales/gre-guides/{id}/print', 'Api\\GreGuideController@printable');
 
         // Restaurant operations (comandas & orders)

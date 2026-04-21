@@ -206,7 +206,44 @@ class SalesController extends Controller
             'percepcion_account' => $salesPercepcionEnabled ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'SALES_PERCEPCION_ENABLED', 'PERCEPCION') : null,
             'sunat_operation_types' => ($salesDetraccionEnabled || $salesRetencionEnabled || $salesPercepcionEnabled) ? $this->resolveSunatOperationTypes($companyId, $branchId) : [],
             'commerce_features' => $commerceFeatures,
+            'company_profile' => $this->resolveCompanyPrintProfile($companyId),
         ]);
+    }
+
+    private function resolveCompanyPrintProfile(int $companyId): array
+    {
+        $company = DB::table('core.companies')
+            ->select('tax_id', 'legal_name', 'trade_name')
+            ->where('id', $companyId)
+            ->first();
+
+        $settings = null;
+        if ($this->tableExists('core.company_settings')) {
+            $settings = DB::table('core.company_settings')
+                ->select('address', 'phone', 'logo_path')
+                ->where('company_id', $companyId)
+                ->first();
+        }
+
+        $logoUrl = null;
+        if ($settings && !empty($settings->logo_path)) {
+            try {
+                $logoUrl = \Storage::disk('public')->exists($settings->logo_path)
+                    ? '/storage/' . ltrim((string) $settings->logo_path, '/')
+                    : null;
+            } catch (\Throwable $e) {
+                $logoUrl = null;
+            }
+        }
+
+        return [
+            'tax_id'     => $company->tax_id ?? null,
+            'legal_name' => $company->legal_name ?? '',
+            'trade_name' => $company->trade_name ?? null,
+            'address'    => $settings->address ?? null,
+            'phone'      => $settings->phone ?? null,
+            'logo_url'   => $logoUrl,
+        ];
     }
 
     private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
@@ -2414,6 +2451,7 @@ class SalesController extends Controller
                 'gravadaTotal' => (float) $gravadaTotal,
                 'inafectaTotal' => (float) $inafectaTotal,
                 'exoneradaTotal' => (float) $exoneradaTotal,
+                'company' => $this->resolveCompanyPrintProfile($companyId),
                 'items' => $mappedItems,
             ],
         ]);

@@ -50,6 +50,28 @@ class AppConfigController extends Controller
         'PURCHASES_PERCEPCION_ENABLED',
     ];
 
+    private const ADMIN_COMMERCE_FEATURE_CODES = [
+        'SALES_CUSTOMER_PRICE_PROFILE',
+        'SALES_SELLER_TO_CASHIER',
+        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
+        'SALES_ANTICIPO_ENABLED',
+        'SALES_TAX_BRIDGE',
+        'SALES_TAX_BRIDGE_DEBUG_VIEW',
+        'SALES_GLOBAL_DISCOUNT_ENABLED',
+        'SALES_ITEM_DISCOUNT_ENABLED',
+        'SALES_FREE_ITEMS_ENABLED',
+        'SALES_DETRACCION_ENABLED',
+        'SALES_RETENCION_ENABLED',
+        'SALES_PERCEPCION_ENABLED',
+        'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
+        'PURCHASES_ITEM_DISCOUNT_ENABLED',
+        'PURCHASES_FREE_ITEMS_ENABLED',
+        'PURCHASES_DETRACCION_ENABLED',
+        'PURCHASES_RETENCION_COMPRADOR_ENABLED',
+        'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
+        'PURCHASES_PERCEPCION_ENABLED',
+    ];
+
     private const FEATURE_LABELS_FALLBACK = [
         'DOC_KIND_CREDIT_NOTE' => 'Notas de crédito',
         'DOC_KIND_CREDIT_NOTE_' => 'Notas de crédito',
@@ -2938,21 +2960,7 @@ class AppConfigController extends Controller
 
     public function companyCommerceAdminMatrix(Request $request)
     {
-        $ADMIN_FEATURE_CODES = [
-            'SALES_GLOBAL_DISCOUNT_ENABLED',
-            'SALES_ITEM_DISCOUNT_ENABLED',
-            'SALES_FREE_ITEMS_ENABLED',
-            'SALES_DETRACCION_ENABLED',
-            'SALES_RETENCION_ENABLED',
-            'SALES_PERCEPCION_ENABLED',
-            'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
-            'PURCHASES_ITEM_DISCOUNT_ENABLED',
-            'PURCHASES_FREE_ITEMS_ENABLED',
-            'PURCHASES_DETRACCION_ENABLED',
-            'PURCHASES_RETENCION_COMPRADOR_ENABLED',
-            'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
-            'PURCHASES_PERCEPCION_ENABLED',
-        ];
+        $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
 
         $companies = DB::table('core.companies')
             ->orderBy('legal_name')
@@ -2991,21 +2999,7 @@ class AppConfigController extends Controller
 
     public function updateCompanyCommerceAdminMatrix(Request $request)
     {
-        $ADMIN_FEATURE_CODES = [
-            'SALES_GLOBAL_DISCOUNT_ENABLED',
-            'SALES_ITEM_DISCOUNT_ENABLED',
-            'SALES_FREE_ITEMS_ENABLED',
-            'SALES_DETRACCION_ENABLED',
-            'SALES_RETENCION_ENABLED',
-            'SALES_PERCEPCION_ENABLED',
-            'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
-            'PURCHASES_ITEM_DISCOUNT_ENABLED',
-            'PURCHASES_FREE_ITEMS_ENABLED',
-            'PURCHASES_DETRACCION_ENABLED',
-            'PURCHASES_RETENCION_COMPRADOR_ENABLED',
-            'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
-            'PURCHASES_PERCEPCION_ENABLED',
-        ];
+        $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
 
         $authUser = $request->attributes->get('auth_user');
 

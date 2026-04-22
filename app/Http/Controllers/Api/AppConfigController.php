@@ -2223,6 +2223,15 @@ class AppConfigController extends Controller
             ->exists();
     }
 
+    private function columnExists(string $schema, string $table, string $column): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->where('column_name', $column)
+            ->exists();
+    }
+
     private function normalizeHomeMetricsRange(string $range): string
     {
         $normalized = strtoupper(trim($range));
@@ -3021,20 +3030,28 @@ class AppConfigController extends Controller
             return response()->json(['message' => 'Company not found'], 404);
         }
 
-        DB::transaction(function () use ($companyId, $payload, $ADMIN_FEATURE_CODES, $authUser) {
+        $hasCreatedAt = $this->columnExists('appcfg', 'company_feature_toggles', 'created_at');
+
+        DB::transaction(function () use ($companyId, $payload, $ADMIN_FEATURE_CODES, $authUser, $hasCreatedAt) {
             foreach ($ADMIN_FEATURE_CODES as $code) {
                 if (!array_key_exists($code, $payload['features'])) {
                     continue;
                 }
                 $isEnabled = (bool) $payload['features'][$code];
+
+                $values = [
+                    'is_enabled' => $isEnabled,
+                    'updated_by' => $authUser ? $authUser->id : null,
+                    'updated_at' => now(),
+                ];
+
+                if ($hasCreatedAt) {
+                    $values['created_at'] = now();
+                }
+
                 DB::table('appcfg.company_feature_toggles')->updateOrInsert(
                     ['company_id' => $companyId, 'feature_code' => $code],
-                    [
-                        'is_enabled' => $isEnabled,
-                        'updated_by' => $authUser ? $authUser->id : null,
-                        'updated_at' => now(),
-                        'created_at' => now(),
-                    ]
+                    $values
                 );
             }
         });
@@ -3131,6 +3148,8 @@ class AppConfigController extends Controller
             return response()->json(['message' => 'Company not found'], 404);
         }
 
+        $hasCreatedAt = $this->columnExists('inventory', 'inventory_settings', 'created_at');
+
         $updates = ['updated_at' => now()];
         $boolFields = [
             'enable_inventory_pro', 'enable_lot_tracking', 'enable_expiry_tracking',
@@ -3152,7 +3171,11 @@ class AppConfigController extends Controller
 
         DB::table('inventory.inventory_settings')->updateOrInsert(
             ['company_id' => $companyId],
-            array_merge($updates, ['company_id' => $companyId, 'created_at' => now()])
+            array_merge(
+                $updates,
+                ['company_id' => $companyId],
+                $hasCreatedAt ? ['created_at' => now()] : []
+            )
         );
 
         return $this->companyInventorySettingsAdminMatrix($request);

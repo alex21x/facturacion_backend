@@ -1741,6 +1741,24 @@ class AppConfigController extends Controller
                 );
             }
 
+            if ($this->tableExists('appcfg', 'company_feature_toggles')) {
+                $taxBridgeValues = [
+                    'is_enabled' => true,
+                    'config' => $this->encodeJsonConfig($this->defaultSalesTaxBridgeConfig()),
+                    'updated_by' => $authUser->id,
+                    'updated_at' => now(),
+                ];
+
+                if ($this->columnExists('appcfg', 'company_feature_toggles', 'created_at')) {
+                    $taxBridgeValues['created_at'] = now();
+                }
+
+                DB::table('appcfg.company_feature_toggles')->updateOrInsert(
+                    ['company_id' => $companyId, 'feature_code' => 'SALES_TAX_BRIDGE'],
+                    $taxBridgeValues
+                );
+            }
+
             $this->ensureCompanyAccessLink($companyId, (string) $payload['legal_name'], $taxId, $authUser->id);
         });
 
@@ -2021,6 +2039,25 @@ class AppConfigController extends Controller
         }
 
         return $value;
+    }
+
+    private function defaultSalesTaxBridgeConfig(): array
+    {
+        return [
+            'bridge_mode' => 'BETA',
+            'production_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNAT',
+            'beta_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA',
+            'timeout_seconds' => 15,
+            'auth_scheme' => 'none',
+            'token' => '',
+            'force_async_on_issue' => true,
+            'auto_send_on_issue' => true,
+            'auto_reconcile_enabled' => true,
+            'reconcile_batch_size' => 20,
+            'sol_user' => 'MODDATOS',
+            'sol_pass' => 'Moddatos',
+            'envio_pse' => '',
+        ];
     }
 
     private function encodeJsonConfig($value): ?string

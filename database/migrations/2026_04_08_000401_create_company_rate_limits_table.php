@@ -8,6 +8,10 @@ class CreateCompanyRateLimitsTable extends Migration
 {
     public function up()
     {
+        if (Schema::hasTable('appcfg.company_rate_limits')) {
+            return;
+        }
+
         Schema::create('appcfg.company_rate_limits', function (Blueprint $table) {
             $table->unsignedBigInteger('company_id')->primary();
             $table->unsignedInteger('requests_per_minute')->default(3600);

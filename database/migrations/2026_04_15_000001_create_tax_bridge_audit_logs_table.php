@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('sales.tax_bridge_audit_logs')) {
+            return;
+        }
+
         // Auditoría de TODOS los envíos tributarios (RA, RC, BD, RD, NC, ND, facturas, boletas)
         Schema::create('sales.tax_bridge_audit_logs', function (Blueprint $table) {
             $table->bigIncrements('id');

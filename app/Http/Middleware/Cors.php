@@ -41,15 +41,19 @@ class Cors
         return $response;
     }
 
-    private function allowedOrigins(): array
+private function allowedOrigins(): array
     {
         $origins = [
             'http://127.0.0.1:5173',
             'http://localhost:5173',
             'http://127.0.0.1:5174',
             'http://localhost:5174',
+            'http://127.0.0.1:5178',
+            'http://localhost:5178',
+            'http://127.0.0.1:5179',
+            'http://localhost:5179',
             (string) env('FRONTEND_URL', ''),
-            (string) env('FRONTEND_ADMIN_URL', ''),
+            (string) env('FRONTEND_APP_URL', ''),
         ];
 
         return array_values(array_filter(array_unique($origins)));

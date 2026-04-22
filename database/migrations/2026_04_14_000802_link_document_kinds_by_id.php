@@ -18,8 +18,20 @@ return new class extends Migration
         DB::statement("ALTER TABLE sales.document_kinds ALTER COLUMN id SET NOT NULL");
         DB::statement("SELECT setval('sales.document_kinds_id_seq', COALESCE((SELECT MAX(id) FROM sales.document_kinds), 1), true)");
 
-        DB::statement('ALTER TABLE sales.document_kinds DROP CONSTRAINT IF EXISTS document_kinds_pkey');
-        DB::statement('ALTER TABLE sales.document_kinds ADD CONSTRAINT document_kinds_pkey PRIMARY KEY (id)');
+        DB::statement(<<<'SQL'
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'document_kinds_pkey'
+          AND conrelid = 'sales.document_kinds'::regclass
+    ) THEN
+        ALTER TABLE sales.document_kinds ADD CONSTRAINT document_kinds_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+SQL
+);
 
         DB::statement(<<<'SQL'
 DO $$

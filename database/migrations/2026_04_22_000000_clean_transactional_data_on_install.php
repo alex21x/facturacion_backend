@@ -8,27 +8,37 @@ return new class extends Migration
 {
     /**
      * Run the migration to clean transactional/operational data on fresh install.
-     * IMPORTANT: This migration is designed to run ONLY on fresh installations 
-     * after the bootstrap SQL dump is restored. It cleans operational data while 
-     * preserving master data, configuration, series, and endpoints.
-     * 
-     * Tables preserved:
-     * - master.* (master data: products, customers, suppliers, etc)
-     * - appcfg.* (application configuration)
-     * - core.series_numbers (document series)
-     * - core.document_sequences (document numerators)
-     * - core.endpoints/inpoints (API endpoints)
-     * 
-     * Tables cleaned:
-     * - sales.* (operational sales data)
-     * - purchases.* (operational purchase data)
-     * - inventory.* (inventory movements, transfers)
-     * - cash.* (cash transactions, flows)
+     * IMPORTANT: This migration is designed to run ONLY on fresh installations
+     * after the bootstrap SQL dump is restored. It cleans operational data while
+     * preserving master data, configuration, series, and users.
+     *
+     * Tables PRESERVED (master/config — never touched):
+     * - auth.*          (users, roles, permissions)
+     * - appcfg.*        (application configuration)
+     * - core.*          (companies, branches, settings)
+     * - master.*        (catalogs: tax codes, UOM, etc.)
+     * - inventory.products, inventory.categories, inventory.warehouses,
+     *   inventory.product_* (full product catalog)
+     * - sales.series_numbers, sales.document_sequences (series config)
+     * - sales.cash_registers, sales.customers, sales.price_tiers,
+     *   sales.document_kinds, sales.customer_types (master/config)
+     *
+     * Tables CLEANED (transactional operational data):
+     * - sales.commercial_documents + related detail tables
+     * - sales.sales_orders + related detail tables
+     * - sales.cash_sessions, sales.cash_movements
+     * - sales.daily_summaries + items
+     * - sales.gre_guides
+     * - sales.sunat_exception_actions, sales.tax_bridge_audit_logs
+     * - inventory.inventory_ledger, inventory.stock_entries + items
+     * - inventory.stock_transformations + lines
+     * - inventory.product_lots, inventory.lot_expiry_projection
+     * - inventory.stock_daily_snapshot
+     * - inventory.outbox_events, inventory.report_requests
+     * - inventory.product_import_batches + items
      */
     public function up(): void
     {
-        // Only run if this is a bootstrap operation (check if a specific marker exists)
-        // This prevents accidental deletion on production environments
         if (!$this->shouldCleanTransactionalData()) {
             return;
         }
@@ -36,17 +46,8 @@ return new class extends Migration
         DB::connection('pgsql')->statement('SET session_replication_role = replica');
 
         try {
-            // Clean operational sales data
-            $this->cleanSalesData();
-
-            // Clean operational purchase data
-            $this->cleanPurchasesData();
-
-            // Clean inventory movements and transfers
-            $this->cleanInventoryData();
-
-            // Clean cash/financial transactions
-            $this->cleanCashData();
+            $this->cleanSalesTransactionalData();
+            $this->cleanInventoryTransactionalData();
         } finally {
             DB::connection('pgsql')->statement('SET session_replication_role = default');
         }
@@ -77,83 +78,64 @@ return new class extends Migration
         return (bool) ($result->exists ?? false);
     }
 
-    private function cleanSalesData(): void
+    private function cleanSalesTransactionalData(): void
     {
+        // Detail tables first (reference header tables via FK)
         $tables = [
-            'sales.invoice_details',
-            'sales.invoices',
-            'sales.receipt_details',
-            'sales.receipts',
-            'sales.quotation_details',
-            'sales.quotations',
-            'sales.sales_order_details',
-            'sales.sales_orders',
-            'sales.credit_note_details',
-            'sales.credit_notes',
-            'sales.debit_note_details',
-            'sales.debit_notes',
-            'sales.gre_guide_details',
+            // Commercial documents (invoices, receipts, credit/debit notes, quotations)
+            'sales.commercial_document_item_lots',
+            'sales.commercial_document_items',
+            'sales.commercial_document_payments',
+            'sales.daily_summary_items',
+            'sales.sunat_exception_actions',
+            'sales.tax_bridge_audit_logs',
+            'sales.commercial_documents',
+            // Daily summaries (boletas/facturas sent to SUNAT)
+            'sales.daily_summaries',
+            // GRE guides (guías de remisión)
             'sales.gre_guides',
-            'sales.invoice_payments',
-            'sales.receipt_payments',
+            // Sales orders (pedidos) — transactional, not configuration
+            'sales.sales_order_item_lots',
+            'sales.sales_order_items',
+            'sales.sales_order_payments',
+            'sales.sales_orders',
+            // Cash sessions and movements
+            'sales.cash_movements',
+            'sales.cash_sessions',
         ];
 
         foreach ($tables as $table) {
             if ($this->tableExists($table)) {
-                DB::statement("TRUNCATE TABLE $table CASCADE");
+                DB::statement("TRUNCATE TABLE $table");
             }
         }
     }
 
-    private function cleanPurchasesData(): void
+    private function cleanInventoryTransactionalData(): void
     {
         $tables = [
-            'purchases.purchase_order_details',
-            'purchases.purchase_orders',
-            'purchases.purchase_invoice_details',
-            'purchases.purchase_invoices',
-            'purchases.purchase_receipt_details',
-            'purchases.purchase_receipts',
-            'purchases.purchase_payments',
+            // Stock movements and ledger
+            'inventory.stock_transformation_lines',
+            'inventory.stock_transformations',
+            'inventory.stock_entry_items',
+            'inventory.stock_entries',
+            'inventory.inventory_ledger',
+            // Computed / derived tables (rebuilt from ledger)
+            'inventory.stock_daily_snapshot',
+            'inventory.lot_expiry_projection',
+            // Product lots (transactional lot records)
+            'inventory.product_lots',
+            // Event queues and async tasks
+            'inventory.outbox_events',
+            'inventory.report_requests',
+            // Import history
+            'inventory.product_import_batch_items',
+            'inventory.product_import_batches',
         ];
 
         foreach ($tables as $table) {
             if ($this->tableExists($table)) {
-                DB::statement("TRUNCATE TABLE $table CASCADE");
-            }
-        }
-    }
-
-    private function cleanInventoryData(): void
-    {
-        $tables = [
-            'inventory.movement_details',
-            'inventory.movements',
-            'inventory.transfer_details',
-            'inventory.transfers',
-            'inventory.stock_adjustments',
-            'inventory.stock_counts',
-        ];
-
-        foreach ($tables as $table) {
-            if ($this->tableExists($table)) {
-                DB::statement("TRUNCATE TABLE $table CASCADE");
-            }
-        }
-    }
-
-    private function cleanCashData(): void
-    {
-        $tables = [
-            'cash.cash_flows',
-            'cash.cash_transactions',
-            'cash.cash_count_details',
-            'cash.cash_counts',
-        ];
-
-        foreach ($tables as $table) {
-            if ($this->tableExists($table)) {
-                DB::statement("TRUNCATE TABLE $table CASCADE");
+                DB::statement("TRUNCATE TABLE $table");
             }
         }
     }

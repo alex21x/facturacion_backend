@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -59,9 +60,21 @@ return new class extends Migration
 
     private function shouldCleanTransactionalData(): bool
     {
-        // Only clean if APP_ENV is 'local' (development environment)
-        // This prevents accidental execution on production
-        return env('APP_ENV') === 'local';
+        // Require explicit opt-in flag during clean install bootstrap.
+        // This avoids wiping operational data during regular updates.
+        return env('APP_ENV') === 'local'
+            && filter_var(env('ALLOW_CLEAN_TRANSACTIONAL_ON_INSTALL', false), FILTER_VALIDATE_BOOL);
+    }
+
+    private function tableExists(string $schemaTable): bool
+    {
+        [$schema, $table] = explode('.', $schemaTable, 2);
+        $result = DB::selectOne(
+            'SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?) AS exists',
+            [$schema, $table]
+        );
+
+        return (bool) ($result->exists ?? false);
     }
 
     private function cleanSalesData(): void
@@ -86,7 +99,7 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            if (Schema::hasTable(str_replace('.', '_', $table))) {
+            if ($this->tableExists($table)) {
                 DB::statement("TRUNCATE TABLE $table CASCADE");
             }
         }
@@ -105,7 +118,7 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            if (Schema::hasTable(str_replace('.', '_', $table))) {
+            if ($this->tableExists($table)) {
                 DB::statement("TRUNCATE TABLE $table CASCADE");
             }
         }
@@ -123,7 +136,7 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            if (Schema::hasTable(str_replace('.', '_', $table))) {
+            if ($this->tableExists($table)) {
                 DB::statement("TRUNCATE TABLE $table CASCADE");
             }
         }
@@ -139,7 +152,7 @@ return new class extends Migration
         ];
 
         foreach ($tables as $table) {
-            if (Schema::hasTable(str_replace('.', '_', $table))) {
+            if ($this->tableExists($table)) {
                 DB::statement("TRUNCATE TABLE $table CASCADE");
             }
         }

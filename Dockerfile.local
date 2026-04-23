@@ -16,6 +16,7 @@ COPY . .
 
 RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader --no-scripts \
     && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && sed -i 's/\r//' docker/entrypoint.local.sh \
     && chmod +x docker/entrypoint.local.sh
 
 EXPOSE 8000

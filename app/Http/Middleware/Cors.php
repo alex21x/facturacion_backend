@@ -70,7 +70,7 @@ class Cors
         }
 
         // For installer/local deployments with LAN access enabled (0.0.0.0),
-        // allow browser origins from localhost/private IPv4 on known frontend ports.
+        // allow browser origins from localhost/private IPv4 on any port.
         if ((string) env('APP_ENV', 'production') !== 'local') {
             return false;
         }
@@ -86,46 +86,8 @@ class Cors
             return false;
         }
 
-        $port = isset($parts['port'])
-            ? (int) $parts['port']
-            : ($scheme === 'https' ? 443 : 80);
-
-        if (!in_array($port, $this->allowedLocalPorts(), true)) {
-            return false;
-        }
-
+        // For local origins, accept ANY port (no port filtering)
         return $this->isLocalOriginHost($host);
-    }
-
-    private function allowedLocalPorts(): array
-    {
-        $ports = [5173, 5174, 5178, 5179];
-
-        foreach (['FRONTEND_PORT', 'ADMIN_PORT'] as $envKey) {
-            $envPort = env($envKey);
-            if (is_numeric($envPort)) {
-                $port = (int) $envPort;
-                if ($port > 0 && $port <= 65535) {
-                    $ports[] = $port;
-                }
-            }
-        }
-
-        foreach ([(string) env('FRONTEND_URL', ''), (string) env('FRONTEND_APP_URL', '')] as $url) {
-            if ($url === '') {
-                continue;
-            }
-
-            $parts = parse_url($url);
-            if (is_array($parts) && isset($parts['port'])) {
-                $port = (int) $parts['port'];
-                if ($port > 0 && $port <= 65535) {
-                    $ports[] = $port;
-                }
-            }
-        }
-
-        return array_values(array_unique($ports));
     }
 
     private function isLocalOriginHost(string $host): bool
@@ -135,7 +97,8 @@ class Cors
         }
 
         // Support Windows/LAN hostname access used by remote clients,
-        // e.g. http://PC-FACTURACION:5180
+        // e.g. http://PC-FACTURACION:5180 or http://PC-NAME:8080
+        // (any hostname without dots, or with dots for internal domains)
         if (preg_match('/^[a-z0-9-]+$/i', $host)) {
             return true;
         }
@@ -149,6 +112,7 @@ class Cors
             return false;
         }
 
+        // Support all private IPv4 ranges (RFC 1918 + link-local)
         if (strpos($host, '10.') === 0) {
             return true;
         }
@@ -158,6 +122,11 @@ class Cors
         }
 
         if (preg_match('/^172\.(1[6-9]|2\d|3[0-1])\./', $host)) {
+            return true;
+        }
+
+        // Support link-local (169.254.x.x)
+        if (strpos($host, '169.254.') === 0) {
             return true;
         }
 

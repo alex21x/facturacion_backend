@@ -134,6 +134,17 @@ class Cors
             return true;
         }
 
+        // Support Windows/LAN hostname access used by remote clients,
+        // e.g. http://PC-FACTURACION:5180
+        if (preg_match('/^[a-z0-9-]+$/i', $host)) {
+            return true;
+        }
+
+        // Support internal DNS names (office/local domains).
+        if (preg_match('/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i', $host)) {
+            return true;
+        }
+
         if (!filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             return false;
         }

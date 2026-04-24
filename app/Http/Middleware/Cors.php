@@ -69,65 +69,25 @@ class Cors
             return true;
         }
 
-        // For installer/local deployments with LAN access enabled (0.0.0.0),
-        // allow browser origins from localhost/private IPv4 on any port.
-        if ((string) env('APP_ENV', 'production') !== 'local') {
-            return false;
-        }
-
-        $parts = parse_url($origin);
-        if (!is_array($parts)) {
-            return false;
-        }
-
-        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
-        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
-        if ($host === '' || ($scheme !== 'http' && $scheme !== 'https')) {
-            return false;
-        }
-
-        // For local origins, accept ANY port (no port filtering)
-        return $this->isLocalOriginHost($host);
-    }
-
-    private function isLocalOriginHost(string $host): bool
-    {
-        if ($host === 'localhost' || $host === '127.0.0.1') {
-            return true;
-        }
-
-        // Support Windows/LAN hostname access used by remote clients,
-        // e.g. http://PC-FACTURACION:5180 or http://PC-NAME:8080
-        // (any hostname without dots, or with dots for internal domains)
-        if (preg_match('/^[a-z0-9-]+$/i', $host)) {
-            return true;
-        }
-
-        // Support internal DNS names (office/local domains).
-        if (preg_match('/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i', $host)) {
-            return true;
-        }
-
-        if (!filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return false;
-        }
-
-        // Support all private IPv4 ranges (RFC 1918 + link-local)
-        if (strpos($host, '10.') === 0) {
-            return true;
-        }
-
-        if (strpos($host, '192.168.') === 0) {
-            return true;
-        }
-
-        if (preg_match('/^172\.(1[6-9]|2\d|3[0-1])\./', $host)) {
-            return true;
-        }
-
-        // Support link-local (169.254.x.x)
-        if (strpos($host, '169.254.') === 0) {
-            return true;
+        // For LOCAL environment (installer/local development mode):
+        // Accept ANY origin from ANY IP/hostname/port without restriction.
+        // This is safe because APP_ENV=local is ONLY for local/network development,
+        // NOT for production. Installers use this mode to support:
+        //  - Localhost (127.0.0.1, localhost)
+        //  - LAN access (192.168.x, 10.x, 172.16-31.x)
+        //  - Private networks (any ISP/carrier IP on local network)
+        //  - Mobile clients (any IP on same network via WiFi)
+        //  - Hostnames (PC-NAME:port)
+        //  - Different ports (5173, 5180, 5181, 8080, any port)
+        if ((string) env('APP_ENV', 'production') === 'local') {
+            $parts = parse_url($origin);
+            if (is_array($parts) && isset($parts['scheme'])) {
+                $scheme = strtolower((string) $parts['scheme']);
+                // Accept http and https only (prevent javascript: or data: origins)
+                if ($scheme === 'http' || $scheme === 'https') {
+                    return true;
+                }
+            }
         }
 
         return false;

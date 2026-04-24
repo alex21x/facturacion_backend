@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict uc2RQCMEE408gkDyONo9xXDZwtNFqcJhSS9hAWxn4A35LZg03RCoObkU23sQYLQ
+\restrict 02aWTCECukDSUgPIfW8a17KaJZlxe0qO9jCTiuYo3p2qtsShOQdRgOoVHwydqQr
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -4160,7 +4160,7 @@ ALTER TABLE ONLY sales.tax_bridge_audit_logs ALTER COLUMN id SET DEFAULT nextval
 --
 
 COPY appcfg.admin_portal_users (user_id, status, created_at, updated_at) FROM stdin;
-4	1	2026-04-08 00:18:22.789859	2026-04-08 00:18:22.789859
+4	1	2026-04-08 00:18:22.789859	2026-04-24 00:27:28.134609
 \.
 
 
@@ -5605,7 +5605,6 @@ COPY auth.refresh_tokens (id, user_id, token_hash, expires_at, revoked_at, creat
 961	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.3127ec8c2f25a713e64d8ecff11a4baaea45704232e69b4a8c49c3187e904379	2026-05-08 04:27:05+00	2026-04-08 04:32:32+00	2026-04-08 04:27:05+00
 977	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.6fcbd8cf1e5448cd7d06d2bd04f6b9e712c44f03b94d06b50905c840551bc5b4	2026-05-08 05:29:09+00	2026-04-08 05:35:35+00	2026-04-08 05:29:09+00
 993	5	7e714d6d8bc201e47f5042559c1cc6214446e6b8.9fae70c2588f58315f669dd3d045640582a8c279c7b75636372351d112280451	2026-05-10 00:55:37+00	2026-04-10 01:15:22+00	2026-04-10 00:55:37+00
-1006	4	df4b75dddf3a95c03a2aa0fadf9cbf9f69e7f9ce.dcb088e89f84499f873a394cd892d79b0281e68cbc599d6ff3d078f25addb973	2026-05-11 07:34:49+00	\N	2026-04-11 07:34:49+00
 1022	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.c7148d00de2f15e4e66b25bc91c7161b941fcce490615b2438b773567428525c	2026-05-13 21:52:52+00	2026-04-13 22:23:08+00	2026-04-13 21:52:52+00
 1038	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.32ca54abebed4cee7f7bb9fd2cdffa599cb9d9b390b95056bb7933d008e274bb	2026-05-14 16:04:33+00	2026-04-14 16:28:28+00	2026-04-14 16:04:33+00
 1054	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.4980f58b9045dd2f1eb212c4e5f6f4784380b7a3d7838af135987f510c2cf6e9	2026-05-15 22:03:35+00	2026-04-15 22:37:10+00	2026-04-15 22:03:35+00
@@ -5641,7 +5640,13 @@ COPY auth.refresh_tokens (id, user_id, token_hash, expires_at, revoked_at, creat
 1025	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.aa38b7b1ebdc37499bc48850cc2ecb15d2f89ca266fd288e937bb067bc5e7b72	2026-05-13 23:19:56+00	2026-04-14 03:48:24+00	2026-04-13 23:19:56+00
 1041	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.21ff056d46a83a2ad4a33984398066b93375fda9e0ab4cd60c16efb9400a0eb0	2026-05-14 23:23:07+00	2026-04-15 11:30:13+00	2026-04-14 23:23:07+00
 1057	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.dc17904a5345b6200865864c9079ef0236896fae2c6682a997d238efcfc109f9	2026-05-15 23:36:31+00	2026-04-16 00:06:42+00	2026-04-15 23:36:31+00
-1072	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.78b5be2ee74ad6591b2f2d437b353d4e08784a653219d4a479d65e0d5efb2af0	2026-06-23 00:07:33+00	\N	2026-04-24 00:07:33+00
+1006	4	df4b75dddf3a95c03a2aa0fadf9cbf9f69e7f9ce.dcb088e89f84499f873a394cd892d79b0281e68cbc599d6ff3d078f25addb973	2026-05-11 07:34:49+00	2026-04-24 00:27:30+00	2026-04-11 07:34:49+00
+1072	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.78b5be2ee74ad6591b2f2d437b353d4e08784a653219d4a479d65e0d5efb2af0	2026-06-23 00:07:33+00	2026-04-24 00:25:46+00	2026-04-24 00:07:33+00
+1073	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.2e2247ba02d018aa50275da432f990413386f6e33844c5a5afb6b650bb5799f7	2026-06-23 00:25:46+00	2026-04-24 00:26:46+00	2026-04-24 00:25:46+00
+1074	1	e9e35fd0da7eae8b821fb6d0870a9fb20953c974.c302a1e6a843080f4018f3e8bd35b7d7cc3ce81c02d90816f99a841ca405df1e	2026-06-23 00:25:48+00	\N	2026-04-24 00:25:48+00
+1075	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.10f5c8b953d9fae53de454aae5c5ba8a6a95d04a08133d0cf193312d5a11d48d	2026-06-23 00:26:46+00	2026-04-24 00:26:57+00	2026-04-24 00:26:46+00
+1076	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.035ae28a545120490ff49a75863b15f0e7069b596936c2d570c214dc8850fc39	2026-06-23 00:26:57+00	\N	2026-04-24 00:26:57+00
+1077	4	df4b75dddf3a95c03a2aa0fadf9cbf9f69e7f9ce.5724c1fb52b53662960600d723dcbd30185c44974dfd4f1bf5070b3960406dc4	2026-06-23 00:27:30+00	\N	2026-04-24 00:27:30+00
 \.
 
 
@@ -5736,10 +5741,10 @@ COPY auth.users (id, company_id, branch_id, username, password_hash, first_name,
 3	1	1	caja_demo	$2y$10$DvUMKOMvfT32M3gwGLGD2.4ddiskMfu.nfQT2kwKeiyQZOCDdMP1.	Caja	Demo	caja@demo.local	\N	1	2026-03-27 07:26:51+00	2026-03-20 16:11:40.73812+00	2026-03-27 07:26:51+00	\N
 2	1	1	vendedor_demo	$2y$10$DvUMKOMvfT32M3gwGLGD2.4ddiskMfu.nfQT2kwKeiyQZOCDdMP1.	Vendedor	Demo	vendedor@demo.local	\N	1	2026-03-27 10:41:47+00	2026-03-20 16:11:40.73812+00	2026-03-27 10:41:47+00	\N
 5	4	4	rest	$2y$10$RwA0UZuvELJZHKHbWoD2ZudXcNJcU0OWbW25RaU3r9.RrgRcDjFxe	restaurante	restaurante	fernandezdelacrua@gmail.com	\N	1	2026-04-11 07:23:31+00	2026-04-08 06:55:41+00	2026-04-11 07:23:31+00	\N
-4	1	1	admin_panel	$2y$10$ZCevYCFTfINZEYMAhrDCS..Otpbd9tQ0IZNvOY1lFi/kAXvoPBoXe	Portal	Admin	admin.panel@demo.local	\N	1	2026-04-11 07:34:49+00	2026-04-08 05:16:57.957523+00	2026-04-11 07:34:49+00	\N
 6	4	4	mozo_rest	$2y$10$4f58D1wg1Y1MeiYhZZpRLu9gG3DwyxJNJTMJc8PVAkP2Zgu/F4ldi	Mozo	Restaurante	mozo.rest@local.test	\N	1	2026-04-11 07:35:18+00	2026-04-11 07:09:37+00	2026-04-11 07:35:18+00	\N
 7	4	4	comanda_rest	$2y$10$kFWIThjaVIxsxbzLgTXvC.ByaKFnl31ugGh9/Yt1Qp8zf/HoQvBRu	Cocina	Comanda	comanda.rest@local.test	\N	1	2026-04-11 07:37:04+00	2026-04-11 07:09:37+00	2026-04-11 07:37:04+00	\N
-1	1	1	admin	$2y$10$FFlO73LI1c0.bKBztmasxubqIvjVbtjour1/ljakfJh0HktVottNW	Admin	Sistema	admin@demo.local	\N	1	2026-04-24 00:07:33+00	2026-03-11 02:21:33.764975+00	2026-04-24 00:07:33+00	\N
+1	1	1	admin	$2y$10$FFlO73LI1c0.bKBztmasxubqIvjVbtjour1/ljakfJh0HktVottNW	Admin	Sistema	admin@demo.local	\N	1	2026-04-24 00:26:57+00	2026-03-11 02:21:33.764975+00	2026-04-24 00:26:57+00	\N
+4	1	1	admin_panel	$2y$10$1z8vVkAcrwwl1FfNZTRB2.jThpyVpSJ/3m9D0wzQFSZVMpfMauEaO	Portal	Admin	admin.panel@demo.local	\N	1	2026-04-24 00:27:30+00	2026-04-08 05:16:57.957523+00	2026-04-24 00:27:30+00	\N
 \.
 
 
@@ -10547,6 +10552,15 @@ COPY ops.http_endpoint_latency_samples (id, company_id, method, route_uri, endpo
 4	\N	POST	/api/auth/login	POST /api/auth/login	401	15.961	2026-04-24 00:05:56+00	2026-04-24 00:05:56+00	2026-04-24 00:05:56+00
 5	\N	POST	/api/auth/login	POST /api/auth/login	401	29.992	2026-04-24 00:06:58+00	2026-04-24 00:06:58+00	2026-04-24 00:06:58+00
 6	\N	POST	/api/auth/login	POST /api/auth/login	200	90.795	2026-04-24 00:07:33+00	2026-04-24 00:07:33+00	2026-04-24 00:07:33+00
+7	\N	POST	/api/auth/login	POST /api/auth/login	200	106.811	2026-04-24 00:25:46+00	2026-04-24 00:25:46+00	2026-04-24 00:25:46+00
+8	\N	POST	/api/auth/login	POST /api/auth/login	200	81.766	2026-04-24 00:25:48+00	2026-04-24 00:25:48+00	2026-04-24 00:25:48+00
+9	\N	POST	/api/auth/login	POST /api/auth/login	401	90.955	2026-04-24 00:26:45+00	2026-04-24 00:26:45+00	2026-04-24 00:26:45+00
+10	\N	POST	/api/auth/login	POST /api/auth/login	401	66.744	2026-04-24 00:26:46+00	2026-04-24 00:26:46+00	2026-04-24 00:26:46+00
+11	\N	POST	/api/auth/login	POST /api/auth/login	200	84.078	2026-04-24 00:26:46+00	2026-04-24 00:26:46+00	2026-04-24 00:26:46+00
+12	\N	POST	/api/auth/login	POST /api/auth/login	401	112.604	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00
+13	\N	POST	/api/auth/login	POST /api/auth/login	401	65.625	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00
+14	\N	POST	/api/auth/login	POST /api/auth/login	200	80.158	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00	2026-04-24 00:26:57+00
+15	\N	POST	/api/auth/login	POST /api/auth/login	200	85.143	2026-04-24 00:27:30+00	2026-04-24 00:27:30+00	2026-04-24 00:27:30+00
 \.
 
 
@@ -11738,7 +11752,7 @@ SELECT pg_catalog.setval('auth.permissions_id_seq', 1, false);
 -- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
 --
 
-SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 1072, true);
+SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 1077, true);
 
 
 --
@@ -11962,7 +11976,7 @@ SELECT pg_catalog.setval('master.detraccion_service_codes_id_seq', 31, true);
 -- Name: http_endpoint_latency_samples_id_seq; Type: SEQUENCE SET; Schema: ops; Owner: -
 --
 
-SELECT pg_catalog.setval('ops.http_endpoint_latency_samples_id_seq', 6, true);
+SELECT pg_catalog.setval('ops.http_endpoint_latency_samples_id_seq', 15, true);
 
 
 --
@@ -15602,5 +15616,5 @@ ALTER TABLE ONLY sales.wholesale_settings
 -- PostgreSQL database dump complete
 --
 
-\unrestrict uc2RQCMEE408gkDyONo9xXDZwtNFqcJhSS9hAWxn4A35LZg03RCoObkU23sQYLQ
+\unrestrict 02aWTCECukDSUgPIfW8a17KaJZlxe0qO9jCTiuYo3p2qtsShOQdRgOoVHwydqQr
 

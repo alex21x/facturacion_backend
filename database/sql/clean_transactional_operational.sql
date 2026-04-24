@@ -4,8 +4,8 @@
 
 BEGIN;
 
-SET session_replication_role = replica;
-
+-- CASCADE handles FK dependencies without needing to disable triggers.
+-- Order still matters for clarity but CASCADE makes it safe regardless.
 DO $$
 DECLARE
     table_name text;
@@ -44,12 +44,12 @@ DECLARE
 BEGIN
     FOREACH table_name IN ARRAY tables_to_clean LOOP
         IF to_regclass(table_name) IS NOT NULL THEN
-            EXECUTE format('TRUNCATE TABLE %s', table_name);
+            EXECUTE format('TRUNCATE TABLE %I.%I CASCADE',
+                split_part(table_name, '.', 1),
+                split_part(table_name, '.', 2));
         END IF;
     END LOOP;
 END;
 $$;
-
-SET session_replication_role = default;
 
 COMMIT;

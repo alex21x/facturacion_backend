@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 8UGWw1GvOxtqGkoxh7cHTwwDEa3BhcUDAL31irc9uahO9hKQ1HbdNavlKHZmR9p
+\restrict uc2RQCMEE408gkDyONo9xXDZwtNFqcJhSS9hAWxn4A35LZg03RCoObkU23sQYLQ
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -5641,6 +5641,7 @@ COPY auth.refresh_tokens (id, user_id, token_hash, expires_at, revoked_at, creat
 1025	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.aa38b7b1ebdc37499bc48850cc2ecb15d2f89ca266fd288e937bb067bc5e7b72	2026-05-13 23:19:56+00	2026-04-14 03:48:24+00	2026-04-13 23:19:56+00
 1041	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.21ff056d46a83a2ad4a33984398066b93375fda9e0ab4cd60c16efb9400a0eb0	2026-05-14 23:23:07+00	2026-04-15 11:30:13+00	2026-04-14 23:23:07+00
 1057	1	7e714d6d8bc201e47f5042559c1cc6214446e6b8.dc17904a5345b6200865864c9079ef0236896fae2c6682a997d238efcfc109f9	2026-05-15 23:36:31+00	2026-04-16 00:06:42+00	2026-04-15 23:36:31+00
+1072	1	70ab742c4bb9b010f39a62bae51061883f96a2d8.78b5be2ee74ad6591b2f2d437b353d4e08784a653219d4a479d65e0d5efb2af0	2026-06-23 00:07:33+00	\N	2026-04-24 00:07:33+00
 \.
 
 
@@ -5738,7 +5739,7 @@ COPY auth.users (id, company_id, branch_id, username, password_hash, first_name,
 4	1	1	admin_panel	$2y$10$ZCevYCFTfINZEYMAhrDCS..Otpbd9tQ0IZNvOY1lFi/kAXvoPBoXe	Portal	Admin	admin.panel@demo.local	\N	1	2026-04-11 07:34:49+00	2026-04-08 05:16:57.957523+00	2026-04-11 07:34:49+00	\N
 6	4	4	mozo_rest	$2y$10$4f58D1wg1Y1MeiYhZZpRLu9gG3DwyxJNJTMJc8PVAkP2Zgu/F4ldi	Mozo	Restaurante	mozo.rest@local.test	\N	1	2026-04-11 07:35:18+00	2026-04-11 07:09:37+00	2026-04-11 07:35:18+00	\N
 7	4	4	comanda_rest	$2y$10$kFWIThjaVIxsxbzLgTXvC.ByaKFnl31ugGh9/Yt1Qp8zf/HoQvBRu	Cocina	Comanda	comanda.rest@local.test	\N	1	2026-04-11 07:37:04+00	2026-04-11 07:09:37+00	2026-04-11 07:37:04+00	\N
-1	1	1	admin	$2y$10$TcJzJDagJOTKolO6dbZa9OlcTpuBx3jZ1yozFytV3.Dtj/YO1erSy	Admin	Sistema	admin@demo.local	\N	1	2026-04-17 18:43:02+00	2026-03-11 02:21:33.764975+00	2026-04-17 18:43:02+00	\N
+1	1	1	admin	$2y$10$FFlO73LI1c0.bKBztmasxubqIvjVbtjour1/ljakfJh0HktVottNW	Admin	Sistema	admin@demo.local	\N	1	2026-04-24 00:07:33+00	2026-03-11 02:21:33.764975+00	2026-04-24 00:07:33+00	\N
 \.
 
 
@@ -10540,6 +10541,12 @@ COPY master.vat_categories (id, code, name, is_deleted, tax_code) FROM stdin;
 --
 
 COPY ops.http_endpoint_latency_samples (id, company_id, method, route_uri, endpoint_key, status_code, duration_ms, requested_at, created_at, updated_at) FROM stdin;
+1	\N	POST	/api/auth/login	POST /api/auth/login	422	30.531	2026-04-23 22:32:32+00	2026-04-23 22:32:32+00	2026-04-23 22:32:32+00
+2	\N	POST	/api/auth/login	POST /api/auth/login	401	81.566	2026-04-23 23:13:26+00	2026-04-23 23:13:26+00	2026-04-23 23:13:26+00
+3	\N	POST	/api/auth/login	POST /api/auth/login	401	98.262	2026-04-24 00:03:25+00	2026-04-24 00:03:25+00	2026-04-24 00:03:25+00
+4	\N	POST	/api/auth/login	POST /api/auth/login	401	15.961	2026-04-24 00:05:56+00	2026-04-24 00:05:56+00	2026-04-24 00:05:56+00
+5	\N	POST	/api/auth/login	POST /api/auth/login	401	29.992	2026-04-24 00:06:58+00	2026-04-24 00:06:58+00	2026-04-24 00:06:58+00
+6	\N	POST	/api/auth/login	POST /api/auth/login	200	90.795	2026-04-24 00:07:33+00	2026-04-24 00:07:33+00	2026-04-24 00:07:33+00
 \.
 
 
@@ -10593,7 +10600,7 @@ COPY public.migrations (id, migration, batch) FROM stdin;
 35	2026_04_18_000004_optimize_inventory_product_autocomplete_indexes	23
 36	2026_04_18_000005_create_inventory_product_commercial_config_tables	23
 37	2026_04_18_000006_ensure_appcfg_company_units_and_customer_price_profiles	23
-38	2026_04_22_000000_clean_transactional_data_on_install	23
+38	2026_04_22_000000_clean_transactional_data_on_install	24
 \.
 
 
@@ -10610,7 +10617,6 @@ COPY public.password_resets (email, token, created_at) FROM stdin;
 --
 
 COPY public.users (id, name, email, email_verified_at, password, remember_token, created_at, updated_at) FROM stdin;
-1	Administrador	admin@facturacion.local	\N	$2y$10$VjTEipDoAlUQ3By6RZ8A/.AQI7H/VxuhwmLxOFq/HxCym5uW5NBJK	\N	2026-04-23 16:57:27	2026-04-23 16:57:27
 \.
 
 
@@ -11732,7 +11738,7 @@ SELECT pg_catalog.setval('auth.permissions_id_seq', 1, false);
 -- Name: refresh_tokens_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: -
 --
 
-SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 1071, true);
+SELECT pg_catalog.setval('auth.refresh_tokens_id_seq', 1072, true);
 
 
 --
@@ -11956,7 +11962,7 @@ SELECT pg_catalog.setval('master.detraccion_service_codes_id_seq', 31, true);
 -- Name: http_endpoint_latency_samples_id_seq; Type: SEQUENCE SET; Schema: ops; Owner: -
 --
 
-SELECT pg_catalog.setval('ops.http_endpoint_latency_samples_id_seq', 1, false);
+SELECT pg_catalog.setval('ops.http_endpoint_latency_samples_id_seq', 6, true);
 
 
 --
@@ -11977,7 +11983,7 @@ SELECT pg_catalog.setval('public.migrations_id_seq', 38, true);
 -- Name: users_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
 --
 
-SELECT pg_catalog.setval('public.users_id_seq', 1, true);
+SELECT pg_catalog.setval('public.users_id_seq', 1, false);
 
 
 --
@@ -15596,5 +15602,5 @@ ALTER TABLE ONLY sales.wholesale_settings
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 8UGWw1GvOxtqGkoxh7cHTwwDEa3BhcUDAL31irc9uahO9hKQ1HbdNavlKHZmR9p
+\unrestrict uc2RQCMEE408gkDyONo9xXDZwtNFqcJhSS9hAWxn4A35LZg03RCoObkU23sQYLQ
 

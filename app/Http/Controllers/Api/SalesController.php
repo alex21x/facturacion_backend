@@ -143,6 +143,7 @@ class SalesController extends Controller
         $commerceFeatureDefaults = [
             'SALES_SELLER_TO_CASHIER' => false,
             'SALES_CUSTOMER_PRICE_PROFILE' => false,
+            'SALES_WORKSHOP_MULTI_VEHICLE' => false,
             'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => true,
             'SALES_ANTICIPO_ENABLED' => false,
             'SALES_TAX_BRIDGE' => false,
@@ -212,18 +213,43 @@ class SalesController extends Controller
 
     private function resolveCompanyPrintProfile(int $companyId): array
     {
+        $companyColumns = $this->tableColumns('core.companies');
+        $companyEmailColumn = $this->firstExistingColumn($companyColumns, ['email', 'contact_email']);
+
+        $companySelect = ['tax_id', 'legal_name', 'trade_name'];
+        if ($companyEmailColumn) {
+            $companySelect[] = $companyEmailColumn;
+        }
+
         $company = DB::table('core.companies')
-            ->select('tax_id', 'legal_name', 'trade_name')
+            ->select($companySelect)
             ->where('id', $companyId)
             ->first();
 
         $settings = null;
         if ($this->tableExists('core.company_settings')) {
+            $settingColumns = $this->tableColumns('core.company_settings');
+            $settingEmailColumn = $this->firstExistingColumn($settingColumns, ['email', 'contact_email']);
+
+            $settingsSelect = ['address', 'phone', 'logo_path'];
+            if ($settingEmailColumn) {
+                $settingsSelect[] = $settingEmailColumn;
+            }
+
             $settings = DB::table('core.company_settings')
-                ->select('address', 'phone', 'logo_path')
+                ->select($settingsSelect)
                 ->where('company_id', $companyId)
                 ->first();
         }
+
+        $companyEmail = null;
+        if ($settings) {
+            $companyEmail = (string) ($settings->email ?? $settings->contact_email ?? '');
+        }
+        if ($companyEmail === null || trim($companyEmail) === '') {
+            $companyEmail = (string) ($company->email ?? $company->contact_email ?? '');
+        }
+        $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
         $logoUrl = null;
         if ($settings && !empty($settings->logo_path)) {
@@ -242,6 +268,7 @@ class SalesController extends Controller
             'trade_name' => $company->trade_name ?? null,
             'address'    => $settings->address ?? null,
             'phone'      => $settings->phone ?? null,
+            'email'      => $companyEmail,
             'logo_url'   => $logoUrl,
         ];
     }
@@ -433,6 +460,8 @@ class SalesController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $search = trim((string) $request->query('q', ''));
         $limit = (int) $request->query('limit', 12);
+        $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
+            && $this->tableExists('sales.customer_vehicles');
 
         $this->ensureCustomerPriceProfilesTable();
 
@@ -481,7 +510,7 @@ class SalesController extends Controller
             $like = '%' . $search . '%';
             $normalizedDoc = preg_replace('/\D+/', '', $search);
 
-            $query->where(function ($nested) use ($like, $normalizedDoc) {
+            $query->where(function ($nested) use ($like, $normalizedDoc, $workshopVehicleSearchEnabled) {
                 $nested->where('c.doc_number', 'ilike', $like)
                     ->orWhere('c.legal_name', 'ilike', $like)
                     ->orWhere('c.trade_name', 'ilike', $like)
@@ -492,6 +521,25 @@ class SalesController extends Controller
 
                 if ($normalizedDoc !== '') {
                     $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(c.doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+
+                if ($workshopVehicleSearchEnabled) {
+                    $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedDoc) {
+                        $vehicleQuery->select(DB::raw('1'))
+                            ->from('sales.customer_vehicles as cv')
+                            ->whereColumn('cv.company_id', 'c.company_id')
+                            ->whereColumn('cv.customer_id', 'c.id')
+                            ->where('cv.status', 1)
+                            ->where(function ($vehicleNested) use ($like, $normalizedDoc) {
+                                $vehicleNested->where('cv.plate', 'ilike', $like)
+                                    ->orWhere('cv.brand', 'ilike', $like)
+                                    ->orWhere('cv.model', 'ilike', $like);
+
+                                if ($normalizedDoc !== '') {
+                                    $vehicleNested->orWhere('cv.plate_normalized', 'ilike', '%' . $normalizedDoc . '%');
+                                }
+                            });
+                    });
                 }
             });
         }
@@ -782,6 +830,8 @@ class SalesController extends Controller
         $search = trim((string) $request->query('q', ''));
         $status = $request->query('status');
         $limit = (int) $request->query('limit', 100);
+        $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
+            && $this->tableExists('sales.customer_vehicles');
 
         $this->ensureCustomerPriceProfilesTable();
 
@@ -830,7 +880,7 @@ class SalesController extends Controller
             $like = '%' . $search . '%';
             $normalizedDoc = preg_replace('/\D+/', '', $search);
 
-            $query->where(function ($nested) use ($like, $normalizedDoc) {
+            $query->where(function ($nested) use ($like, $normalizedDoc, $workshopVehicleSearchEnabled) {
                 $nested->where('c.doc_number', 'ilike', $like)
                     ->orWhere('c.legal_name', 'ilike', $like)
                     ->orWhere('c.trade_name', 'ilike', $like)
@@ -841,6 +891,25 @@ class SalesController extends Controller
 
                 if ($normalizedDoc !== '') {
                     $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(c.doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+
+                if ($workshopVehicleSearchEnabled) {
+                    $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedDoc) {
+                        $vehicleQuery->select(DB::raw('1'))
+                            ->from('sales.customer_vehicles as cv')
+                            ->whereColumn('cv.company_id', 'c.company_id')
+                            ->whereColumn('cv.customer_id', 'c.id')
+                            ->where('cv.status', 1)
+                            ->where(function ($vehicleNested) use ($like, $normalizedDoc) {
+                                $vehicleNested->where('cv.plate', 'ilike', $like)
+                                    ->orWhere('cv.brand', 'ilike', $like)
+                                    ->orWhere('cv.model', 'ilike', $like);
+
+                                if ($normalizedDoc !== '') {
+                                    $vehicleNested->orWhere('cv.plate_normalized', 'ilike', '%' . $normalizedDoc . '%');
+                                }
+                            });
+                    });
                 }
             });
         }
@@ -879,6 +948,297 @@ class SalesController extends Controller
         return response()->json([
             'data' => $rows,
         ]);
+    }
+
+    public function customerVehicles(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
+            return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
+        }
+
+        if (!$this->tableExists('sales.customer_vehicles')) {
+            return response()->json(['message' => 'La tabla de vehiculos aun no existe en esta instancia'], 503);
+        }
+
+        $customerExists = DB::table('sales.customers')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$customerExists) {
+            return response()->json(['message' => 'Customer not found'], 404);
+        }
+
+        $rows = DB::table('sales.customer_vehicles')
+            ->select('id', 'customer_id', 'plate', 'brand', 'model', 'year', 'color', 'vin', 'is_default', 'status')
+            ->where('company_id', $companyId)
+            ->where('customer_id', $id)
+            ->where('status', 1)
+            ->orderByDesc('is_default')
+            ->orderBy('brand')
+            ->orderBy('model')
+            ->orderBy('plate')
+            ->get()
+            ->map(fn($row) => [
+                'id' => (int) $row->id,
+                'customer_id' => (int) $row->customer_id,
+                'plate' => (string) $row->plate,
+                'brand' => $row->brand !== null ? (string) $row->brand : null,
+                'model' => $row->model !== null ? (string) $row->model : null,
+                'year' => $row->year !== null ? (int) $row->year : null,
+                'color' => $row->color !== null ? (string) $row->color : null,
+                'vin' => $row->vin !== null ? (string) $row->vin : null,
+                'is_default' => (bool) ($row->is_default ?? false),
+                'status' => (int) ($row->status ?? 1),
+            ])
+            ->values();
+
+        return response()->json(['data' => $rows]);
+    }
+
+    public function createCustomerVehicle(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
+            return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
+        }
+
+        if (!$this->tableExists('sales.customer_vehicles')) {
+            return response()->json(['message' => 'La tabla de vehiculos aun no existe en esta instancia'], 503);
+        }
+
+        $customerExists = DB::table('sales.customers')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$customerExists) {
+            return response()->json(['message' => 'Customer not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'plate' => 'required|string|max:20',
+            'brand' => 'nullable|string|max:80',
+            'model' => 'nullable|string|max:80',
+            'year' => 'nullable|integer|min:1900|max:2100',
+            'color' => 'nullable|string|max:40',
+            'vin' => 'nullable|string|max:50',
+            'is_default' => 'nullable|boolean',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $plateNormalized = $this->normalizeVehiclePlate((string) ($payload['plate'] ?? ''));
+        if ($plateNormalized === '') {
+            return response()->json(['message' => 'La placa ingresada no es valida'], 422);
+        }
+
+        $duplicate = DB::table('sales.customer_vehicles')
+            ->where('company_id', $companyId)
+            ->where('plate_normalized', $plateNormalized)
+            ->where('status', 1)
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json(['message' => 'La placa ya esta registrada para otro cliente'], 422);
+        }
+
+        $isDefault = (bool) ($payload['is_default'] ?? false);
+        if ($isDefault) {
+            DB::table('sales.customer_vehicles')
+                ->where('company_id', $companyId)
+                ->where('customer_id', $id)
+                ->update(['is_default' => false, 'updated_at' => now()]);
+        }
+
+        $newId = DB::table('sales.customer_vehicles')->insertGetId([
+            'company_id' => $companyId,
+            'customer_id' => $id,
+            'plate' => strtoupper(trim((string) $payload['plate'])),
+            'plate_normalized' => $plateNormalized,
+            'brand' => $payload['brand'] ?? null,
+            'model' => $payload['model'] ?? null,
+            'year' => $payload['year'] ?? null,
+            'color' => $payload['color'] ?? null,
+            'vin' => $payload['vin'] ?? null,
+            'is_default' => $isDefault,
+            'status' => (int) ($payload['status'] ?? 1),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Vehicle created', 'id' => (int) $newId], 201);
+    }
+
+    public function updateCustomerVehicle(Request $request, int $id, int $vehicleId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
+            return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
+        }
+
+        if (!$this->tableExists('sales.customer_vehicles')) {
+            return response()->json(['message' => 'La tabla de vehiculos aun no existe en esta instancia'], 503);
+        }
+
+        $vehicle = DB::table('sales.customer_vehicles')
+            ->where('id', $vehicleId)
+            ->where('company_id', $companyId)
+            ->where('customer_id', $id)
+            ->first();
+
+        if (!$vehicle) {
+            return response()->json(['message' => 'Vehicle not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'plate' => 'nullable|string|max:20',
+            'brand' => 'nullable|string|max:80',
+            'model' => 'nullable|string|max:80',
+            'year' => 'nullable|integer|min:1900|max:2100',
+            'color' => 'nullable|string|max:40',
+            'vin' => 'nullable|string|max:50',
+            'is_default' => 'nullable|boolean',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $changes = $validator->validated();
+        $update = [];
+
+        if (array_key_exists('plate', $changes)) {
+            $plateNormalized = $this->normalizeVehiclePlate((string) $changes['plate']);
+            if ($plateNormalized === '') {
+                return response()->json(['message' => 'La placa ingresada no es valida'], 422);
+            }
+
+            $duplicate = DB::table('sales.customer_vehicles')
+                ->where('company_id', $companyId)
+                ->where('plate_normalized', $plateNormalized)
+                ->where('status', 1)
+                ->where('id', '<>', $vehicleId)
+                ->exists();
+
+            if ($duplicate) {
+                return response()->json(['message' => 'La placa ya esta registrada para otro cliente'], 422);
+            }
+
+            $update['plate'] = strtoupper(trim((string) $changes['plate']));
+            $update['plate_normalized'] = $plateNormalized;
+        }
+
+        foreach (['brand', 'model', 'year', 'color', 'vin', 'status'] as $field) {
+            if (array_key_exists($field, $changes)) {
+                $update[$field] = $changes[$field];
+            }
+        }
+
+        if (array_key_exists('is_default', $changes)) {
+            $isDefault = (bool) $changes['is_default'];
+            if ($isDefault) {
+                DB::table('sales.customer_vehicles')
+                    ->where('company_id', $companyId)
+                    ->where('customer_id', $id)
+                    ->update(['is_default' => false, 'updated_at' => now()]);
+            }
+            $update['is_default'] = $isDefault;
+        }
+
+        if (empty($update)) {
+            return response()->json(['message' => 'No changes provided'], 422);
+        }
+
+        $update['updated_at'] = now();
+
+        DB::table('sales.customer_vehicles')
+            ->where('id', $vehicleId)
+            ->where('company_id', $companyId)
+            ->where('customer_id', $id)
+            ->update($update);
+
+        return response()->json(['message' => 'Vehicle updated']);
+    }
+
+    public function deleteCustomerVehicle(Request $request, int $id, int $vehicleId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
+            return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
+        }
+
+        if (!$this->tableExists('sales.customer_vehicles')) {
+            return response()->json(['message' => 'La tabla de vehiculos aun no existe en esta instancia'], 503);
+        }
+
+        $vehicle = DB::table('sales.customer_vehicles')
+            ->where('id', $vehicleId)
+            ->where('company_id', $companyId)
+            ->where('customer_id', $id)
+            ->where('status', 1)
+            ->first(['id', 'is_default']);
+
+        if (!$vehicle) {
+            return response()->json(['message' => 'Vehicle not found'], 404);
+        }
+
+        DB::table('sales.customer_vehicles')
+            ->where('id', $vehicleId)
+            ->where('company_id', $companyId)
+            ->where('customer_id', $id)
+            ->update([
+                'status' => 0,
+                'is_default' => false,
+                'updated_at' => now(),
+            ]);
+
+        if ((bool) ($vehicle->is_default ?? false)) {
+            $replacement = DB::table('sales.customer_vehicles')
+                ->where('company_id', $companyId)
+                ->where('customer_id', $id)
+                ->where('status', 1)
+                ->orderBy('id')
+                ->first(['id']);
+
+            if ($replacement) {
+                DB::table('sales.customer_vehicles')
+                    ->where('id', (int) $replacement->id)
+                    ->update(['is_default' => true, 'updated_at' => now()]);
+            }
+        }
+
+        return response()->json(['message' => 'Vehicle deleted']);
     }
 
     public function customerTypes(Request $request)
@@ -1143,6 +1503,7 @@ class SalesController extends Controller
             'issue_at' => 'nullable|date',
             'due_at' => 'nullable|date',
             'customer_id' => 'required|integer|min:1',
+            'customer_vehicle_id' => 'nullable|integer|min:1',
             'currency_id' => 'required|integer|min:1',
             'payment_method_id' => 'nullable|integer|min:1',
             'exchange_rate' => 'nullable|numeric|min:0',
@@ -1282,6 +1643,44 @@ class SalesController extends Controller
             return response()->json([
                 'message' => 'Para este tipo de documento el cliente debe tener RUC valido (11 digitos).',
             ], 422);
+        }
+
+        $workshopMultiVehicleEnabled = $this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)
+            && $this->tableExists('sales.customer_vehicles');
+
+        $selectedVehicleId = isset($payload['customer_vehicle_id']) ? (int) $payload['customer_vehicle_id'] : 0;
+        if ($selectedVehicleId > 0 && !$workshopMultiVehicleEnabled) {
+            return response()->json([
+                'message' => 'La empresa no tiene habilitado el flujo de vehiculos por cliente.',
+            ], 422);
+        }
+
+        if ($selectedVehicleId > 0) {
+            $vehicle = DB::table('sales.customer_vehicles')
+                ->select('id', 'plate', 'brand', 'model')
+                ->where('id', $selectedVehicleId)
+                ->where('company_id', $companyId)
+                ->where('customer_id', (int) $payload['customer_id'])
+                ->where('status', 1)
+                ->first();
+
+            if (!$vehicle) {
+                return response()->json([
+                    'message' => 'El vehiculo seleccionado no pertenece al cliente o no esta activo.',
+                ], 422);
+            }
+
+            $payload['customer_vehicle_id'] = (int) $vehicle->id;
+            $payload['vehicle_plate_snapshot'] = strtoupper(trim((string) ($vehicle->plate ?? '')));
+            $payload['vehicle_brand_snapshot'] = trim((string) ($vehicle->brand ?? '')) !== '' ? trim((string) $vehicle->brand) : null;
+            $payload['vehicle_model_snapshot'] = trim((string) ($vehicle->model ?? '')) !== '' ? trim((string) $vehicle->model) : null;
+            $payload['metadata'] = array_merge($metadata, [
+                'customer_vehicle_id' => (int) $vehicle->id,
+                'vehicle_plate' => $payload['vehicle_plate_snapshot'],
+                'vehicle_brand' => $payload['vehicle_brand_snapshot'],
+                'vehicle_model' => $payload['vehicle_model_snapshot'],
+            ]);
+            $metadata = $payload['metadata'];
         }
 
         if ($noteBaseKind !== null) {
@@ -1540,8 +1939,19 @@ class SalesController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
+        $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
+        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
+        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
+        $isSellerUser = !str_contains($roleCode, 'ADMIN')
+            && ($roleProfile === 'SELLER'
+                || str_contains($roleCode, 'VENDED')
+                || str_contains($roleCode, 'SELLER'));
+        $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
+            && $this->tableExists('sales.customer_vehicles');
+
         $filters = [
-            'branch_id' => $request->query('branch_id', $authUser->branch_id),
+            'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
             'document_kind' => $request->query('document_kind'),
@@ -1549,10 +1959,15 @@ class SalesController extends Controller
             'status' => $request->query('status'),
             'conversion_state' => $request->query('conversion_state'),
             'customer' => trim((string) $request->query('customer', '')),
+            'customer_id' => $request->query('customer_id'),
+            'vehicle' => trim((string) $request->query('vehicle', '')),
+            'customer_vehicle_id' => $request->query('customer_vehicle_id'),
             'issue_date_from' => $request->query('issue_date_from'),
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
+            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $page = (int) $request->query('page', 1);
         $limit = (int) $request->query('per_page', $request->query('limit', 10));
@@ -1646,6 +2061,10 @@ class SalesController extends Controller
                                                         WHERE di.document_id = d.id
                                                 ) as has_items"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
             ])
             ->where('d.company_id', $companyId);
 
@@ -1679,9 +2098,20 @@ class SalesController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
+        $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $format = strtolower(trim((string) $request->query('format', 'csv')));
+        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
+        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
+        $isSellerUser = !str_contains($roleCode, 'ADMIN')
+            && ($roleProfile === 'SELLER'
+                || str_contains($roleCode, 'VENDED')
+                || str_contains($roleCode, 'SELLER'));
+        $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
+            && $this->tableExists('sales.customer_vehicles');
+
         $filters = [
-            'branch_id' => $request->query('branch_id', $authUser->branch_id),
+            'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
             'document_kind' => $request->query('document_kind'),
@@ -1689,11 +2119,17 @@ class SalesController extends Controller
             'status' => $request->query('status'),
             'conversion_state' => $request->query('conversion_state'),
             'customer' => trim((string) $request->query('customer', '')),
+            'customer_id' => $request->query('customer_id'),
+            'vehicle' => trim((string) $request->query('vehicle', '')),
+            'customer_vehicle_id' => $request->query('customer_vehicle_id'),
             'issue_date_from' => $request->query('issue_date_from'),
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
+            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
+        $detailMode = strtoupper(trim((string) $request->query('detail', 'SUMMARY')));
 
         $max = (int) $request->query('max', 5000);
         if ($max < 1) {
@@ -1741,10 +2177,115 @@ class SalesController extends Controller
                                 ) as source_document_number"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
             ])
             ->where('d.company_id', $companyId);
 
         $this->applyCommercialDocumentFilters($query, $filters);
+
+        if ($detailMode === 'PRODUCT') {
+            $detailRows = (clone $query)
+                ->join('sales.commercial_document_items as di', 'di.document_id', '=', 'd.id')
+                ->leftJoin('inventory.products as p', function ($join) {
+                    $join->on('p.id', '=', 'di.product_id');
+                })
+                ->leftJoin('core.units as u', 'u.id', '=', 'di.unit_id')
+                ->select([
+                    'd.id',
+                    'd.document_kind',
+                    DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
+                    'd.series',
+                    'd.number',
+                    'd.issue_at',
+                    'd.status',
+                    DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                    DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                    DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                    DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                    DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                    DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                    'di.product_id',
+                    DB::raw("COALESCE(di.description, p.name, 'SIN DESCRIPCION') as product_description"),
+                    DB::raw("COALESCE(u.code, '-') as unit_code"),
+                    'di.qty',
+                    'di.unit_price',
+                    'di.total as line_total',
+                ])
+                ->orderBy('d.issue_at', 'desc')
+                ->orderBy('d.id', 'desc')
+                ->orderBy('di.line_no')
+                ->limit($max)
+                ->get();
+
+            if ($format === 'json') {
+                return response()->json([
+                    'data' => $detailRows,
+                    'meta' => [
+                        'count' => (int) $detailRows->count(),
+                        'max' => $max,
+                        'detail' => 'PRODUCT',
+                    ],
+                ]);
+            }
+
+            $filename = 'reporte_ventas_producto_' . now()->format('Ymd_His') . '.csv';
+            return response()->streamDownload(function () use ($detailRows) {
+                $out = fopen('php://output', 'w');
+                if ($out === false) {
+                    return;
+                }
+
+                fwrite($out, "\xEF\xBB\xBF");
+                fputcsv($out, [
+                    'ID',
+                    'Documento',
+                    'Serie',
+                    'Numero',
+                    'Fecha Emision',
+                    'Cliente',
+                    'Vehiculo',
+                    'Forma de Pago',
+                    'Estado',
+                    'Producto',
+                    'Unidad',
+                    'Cantidad',
+                    'Precio Unitario',
+                    'Total Linea',
+                ], ';');
+
+                foreach ($detailRows as $row) {
+                    fputcsv($out, [
+                        (int) $row->id,
+                        (string) ($row->document_kind_label ?? $row->document_kind),
+                        (string) $row->series,
+                        (string) $row->number,
+                        $row->issue_at ? (string) $row->issue_at : '',
+                        (string) ($row->customer_name ?? ''),
+                        trim(implode(' | ', array_values(array_filter([
+                            (string) ($row->vehicle_plate_snapshot ?? ''),
+                            (string) ($row->vehicle_brand_snapshot ?? ''),
+                            (string) ($row->vehicle_model_snapshot ?? ''),
+                        ], static function ($part) {
+                            return trim($part) !== '';
+                        })))),
+                        (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
+                        (string) ($row->status ?? ''),
+                        (string) ($row->product_description ?? ''),
+                        (string) ($row->unit_code ?? '-'),
+                        number_format((float) ($row->qty ?? 0), 3, '.', ''),
+                        number_format((float) ($row->unit_price ?? 0), 2, '.', ''),
+                        number_format((float) ($row->line_total ?? 0), 2, '.', ''),
+                    ], ';');
+                }
+
+                fclose($out);
+            }, $filename, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+            ]);
+        }
 
         $rows = $query
             ->orderBy('d.issue_at', 'desc')
@@ -1824,10 +2365,19 @@ class SalesController extends Controller
         $status = $filters['status'] ?? null;
         $conversionState = $filters['conversion_state'] ?? null;
         $customer = trim((string) ($filters['customer'] ?? ''));
+        $customerId = (int) ($filters['customer_id'] ?? 0);
+        $vehicle = trim((string) ($filters['vehicle'] ?? ''));
+        $customerVehicleId = $filters['customer_vehicle_id'] ?? null;
         $issueDateFrom = $filters['issue_date_from'] ?? null;
         $issueDateTo = $filters['issue_date_to'] ?? null;
         $series = trim((string) ($filters['series'] ?? ''));
         $number = trim((string) ($filters['number'] ?? ''));
+        $sellerUserId = isset($filters['seller_user_id']) ? (int) $filters['seller_user_id'] : null;
+        $workshopVehicleSearchEnabled = (bool) ($filters['workshop_vehicle_search_enabled'] ?? false);
+
+        if ($sellerUserId !== null && $sellerUserId > 0) {
+            $query->where('d.created_by', $sellerUserId);
+        }
 
         if ($branchId !== null && $branchId !== '') {
             $query->where('d.branch_id', (int) $branchId);
@@ -1900,13 +2450,43 @@ class SalesController extends Controller
             $query->where('d.status', (string) $status);
         }
 
+        if ($customerId > 0) {
+            $query->where('d.customer_id', $customerId);
+        }
+
         if ($customer !== '') {
             $like = '%' . $customer . '%';
-            $query->where(function ($nested) use ($like) {
+            $query->where(function ($nested) use ($like, $workshopVehicleSearchEnabled) {
                 $nested->where('c.legal_name', 'ilike', $like)
                     ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like])
                     ->orWhere('c.doc_number', 'ilike', $like);
+
+                if ($workshopVehicleSearchEnabled) {
+                    $nested->orWhereExists(function ($vehicleQuery) use ($like) {
+                        $vehicleQuery->select(DB::raw('1'))
+                            ->from('sales.customer_vehicles as cv')
+                            ->whereColumn('cv.customer_id', 'c.id')
+                            ->whereColumn('cv.company_id', 'd.company_id')
+                            ->where('cv.status', 1)
+                            ->where(function ($vehicleNested) use ($like) {
+                                $vehicleNested->where('cv.plate', 'ilike', $like)
+                                    ->orWhere('cv.brand', 'ilike', $like)
+                                    ->orWhere('cv.model', 'ilike', $like);
+                            });
+                    });
+                }
             });
+        }
+
+        if ($workshopVehicleSearchEnabled && $vehicle !== '') {
+            $vehicleLike = '%' . $vehicle . '%';
+            $query->where(function ($nested) use ($vehicleLike) {
+                $nested->whereRaw("COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot'), '') ILIKE ?", [$vehicleLike]);
+            });
+        }
+
+        if ($workshopVehicleSearchEnabled && $customerVehicleId !== null && $customerVehicleId !== '') {
+            $query->whereRaw("COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId'), '0')::BIGINT = ?", [(int) $customerVehicleId]);
         }
 
         if ($issueDateFrom) {
@@ -2272,6 +2852,7 @@ class SalesController extends Controller
                 'd.branch_id',
                 'd.warehouse_id',
                 'd.customer_id',
+                'd.customer_vehicle_id',
                 'd.currency_id',
                 'd.payment_method_id',
                 'd.document_kind',
@@ -2286,6 +2867,9 @@ class SalesController extends Controller
                 'd.balance_due',
                 'd.notes',
                 'd.metadata',
+                'd.vehicle_plate_snapshot',
+                'd.vehicle_brand_snapshot',
+                'd.vehicle_model_snapshot',
                 'cur.code as currency_code',
                 'cur.symbol as currency_symbol',
                 'pm.name as payment_method_name',
@@ -2430,6 +3014,7 @@ class SalesController extends Controller
                 'branchId' => $doc->branch_id !== null ? (int) $doc->branch_id : null,
                 'warehouseId' => $doc->warehouse_id !== null ? (int) $doc->warehouse_id : null,
                 'customerId' => (int) $doc->customer_id,
+                'customerVehicleId' => $doc->customer_vehicle_id !== null ? (int) $doc->customer_vehicle_id : null,
                 'currencyId' => (int) $doc->currency_id,
                 'paymentMethodId' => $doc->payment_method_id !== null ? (int) $doc->payment_method_id : null,
                 'documentKind' => (string) $doc->document_kind,
@@ -2448,6 +3033,9 @@ class SalesController extends Controller
                 'taxTotal' => (float) $taxTotal,
                 'grandTotal' => (float) $doc->total,
                 'metadata' => $docMetadata,
+                'vehiclePlateSnapshot' => $doc->vehicle_plate_snapshot !== null ? (string) $doc->vehicle_plate_snapshot : null,
+                'vehicleBrandSnapshot' => $doc->vehicle_brand_snapshot !== null ? (string) $doc->vehicle_brand_snapshot : null,
+                'vehicleModelSnapshot' => $doc->vehicle_model_snapshot !== null ? (string) $doc->vehicle_model_snapshot : null,
                 'gravadaTotal' => (float) $gravadaTotal,
                 'inafectaTotal' => (float) $inafectaTotal,
                 'exoneradaTotal' => (float) $exoneradaTotal,
@@ -3628,6 +4216,27 @@ class SalesController extends Controller
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
             'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
         ];
+    }
+
+    private function isWorkshopMultiVehicleEnabledForRequest(Request $request, int $companyId): bool
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $branchIdRaw = $request->query('branch_id', $request->input('branch_id', $authUser->branch_id ?? null));
+        $branchId = ($branchIdRaw !== null && $branchIdRaw !== '') ? (int) $branchIdRaw : null;
+
+        return $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId);
+    }
+
+    private function isWorkshopMultiVehicleEnabledForContext(int $companyId, ?int $branchId): bool
+    {
+        return $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_WORKSHOP_MULTI_VEHICLE', false);
+    }
+
+    private function normalizeVehiclePlate(string $plate): string
+    {
+        $value = strtoupper(trim($plate));
+
+        return preg_replace('/[^A-Z0-9]/', '', $value) ?? '';
     }
 
     private function isCommerceFeatureEnabled(int $companyId, string $featureCode): bool

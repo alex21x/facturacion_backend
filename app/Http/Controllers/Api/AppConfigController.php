@@ -30,6 +30,7 @@ class AppConfigController extends Controller
         'INVENTORY_PRODUCTS_BY_PROFILE',
         'INVENTORY_PRODUCT_MASTERS_BY_PROFILE',
         'SALES_CUSTOMER_PRICE_PROFILE',
+        'SALES_WORKSHOP_MULTI_VEHICLE',
         'SALES_SELLER_TO_CASHIER',
         'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
         'SALES_ANTICIPO_ENABLED',
@@ -52,6 +53,7 @@ class AppConfigController extends Controller
 
     private const ADMIN_COMMERCE_FEATURE_CODES = [
         'SALES_CUSTOMER_PRICE_PROFILE',
+        'SALES_WORKSHOP_MULTI_VEHICLE',
         'SALES_SELLER_TO_CASHIER',
         'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
         'SALES_ANTICIPO_ENABLED',
@@ -84,6 +86,7 @@ class AppConfigController extends Controller
         'INVENTORY_PRODUCTS_BY_PROFILE' => 'Productos según perfil',
         'INVENTORY_PRODUCT_MASTERS_BY_PROFILE' => 'Catálogo según perfil',
         'SALES_CUSTOMER_PRICE_PROFILE' => 'Precios por cliente',
+        'SALES_WORKSHOP_MULTI_VEHICLE' => 'Taller: clientes con multiples vehiculos',
         'SALES_SELLER_TO_CASHIER' => 'Flujo vendedor a caja',
         'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => 'Editar emitidos antes de respuesta final SUNAT',
         'SALES_ANTICIPO_ENABLED' => 'Cobro con anticipo',

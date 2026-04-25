@@ -6,6 +6,8 @@ BEGIN;
 
 -- CASCADE handles FK dependencies without needing to disable triggers.
 -- Order still matters for clarity but CASCADE makes it safe regardless.
+SET client_min_messages = warning;
+
 DO $$
 DECLARE
     table_name text;

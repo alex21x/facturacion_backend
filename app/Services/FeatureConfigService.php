@@ -193,21 +193,34 @@ class FeatureConfigService
 
     /**
      * Invalidate cache when settings change.
+     * Clears company-level cache and all branch-level caches for the company.
      */
     public function invalidateCompanyCache(int $companyId, ?int $branchId = null): void
     {
+        // Always clear company-level cache
+        Cache::forget(self::CACHE_PREFIX . "company:{$companyId}:branch:null");
+
         if ($branchId !== null) {
-            // Invalidate only this branch
-            $key = self::CACHE_PREFIX . "company:{$companyId}:branch:{$branchId}";
-            Cache::forget($key);
+            // Also clear the specific branch
+            Cache::forget(self::CACHE_PREFIX . "company:{$companyId}:branch:{$branchId}");
         } else {
-            // Invalidate all branches for this company
-            // Pattern: feature_config:company:1:branch:*
-            // Note: Redis doesn't support pattern deletion in Cache facade, so we'd need raw Redis
-            // For now, just invalidate the company-level cache
-            $key = self::CACHE_PREFIX . "company:{$companyId}:branch:null";
-            Cache::forget($key);
+            // Clear all branches for this company
+            $branchIds = DB::table('core.branches')
+                ->where('company_id', $companyId)
+                ->pluck('id');
+
+            foreach ($branchIds as $bid) {
+                Cache::forget(self::CACHE_PREFIX . "company:{$companyId}:branch:{$bid}");
+            }
         }
+    }
+
+    /**
+     * Alias used by AppConfigController for admin-level toggle changes.
+     */
+    public function invalidateCache(int $companyId, ?int $branchId = null): void
+    {
+        $this->invalidateCompanyCache($companyId, $branchId);
     }
 
     /**

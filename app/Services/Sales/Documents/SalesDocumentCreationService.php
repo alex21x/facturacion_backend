@@ -125,10 +125,6 @@ class SalesDocumentCreationService
                     && in_array($normalizedDocumentKind, ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
 
                 $affectsStock = !$stockAlreadyDiscounted && CommercialDocumentPolicy::shouldAffectStock((string) $payload['document_kind'], (string) $documentStatus);
-                if ($isTributaryIssued && !$stockAlreadyDiscounted) {
-                    // Tributary documents are settled to inventory when SUNAT accepts them.
-                    $affectsStock = false;
-                }
                 $settings = $this->inventorySettingsForCompany($companyId);
 
                 $nextNumber = $this->seriesService->reserveNextNumber(
@@ -192,14 +188,9 @@ class SalesDocumentCreationService
                 );
 
                 if ($isTributaryIssued) {
-                    if ($stockAlreadyDiscounted) {
-                        $metadata['inventory_pending_sunat'] = false;
-                        $metadata['inventory_sunat_settled'] = true;
-                    } else {
-                        $metadata['inventory_pending_sunat'] = true;
-                        $metadata['inventory_sunat_settled'] = false;
-                    }
-                    $metadata['stock_already_discounted'] = $stockAlreadyDiscounted;
+                    $metadata['inventory_pending_sunat'] = !$stockAlreadyDiscounted;
+                    $metadata['inventory_sunat_settled'] = false;
+                    $metadata['stock_already_discounted'] = $stockAlreadyDiscounted || $affectsStock;
                 } else {
                     $metadata['inventory_pending_sunat'] = false;
                     $metadata['inventory_sunat_settled'] = $affectsStock;
@@ -224,9 +215,13 @@ class SalesDocumentCreationService
                     'issue_at' => $resolvedIssueAt,
                     'due_at' => $payload['due_at'] ?? null,
                     'customer_id' => $payload['customer_id'],
+                    'customer_vehicle_id' => $payload['customer_vehicle_id'] ?? null,
                     'currency_id' => $payload['currency_id'],
                     'payment_method_id' => $payload['payment_method_id'] ?? null,
                     'exchange_rate' => $payload['exchange_rate'] ?? null,
+                    'vehicle_plate_snapshot' => $payload['vehicle_plate_snapshot'] ?? null,
+                    'vehicle_brand_snapshot' => $payload['vehicle_brand_snapshot'] ?? null,
+                    'vehicle_model_snapshot' => $payload['vehicle_model_snapshot'] ?? null,
                     'subtotal' => round($subtotal, 2),
                     'tax_total' => round($taxTotal, 2),
                     'total' => round($grandTotal, 2),

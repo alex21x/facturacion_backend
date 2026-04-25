@@ -1519,6 +1519,19 @@ class TaxBridgeService
             return '';
         }
 
+        // Guard against malformed values (e.g. "22") and normalize host-only inputs.
+        if (!preg_match('#^https?://#i', $url)) {
+            if (str_starts_with($url, '//')) {
+                $url = 'http:' . $url;
+            } elseif (
+                preg_match('#^(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9.-]+\.[a-z]{2,})(?::\d+)?(?:/.*)?$#i', $url) === 1
+            ) {
+                $url = 'http://' . ltrim($url, '/');
+            } else {
+                return '';
+            }
+        }
+
         $normalized = rtrim($url, '/');
 
         if (preg_match('#^(.*?/index\.php/sunat/)([^/?\#]+)(.*)$#i', $normalized, $matches) === 1) {
@@ -1930,7 +1943,16 @@ class TaxBridgeService
         $metadata = json_decode((string) ($document->metadata ?? '{}'), true);
         $metadata = is_array($metadata) ? $metadata : [];
 
-        if (!empty($metadata['stock_already_discounted']) || !empty($metadata['inventory_sunat_settled'])) {
+        if (!empty($metadata['inventory_sunat_settled'])) {
+            return;
+        }
+
+        if (!empty($metadata['stock_already_discounted'])) {
+            $this->updateDocumentTaxStatus($companyId, $documentId, [
+                'inventory_sunat_settled' => true,
+                'inventory_pending_sunat' => false,
+                'inventory_sunat_settled_at' => now()->toDateTimeString(),
+            ]);
             return;
         }
 

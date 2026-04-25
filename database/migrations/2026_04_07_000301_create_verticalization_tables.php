@@ -130,6 +130,16 @@ return new class extends Migration
             if ($retailId) {
                 $now = now();
                 foreach ($companyIds as $companyId) {
+                    $hasPrimaryVertical = DB::table('appcfg.company_verticals')
+                        ->where('company_id', (int) $companyId)
+                        ->where('is_primary', true)
+                        ->where('status', 1)
+                        ->exists();
+
+                    if ($hasPrimaryVertical) {
+                        continue;
+                    }
+
                     DB::table('appcfg.company_verticals')->updateOrInsert(
                         [
                             'company_id' => (int) $companyId,

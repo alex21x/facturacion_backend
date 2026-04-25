@@ -14,12 +14,12 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('throttle:500,1')->group(function () {
+Route::middleware('throttle:2000,1')->group(function () {
     Route::post('/auth/login', 'Api\\AuthController@login');
     Route::post('/auth/refresh', 'Api\\AuthController@refresh');
 });
 
-Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(function () {
+Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
 
@@ -43,7 +43,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::get('/cash/movements', 'Api\\CashController@movements');
     });
 
-    Route::middleware(['rbac.module:APPCFG,view', 'throttle:1500,1'])->group(function () {
+    Route::middleware(['rbac.module:APPCFG,view', 'throttle:6000,1'])->group(function () {
         Route::get('/masters/dashboard', 'Api\\MasterDataController@dashboard');
         Route::get('/masters/options', 'Api\\MasterDataController@options');
         Route::get('/masters/access-control', 'Api\\MasterDataController@accessControl')->middleware('admin.only');
@@ -116,6 +116,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::get('/sales/price-tiers', 'Api\\SalesController@priceTiers');
         Route::get('/sales/customer-types', 'Api\\SalesController@customerTypes');
         Route::get('/sales/customers', 'Api\\SalesController@customers');
+        Route::get('/sales/customers/{id}/vehicles', 'Api\\SalesController@customerVehicles');
         Route::get('/sales/customers/autocomplete', 'Api\\SalesController@customerAutocomplete');
         Route::get('/sales/customers/resolve-document', 'Api\\SalesController@resolveCustomerByDocument');
         Route::get('/sales/reference-documents', 'Api\\SalesController@referenceDocuments');
@@ -167,6 +168,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:6000,1'])->group(funct
         Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
+        Route::post('/sales/customers/{id}/vehicles', 'Api\\SalesController@createCustomerVehicle');
+        Route::put('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesController@updateCustomerVehicle');
+        Route::delete('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesController@deleteCustomerVehicle');
 
         // Daily Summary (Resumen Diario de Boletas)
         Route::post('/sales/daily-summaries', 'Api\\DailySummaryController@store');

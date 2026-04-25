@@ -58,6 +58,18 @@ return new class extends Migration
         DB::statement('CREATE INDEX IF NOT EXISTS daily_summary_items_summary_idx
             ON sales.daily_summary_items (summary_id)');
 
+        $hasDuplicateDocumentIds = DB::table('sales.daily_summary_items')
+            ->select('document_id')
+            ->groupBy('document_id')
+            ->havingRaw('COUNT(*) > 1')
+            ->exists();
+
+        if ($hasDuplicateDocumentIds) {
+            DB::statement('CREATE INDEX IF NOT EXISTS daily_summary_items_doc_idx
+                ON sales.daily_summary_items (document_id)');
+            return;
+        }
+
         DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS daily_summary_items_doc_unique_idx
             ON sales.daily_summary_items (document_id)');
     }

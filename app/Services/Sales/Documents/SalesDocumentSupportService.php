@@ -95,9 +95,9 @@ class SalesDocumentSupportService
             throw new SalesDocumentException('Invalid conversion factor for product #' . $product->id);
         }
 
-        $qtyBase = isset($item['qty_base']) && (float) $item['qty_base'] > 0
-            ? (float) $item['qty_base']
-            : ($qty * $factor);
+        // Always derive base quantity server-side for product-backed lines.
+        // Client-provided qty_base can become stale when qty/unit changes and causes kardex mismatches.
+        $qtyBase = $qty * $factor;
 
         $baseUnitPrice = isset($item['base_unit_price']) && (float) $item['base_unit_price'] >= 0
             ? (float) $item['base_unit_price']

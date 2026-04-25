@@ -8,6 +8,10 @@ class CreateSunatExceptionActionsTable extends Migration
 {
     public function up()
     {
+        if (Schema::hasTable('sales.sunat_exception_actions')) {
+            return;
+        }
+
         Schema::create('sales.sunat_exception_actions', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->unsignedBigInteger('company_id');

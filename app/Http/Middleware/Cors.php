@@ -82,6 +82,7 @@ class Cors
             'http://localhost:5179',
             (string) env('FRONTEND_URL', ''),
             (string) env('FRONTEND_APP_URL', ''),
+            (string) env('FRONTEND_ADMIN_URL', ''),
         ];
 
         return array_values(array_filter(array_unique($origins)));

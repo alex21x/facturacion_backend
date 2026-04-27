@@ -1,6 +1,6 @@
 -- Limpieza de datos operacionales/transaccionales para instalaciones limpias.
 -- Preserva maestros/configuracion: auth.*, appcfg.*, core.*, master.*,
--- inventory.products*, sales.series_numbers, sales.document_sequences, etc.
+-- pero limpia clientes, vehiculos y catalogo de productos.
 
 BEGIN;
 
@@ -28,6 +28,9 @@ DECLARE
         'sales.sales_orders',
         'sales.cash_movements',
         'sales.cash_sessions',
+        'sales.customer_vehicles',
+        'sales.customer_price_profiles',
+        'sales.customers',
 
         -- Inventory transactional
         'inventory.stock_transformation_lines',
@@ -41,7 +44,11 @@ DECLARE
         'inventory.outbox_events',
         'inventory.report_requests',
         'inventory.product_import_batch_items',
-        'inventory.product_import_batches'
+        'inventory.product_import_batches',
+
+        -- Product catalog reset requested for clean install
+        'inventory.product_sale_units',
+        'inventory.products'
     ];
 BEGIN
     FOREACH table_name IN ARRAY tables_to_clean LOOP
@@ -52,13 +59,13 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- Reiniciar correlativos de comprobantes para que el proximo emitido sea 1.
+    -- Reiniciar correlativos de comprobantes en 0.
     IF to_regclass('sales.series_numbers') IS NOT NULL THEN
-        EXECUTE 'UPDATE sales.series_numbers SET current_number = 1';
+        EXECUTE 'UPDATE sales.series_numbers SET current_number = 0';
     END IF;
 
     IF to_regclass('sales.document_sequences') IS NOT NULL THEN
-        EXECUTE 'UPDATE sales.document_sequences SET current_number = 1';
+        EXECUTE 'UPDATE sales.document_sequences SET current_number = 0';
     END IF;
 END;
 $$;

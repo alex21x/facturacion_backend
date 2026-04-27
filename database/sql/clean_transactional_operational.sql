@@ -51,6 +51,15 @@ BEGIN
                 split_part(table_name, '.', 2));
         END IF;
     END LOOP;
+
+    -- Reiniciar correlativos de comprobantes para que el proximo emitido sea 1.
+    IF to_regclass('sales.series_numbers') IS NOT NULL THEN
+        EXECUTE 'UPDATE sales.series_numbers SET current_number = 1';
+    END IF;
+
+    IF to_regclass('sales.document_sequences') IS NOT NULL THEN
+        EXECUTE 'UPDATE sales.document_sequences SET current_number = 1';
+    END IF;
 END;
 $$;
 

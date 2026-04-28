@@ -41,6 +41,7 @@ DECLARE
         'inventory.stock_daily_snapshot',
         'inventory.lot_expiry_projection',
         'inventory.product_lots',
+        'inventory.purchase_suppliers',
         'inventory.outbox_events',
         'inventory.report_requests',
         'inventory.product_import_batch_items',

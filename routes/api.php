@@ -147,6 +147,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/sales/gre-guides/{id}/print', 'Api\\GreGuideController@printable');
 
         // Restaurant operations (comandas & orders)
+        Route::get('/restaurant/bootstrap', 'Api\\RestaurantController@bootstrap');
         Route::get('/restaurant/comandas', 'Api\\RestaurantController@comandas');
             // Tax Bridge Audit Logs (Trazabilidad de envíos tributarios)
             Route::get('/tax-bridge/audit/document/{documentId}', 'Api\\TaxBridgeAuditController@getDocumentHistory');

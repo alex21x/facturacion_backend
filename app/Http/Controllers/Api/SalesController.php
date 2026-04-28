@@ -2452,9 +2452,7 @@ class SalesController extends Controller
 
         if ($customerId > 0) {
             $query->where('d.customer_id', $customerId);
-        }
-
-        if ($customer !== '') {
+        } elseif ($customer !== '') {
             $like = '%' . $customer . '%';
             $query->where(function ($nested) use ($like, $workshopVehicleSearchEnabled) {
                 $nested->where('c.legal_name', 'ilike', $like)

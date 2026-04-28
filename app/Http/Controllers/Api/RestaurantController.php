@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Restaurant\RestaurantComandaGateway;
 use App\Services\Restaurant\RestaurantOrderService;
 use Illuminate\Http\Request;
@@ -13,13 +14,111 @@ class RestaurantController extends Controller
 {
     public function __construct(
         private RestaurantComandaGateway $gateway,
-        private RestaurantOrderService $orderService
+        private RestaurantOrderService $orderService,
+        private CompanyIgvRateService $companyIgvRateService
     ) {
     }
 
     // =========================================================================
     // Restaurant order endpoints (vertical-specific, does NOT touch retail)
     // =========================================================================
+
+    public function bootstrap(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchId = $request->query('branch_id', $authUser->branch_id);
+        $warehouseId = $request->query('warehouse_id');
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if ($branchId !== null && $branchId !== '') {
+            $branchId = (int) $branchId;
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json(['message' => 'Invalid branch scope'], 422);
+            }
+        } else {
+            $branchId = null;
+        }
+
+        if ($warehouseId !== null && $warehouseId !== '') {
+            $warehouseId = (int) $warehouseId;
+        } else {
+            $warehouseId = null;
+        }
+
+        $currencies = DB::table('core.currencies')
+            ->select('id', 'code', 'name', 'symbol', 'is_default')
+            ->where('status', 1)
+            ->orderByDesc('is_default')
+            ->orderBy('name')
+            ->get();
+
+        $paymentMethods = DB::table('master.payment_types')
+            ->select([
+                'id',
+                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                'name',
+            ])
+            ->where(function ($query) {
+                $query->where('is_active', 1)
+                    ->orWhereIn('status', [1, 2]);
+            })
+            ->orderBy('name')
+            ->get();
+
+        $seriesQuery = DB::table('sales.series_numbers')
+            ->select('id', 'document_kind', 'series', 'current_number', 'is_enabled')
+            ->where('company_id', $companyId)
+            ->whereIn('document_kind', ['SALES_ORDER', 'INVOICE', 'RECEIPT'])
+            ->where('is_enabled', true)
+            ->orderBy('document_kind')
+            ->orderBy('series');
+
+        if ($branchId !== null) {
+            $seriesQuery->where('branch_id', $branchId);
+        }
+
+        if ($warehouseId !== null) {
+            $seriesQuery->where('warehouse_id', $warehouseId);
+        }
+
+        $seriesNumbers = $seriesQuery->get();
+
+        $companyToggle = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+            ->value('is_enabled');
+
+        $branchToggle = null;
+        if ($branchId !== null) {
+            $branchToggle = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                ->value('is_enabled');
+        }
+
+        $restaurantPriceIncludesIgv = $branchToggle !== null
+            ? (bool) $branchToggle
+            : ($companyToggle !== null ? (bool) $companyToggle : true);
+
+        return response()->json([
+            'currencies' => $currencies,
+            'payment_methods' => $paymentMethods,
+            'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
+            'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
+            'series_numbers' => $seriesNumbers,
+        ]);
+    }
 
     public function fetchOrders(Request $request)
     {

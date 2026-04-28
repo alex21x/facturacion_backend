@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\Storage;
 
 class AppConfigController extends Controller
 {
+    private const SYSTEM_COMPANY_ID = 1;
+
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
 
@@ -606,6 +608,7 @@ class AppConfigController extends Controller
             ->get(['id', 'code', 'name', 'description']);
 
         $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
             ->orderBy('legal_name')
             ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
 
@@ -732,7 +735,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyId = (int) $payload['company_id'];
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
         $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
         $isEnabled = (bool) $payload['is_enabled'];
         $makePrimary = array_key_exists('make_primary', $payload) ? (bool) $payload['make_primary'] : true;
@@ -906,7 +909,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
         $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
         $isEnabled = (bool) $payload['is_enabled'];
         $makePrimary = array_key_exists('make_primary', $payload) ? (bool) $payload['make_primary'] : true;
@@ -1075,6 +1078,7 @@ class AppConfigController extends Controller
         $defaultReports = (int) env('DEFAULT_COMPANY_RATE_LIMIT_REPORTS_PER_MINUTE', 900);
 
         $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
             ->orderBy('legal_name')
             ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
 
@@ -1154,7 +1158,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyId = (int) $payload['company_id'];
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
         if (!$companyExists) {
@@ -1223,7 +1227,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
 
         $existingCompanies = DB::table('core.companies')
             ->whereIn('id', $companyIds)
@@ -1275,6 +1279,7 @@ class AppConfigController extends Controller
     public function companyOperationalLimitMatrix(Request $request)
     {
         $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
             ->orderBy('legal_name')
             ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
 
@@ -1353,7 +1358,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyId = (int) $payload['company_id'];
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
         $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
         if (!$companyExists) {
             return response()->json([
@@ -1402,7 +1407,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
 
         foreach ($companyIds as $companyId) {
             DB::table('appcfg.company_operational_limits')->updateOrInsert(
@@ -1776,7 +1781,13 @@ class AppConfigController extends Controller
 
     public function resetAdminCompanyPassword(Request $request, $companyId)
     {
-        $companyId = (int) $companyId;
+        $companyId = $this->normalizeLegacyCompanyId((int) $companyId);
+
+        if ($companyId === self::SYSTEM_COMPANY_ID) {
+            return response()->json([
+                'message' => 'La empresa del sistema no se administra desde este panel.',
+            ], 403);
+        }
 
         $adminUser = DB::table('auth.users as u')
             ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
@@ -2261,6 +2272,25 @@ class AppConfigController extends Controller
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function normalizeLegacyCompanyId(int $companyId): int
+    {
+        if ($companyId <= 0) {
+            return $companyId;
+        }
+
+        if (DB::table('core.companies')->where('id', $companyId)->exists()) {
+            return $companyId;
+        }
+
+        $legacyMap = [4 => 2, 5 => 3];
+        if (!array_key_exists($companyId, $legacyMap)) {
+            return $companyId;
+        }
+
+        $targetId = (int) $legacyMap[$companyId];
+        return DB::table('core.companies')->where('id', $targetId)->exists() ? $targetId : $companyId;
     }
 
     private function columnExists(string $schema, string $table, string $column): bool
@@ -3012,6 +3042,7 @@ class AppConfigController extends Controller
         $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
 
         $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
             ->orderBy('legal_name')
             ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
 
@@ -3063,7 +3094,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyId = (int) $payload['company_id'];
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
         if (!$companyExists) {
@@ -3114,6 +3145,7 @@ class AppConfigController extends Controller
     public function companyInventorySettingsAdminMatrix(Request $request)
     {
         $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
             ->orderBy('legal_name')
             ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
 
@@ -3181,7 +3213,7 @@ class AppConfigController extends Controller
         }
 
         $payload = $validator->validated();
-        $companyId = (int) $payload['company_id'];
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
         if (!$companyExists) {

@@ -2562,7 +2562,23 @@ class AppConfigController extends Controller
 
     private function resolveFrontendAppUrl(): string
     {
-        $base = (string) env('FRONTEND_APP_URL', 'http://127.0.0.1:5173');
+        $base = trim((string) env('FRONTEND_APP_URL', ''));
+        if ($base === '') {
+            $base = trim((string) env('FRONTEND_URL', ''));
+        }
+        if ($base === '') {
+            $base = trim((string) env('FRONTEND_PUBLIC_URL', ''));
+        }
+        if ($base === '') {
+            $base = trim((string) env('APP_URL', ''));
+        }
+
+        $isLocalHost = Str::contains(strtolower($base), ['127.0.0.1', 'localhost']);
+
+        if ($base === '' || ($isLocalHost && app()->environment('production'))) {
+            $base = 'https://facturacionfrontend-production.up.railway.app';
+        }
+
         return rtrim($base, '/');
     }
 

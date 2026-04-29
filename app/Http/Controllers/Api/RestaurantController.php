@@ -95,6 +95,7 @@ class RestaurantController extends Controller
             $allowedKinds = $mode === 'orders_minimal'
                 ? ['SALES_ORDER']
                 : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
+            $documentKindIdsByCode = $this->resolveDocumentKindIdMapByCodes($allowedKinds);
             $allowedKindIds = $this->resolveDocumentKindIdsByCodes($allowedKinds);
             $allowedKindAliases = $this->resolveDocumentKindAliasesByCodes($allowedKinds);
 
@@ -134,7 +135,22 @@ class RestaurantController extends Controller
                 $seriesQuery->where('sn.warehouse_id', $warehouseId);
             }
 
-            $seriesNumbers = $seriesQuery->get();
+            $seriesNumbers = $seriesQuery->get()->map(function ($row) {
+                $documentKindId = isset($row->document_kind_id) && $row->document_kind_id !== null
+                    ? (int) $row->document_kind_id
+                    : null;
+
+                $normalizedCode = $this->resolveCanonicalDocumentKindCode(
+                    (string) ($row->document_kind ?? ''),
+                    $documentKindId
+                );
+
+                if ($normalizedCode !== null) {
+                    $row->document_kind = $normalizedCode;
+                }
+
+                return $row;
+            })->values();
 
             $companyToggle = DB::table('appcfg.company_feature_toggles')
                 ->where('company_id', $companyId)
@@ -159,6 +175,7 @@ class RestaurantController extends Controller
                 'payment_methods' => $paymentMethods,
                 'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
                 'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
+                'document_kind_ids' => $documentKindIdsByCode,
                 'series_numbers' => $seriesNumbers,
             ];
         });
@@ -686,5 +703,65 @@ class RestaurantController extends Controller
         }
 
         return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
+    }
+
+    private function resolveDocumentKindIdMapByCodes(array $codes): array
+    {
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('id', 'code')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $code = strtoupper(trim((string) ($row->code ?? '')));
+            if ($code === '') {
+                continue;
+            }
+            $map[$code] = (int) $row->id;
+        }
+
+        return $map;
+    }
+
+    private function resolveCanonicalDocumentKindCode(string $documentKindValue, ?int $documentKindId = null): ?string
+    {
+        if ($documentKindId !== null) {
+            $codeById = DB::table('sales.document_kinds')
+                ->where('id', $documentKindId)
+                ->value('code');
+
+            if ($codeById !== null && trim((string) $codeById) !== '') {
+                return strtoupper(trim((string) $codeById));
+            }
+        }
+
+        $normalizedValue = strtoupper(trim($documentKindValue));
+        if ($normalizedValue === '') {
+            return null;
+        }
+
+        $row = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->where(function ($query) use ($normalizedValue) {
+                $query->whereRaw('UPPER(TRIM(code)) = ?', [$normalizedValue])
+                    ->orWhereRaw('UPPER(TRIM(label)) = ?', [$normalizedValue]);
+            })
+            ->first();
+
+        if ($row && isset($row->code) && trim((string) $row->code) !== '') {
+            return strtoupper(trim((string) $row->code));
+        }
+
+        return $normalizedValue;
     }
 }

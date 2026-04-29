@@ -1432,6 +1432,12 @@ class AppConfigController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
 
+        if (!$this->tableExists('inventory', 'warehouses')) {
+            return response()->json([
+                'message' => 'No se puede crear empresa: falta tabla de almacenes (inventory.warehouses).',
+            ], 409);
+        }
+
         $validator = Validator::make($request->all(), [
             'tax_id' => 'required|string|min:8|max:20',
             'legal_name' => 'required|string|min:3|max:200',
@@ -1511,9 +1517,9 @@ class AppConfigController extends Controller
             }
         }
 
-        $createDefaultWarehouse = array_key_exists('create_default_warehouse', $payload)
-            ? (bool) $payload['create_default_warehouse']
-            : true;
+        // Business rule: every company must have at least one active warehouse
+        // bound to its main branch to avoid null warehouse flows in operations.
+        $createDefaultWarehouse = true;
         $createDefaultCashRegister = array_key_exists('create_default_cash_register', $payload)
             ? (bool) $payload['create_default_cash_register']
             : true;
@@ -1580,15 +1586,30 @@ class AppConfigController extends Controller
                 );
             }
 
-            if ($createDefaultWarehouse && $this->tableExists('inventory', 'warehouses')) {
-                $defaultWarehouseId = (int) DB::table('inventory.warehouses')->insertGetId([
-                    'company_id' => $companyId,
-                    'branch_id' => $branchId,
-                    'code' => trim((string) ($payload['default_warehouse_code'] ?? 'ALM-001')),
-                    'name' => trim((string) ($payload['default_warehouse_name'] ?? 'Almacen Principal')),
-                    'address' => $payload['address'] ?? null,
-                    'status' => 1,
-                ]);
+            if ($createDefaultWarehouse) {
+                $existingWarehouse = DB::table('inventory.warehouses')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where(function ($query) use ($branchId) {
+                        $query->where('branch_id', $branchId)
+                            ->orWhereNull('branch_id');
+                    })
+                    ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$branchId])
+                    ->orderBy('name')
+                    ->first(['id']);
+
+                if ($existingWarehouse) {
+                    $defaultWarehouseId = (int) $existingWarehouse->id;
+                } else {
+                    $defaultWarehouseId = (int) DB::table('inventory.warehouses')->insertGetId([
+                        'company_id' => $companyId,
+                        'branch_id' => $branchId,
+                        'code' => trim((string) ($payload['default_warehouse_code'] ?? 'ALM-001')),
+                        'name' => trim((string) ($payload['default_warehouse_name'] ?? 'Almacen Principal')),
+                        'address' => $payload['address'] ?? null,
+                        'status' => 1,
+                    ]);
+                }
             }
 
             if ($createDefaultCashRegister && $this->tableExists('sales', 'cash_registers')) {
@@ -1992,7 +2013,7 @@ class AppConfigController extends Controller
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
+            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,RESTAURANT_RECIPES_ENABLED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);

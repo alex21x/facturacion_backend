@@ -178,10 +178,11 @@ class RestaurantRecipeService
 
         // If RESTAURANT_RECIPES_ENABLED flag is OFF, skip all recipe/stock validation
         // and let the comanda flow freely.
-        $recipesEnabled = (bool) DB::table('appcfg.company_feature_toggles')
+        $rawToggleValue = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
             ->value('is_enabled');
+        $recipesEnabled = $this->toBoolFlag($rawToggleValue);
 
         if (!$recipesEnabled) {
             return [
@@ -293,9 +294,6 @@ class RestaurantRecipeService
         foreach ($recipeHeaders as $recipeHeader) {
             $recipeByMenu[(int) $recipeHeader->menu_product_id] = (int) $recipeHeader->id;
         }
-
-        // Recipes are optional: items without a recipe are skipped silently.
-        // Only items that DO have a recipe will have their stock validated.
 
         $recipeItems = DB::table('restaurant.product_recipe_items')
             ->whereIn('recipe_id', array_values($recipeByMenu))
@@ -461,6 +459,18 @@ class RestaurantRecipeService
     {
         $requirements = $this->resolvePreparationRequirements($companyId, $orderId);
 
+        $summary = is_array($requirements['ingredients_summary'] ?? null)
+            ? $requirements['ingredients_summary']
+            : [];
+
+        if (count($summary) === 0) {
+            return [
+                'applied' => false,
+                'reason' => 'no_ingredients',
+                'rows' => 0,
+            ];
+        }
+
         $alreadyApplied = DB::table('inventory.inventory_ledger')
             ->where('company_id', $companyId)
             ->where('ref_type', self::PREP_LEDGER_REF_TYPE)
@@ -478,18 +488,6 @@ class RestaurantRecipeService
         $warehouseId = (int) ($requirements['warehouse_id'] ?? 0);
         if ($warehouseId <= 0) {
             throw new \RuntimeException('No se pudo resolver almacen para consumo de receta', 422);
-        }
-
-        $summary = is_array($requirements['ingredients_summary'] ?? null)
-            ? $requirements['ingredients_summary']
-            : [];
-
-        if (count($summary) === 0) {
-            return [
-                'applied' => false,
-                'reason' => 'no_ingredients',
-                'rows' => 0,
-            ];
         }
 
         $productIds = collect($summary)
@@ -544,6 +542,24 @@ class RestaurantRecipeService
             'reason' => 'ok',
             'rows' => count($ledgerRows),
         ];
+    }
+
+    private function toBoolFlag($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (int) $value === 1;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '' || in_array($normalized, ['0', 'false', 'f', 'no', 'n', 'off'], true)) {
+            return false;
+        }
+
+        return in_array($normalized, ['1', 'true', 't', 'yes', 'y', 'on'], true);
     }
 
     private function ensureStorage(): void

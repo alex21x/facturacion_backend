@@ -3,6 +3,7 @@
 return [
     'commerce_feature_codes' => [
         'RESTAURANT_MENU_IGV_INCLUDED',
+        'RESTAURANT_RECIPES_ENABLED',
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',

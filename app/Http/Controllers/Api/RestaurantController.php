@@ -95,18 +95,32 @@ class RestaurantController extends Controller
             $allowedKinds = $mode === 'orders_minimal'
                 ? ['SALES_ORDER']
                 : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
+            $allowedKindIds = $this->resolveDocumentKindIdsByCodes($allowedKinds);
 
             $seriesQuery = DB::table('sales.series_numbers as sn')
                 ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
                 ->select([
                     'sn.id',
+                    'sn.document_kind_id',
                     DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
                     'sn.series',
                     'sn.current_number',
                     'sn.is_enabled',
                 ])
                 ->where('sn.company_id', $companyId)
-                ->whereRaw("UPPER(COALESCE(dk.code, sn.document_kind)) IN ('" . implode("','", $allowedKinds) . "')")
+                ->where(function ($query) use ($allowedKinds, $allowedKindIds) {
+                    if (!empty($allowedKindIds)) {
+                        $query->whereIn('sn.document_kind_id', $allowedKindIds)
+                            ->orWhere(function ($legacy) use ($allowedKinds) {
+                                $legacy->whereNull('sn.document_kind_id')
+                                    ->whereIn(DB::raw('UPPER(sn.document_kind)'), $allowedKinds);
+                            });
+
+                        return;
+                    }
+
+                    $query->whereIn(DB::raw('UPPER(COALESCE(dk.code, sn.document_kind))'), $allowedKinds);
+                })
                 ->where('sn.is_enabled', true)
                 ->orderBy('document_kind')
                 ->orderBy('sn.series');
@@ -626,5 +640,24 @@ class RestaurantController extends Controller
 
         $token = trim(substr($raw, 7));
         return $token !== '' ? $token : null;
+    }
+
+    private function resolveDocumentKindIdsByCodes(array $codes): array
+    {
+        $normalized = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        return DB::table('sales.document_kinds')
+            ->whereIn(DB::raw('UPPER(code)'), $normalized)
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 }

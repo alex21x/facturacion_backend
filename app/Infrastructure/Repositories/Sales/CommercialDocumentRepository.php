@@ -55,11 +55,11 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ]);
     }
 
-    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId): ?object
+    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId, ?int $documentKindId = null): ?object
     {
         return SeriesNumber::query()
             ->forCompany($companyId)
-            ->forDocumentSeries($documentKind, $series)
+            ->forDocumentSeries($documentKind, $series, $documentKindId)
             ->enabled()
             ->forBranchAndWarehouse($branchId, $warehouseId)
             ->lockForUpdate()

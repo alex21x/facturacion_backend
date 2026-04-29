@@ -126,6 +126,9 @@ class SalesDocumentCreationService
 
                 $affectsStock = !$stockAlreadyDiscounted && CommercialDocumentPolicy::shouldAffectStock((string) $payload['document_kind'], (string) $documentStatus);
                 $settings = $this->inventorySettingsForCompany($companyId);
+                $resolvedDocumentKindId = isset($payload['document_kind_id']) && $payload['document_kind_id'] !== null
+                    ? (int) $payload['document_kind_id']
+                    : $this->resolveDocumentKindId((string) $payload['document_kind']);
 
                 $nextNumber = $this->seriesService->reserveNextNumber(
                     $companyId,
@@ -133,7 +136,8 @@ class SalesDocumentCreationService
                     (string) $payload['series'],
                     $branchId,
                     $warehouseId,
-                    (int) $authUser->id
+                    (int) $authUser->id,
+                    $resolvedDocumentKindId
                 );
 
                 $processedItems = $this->itemPreparationService->prepareProcessedItems(
@@ -202,7 +206,6 @@ class SalesDocumentCreationService
                 $payload['metadata'] = $metadata;
 
                 $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
-                $resolvedDocumentKindId = $this->resolveDocumentKindId((string) $payload['document_kind']);
 
                 $documentId = $this->documentRepository->create([
                     'company_id' => $companyId,

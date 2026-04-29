@@ -176,6 +176,23 @@ class RestaurantRecipeService
     {
         $this->ensureStorage();
 
+        // If RESTAURANT_RECIPES_ENABLED flag is OFF, skip all recipe/stock validation
+        // and let the comanda flow freely.
+        $recipesEnabled = (bool) DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+            ->value('is_enabled');
+
+        if (!$recipesEnabled) {
+            return [
+                'order_id'            => $orderId,
+                'warehouse_id'        => null,
+                'menu_items'          => [],
+                'ingredients_summary' => [],
+                'can_prepare'         => true,
+            ];
+        }
+
         $order = DB::table('sales.commercial_documents')
             ->where('id', $orderId)
             ->where('company_id', $companyId)
@@ -190,7 +207,7 @@ class RestaurantRecipeService
         }
 
         if ($order->warehouse_id === null) {
-            throw new \RuntimeException('El pedido no tiene almacen asignado para validar insumos', 422);
+            throw new \RuntimeException('El pedido no tiene almacen asignado para validar recetas', 422);
         }
 
         $warehouseId = (int) $order->warehouse_id;
@@ -277,18 +294,8 @@ class RestaurantRecipeService
             $recipeByMenu[(int) $recipeHeader->menu_product_id] = (int) $recipeHeader->id;
         }
 
-        $missingMenuItems = [];
-        foreach ($menuItems as $menuItem) {
-            if (!isset($recipeByMenu[$menuItem['menu_product_id']])) {
-                $missingMenuItems[] = $menuItem['menu_product_name'] !== ''
-                    ? $menuItem['menu_product_name']
-                    : ('#' . $menuItem['menu_product_id']);
-            }
-        }
-
-        if (count($missingMenuItems) > 0) {
-            throw new \RuntimeException('Falta receta para: ' . implode(', ', array_unique($missingMenuItems)), 422);
-        }
+        // Recipes are optional: items without a recipe are skipped silently.
+        // Only items that DO have a recipe will have their stock validated.
 
         $recipeItems = DB::table('restaurant.product_recipe_items')
             ->whereIn('recipe_id', array_values($recipeByMenu))
@@ -313,12 +320,12 @@ class RestaurantRecipeService
             $detailIngredients = [];
 
             if ($recipeId === null) {
-                continue;
+                throw new \RuntimeException('Falta receta para: ' . $menuItem['menu_product_name'], 422);
             }
 
             $recipeLines = $recipeItemsByRecipe[$recipeId] ?? [];
             if (count($recipeLines) === 0) {
-                throw new \RuntimeException('La receta no tiene insumos para: ' . ($menuItem['menu_product_name'] ?: ('#' . $menuItem['menu_product_id'])), 422);
+                throw new \RuntimeException('La receta no tiene insumos definidos para: ' . $menuItem['menu_product_name'], 422);
             }
 
             foreach ($recipeLines as $line) {

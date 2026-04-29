@@ -26,6 +26,7 @@ class AppConfigController extends Controller
 
     private const COMMERCE_FEATURE_CODES = [
         'RESTAURANT_MENU_IGV_INCLUDED',
+        'RESTAURANT_RECIPES_ENABLED',
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',
@@ -82,6 +83,7 @@ class AppConfigController extends Controller
         'DOC_KIND_DEBIT_NOTE' => 'Notas de débito',
         'DOC_KIND_DEBIT_NOTE_' => 'Notas de débito',
         'RESTAURANT_MENU_IGV_INCLUDED' => 'Menú con IGV incluido',
+        'RESTAURANT_RECIPES_ENABLED'    => 'Validar recetas en comandas',
         'PRODUCT_MULTI_UOM' => 'Múltiples unidades por producto',
         'PRODUCT_UOM_CONVERSIONS' => 'Conversión de unidades',
         'PRODUCT_WHOLESALE_PRICING' => 'Precios por volumen',

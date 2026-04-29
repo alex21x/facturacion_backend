@@ -1,0 +1,60 @@
+name: Auto Sync Deploy Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: Source branch to sync from
+        required: false
+        default: feature/cambios-generales
+      target_branch:
+        description: Target deploy branch to sync to
+        required: false
+        default: deploy/railway-2026-04-10
+
+permissions:
+  contents: write
+
+jobs:
+  sync-deploy-branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve source and target branches
+        id: refs
+        shell: bash
+        run: |
+          SOURCE="${{ github.event.inputs.source_branch }}"
+          TARGET="${{ github.event.inputs.target_branch }}"
+
+          if [ -z "$SOURCE" ]; then
+            SOURCE="feature/cambios-generales"
+          fi
+
+          if [ -z "$TARGET" ]; then
+            TARGET="deploy/railway-2026-04-10"
+          fi
+
+          echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync target branch
+        shell: bash
+        run: |
+          SOURCE="${{ steps.refs.outputs.source }}"
+          TARGET="${{ steps.refs.outputs.target }}"
+
+          git fetch origin "$SOURCE" "$TARGET"
+          git checkout "$TARGET"
+          git merge --no-ff --no-edit "origin/$SOURCE"
+          git push origin "$TARGET"

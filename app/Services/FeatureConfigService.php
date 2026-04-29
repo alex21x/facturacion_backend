@@ -16,8 +16,10 @@ class FeatureConfigService
      */
     public function getCommerceSettings(int $companyId, ?int $branchId = null): array
     {
-        // Cache key: feature_config:company:1:branch:1 or feature_config:company:1:branch:null
-        $cacheKey = self::CACHE_PREFIX . "company:{$companyId}:branch:" . ($branchId ?? 'null');
+        // Cache key includes a hash of the feature codes list so any deploy that adds/removes
+        // feature codes automatically busts the cache without needing a manual cache:clear.
+        $codesHash = substr(md5(implode(',', config('features.commerce_feature_codes', []))), 0, 8);
+        $cacheKey = self::CACHE_PREFIX . "company:{$companyId}:branch:" . ($branchId ?? 'null') . ":v:{$codesHash}";
         
         // Try cache first
         $cached = Cache::get($cacheKey);

@@ -285,6 +285,30 @@ class RestaurantController extends Controller
             return response()->json(['message' => 'Invalid branch scope'], 422);
         }
 
+        if ($warehouseId !== null) {
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('id', $warehouseId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->where(function ($query) use ($branchId) {
+                    $query->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                })
+                ->exists();
+
+            if (!$warehouseExists) {
+                return response()->json(['message' => 'Invalid warehouse scope'], 422);
+            }
+        } else {
+            $warehouseId = $this->resolveDefaultWarehouseId($companyId, $branchId);
+
+            if ($warehouseId === null) {
+                return response()->json([
+                    'message' => 'No existe almacén activo para la sucursal seleccionada. Crea uno en Maestros > Almacenes.',
+                ], 422);
+            }
+        }
+
         try {
             $result = $this->orderService->createOrder(
                 $authUser,
@@ -677,6 +701,23 @@ class RestaurantController extends Controller
             ->map(static fn ($id) => (int) $id)
             ->values()
             ->all();
+    }
+
+    private function resolveDefaultWarehouseId(int $companyId, int $branchId): ?int
+    {
+        $warehouse = DB::table('inventory.warehouses')
+            ->select('id')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->where(function ($query) use ($branchId) {
+                $query->where('branch_id', $branchId)
+                    ->orWhereNull('branch_id');
+            })
+            ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$branchId])
+            ->orderBy('name')
+            ->first();
+
+        return $warehouse ? (int) $warehouse->id : null;
     }
 
     private function resolveDocumentKindAliasesByCodes(array $codes): array

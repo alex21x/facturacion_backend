@@ -7,6 +7,13 @@ use Illuminate\Support\Facades\Http;
 
 class RestaurantComandaGateway
 {
+    private static bool $restaurantTablesStorageEnsured = false;
+
+    public function __construct(
+        private RestaurantRecipeService $recipeService
+    ) {
+    }
+
     public function list(
         int $companyId,
         ?int $branchId,
@@ -423,7 +430,20 @@ class RestaurantComandaGateway
             }
         }
 
-        $metadata['restaurant_order_status'] = $status;
+        $currentKitchenStatus = strtoupper(trim((string) ($metadata['restaurant_order_status'] ?? 'PENDING')));
+        $nextKitchenStatus = strtoupper(trim($status));
+
+        if ($nextKitchenStatus === 'IN_PREP') {
+            $this->recipeService->assertOrderCanEnterPreparation($companyId, $id);
+
+            if ($currentKitchenStatus !== 'IN_PREP') {
+                $consumptionResult = $this->recipeService->consumePreparationInventory($companyId, $id);
+                $metadata['recipe_stock_consumed'] = (bool) ($consumptionResult['applied'] ?? false);
+                $metadata['recipe_stock_consumed_at'] = now()->toIso8601String();
+            }
+        }
+
+        $metadata['restaurant_order_status'] = $nextKitchenStatus;
         if ($tableLabel !== null) {
             $value = trim($tableLabel);
             if ($value === '') {
@@ -602,6 +622,10 @@ class RestaurantComandaGateway
 
     private function ensureRestaurantTablesStorage(): void
     {
+        if (self::$restaurantTablesStorageEnsured) {
+            return;
+        }
+
         DB::statement('CREATE SCHEMA IF NOT EXISTS restaurant');
 
         DB::statement(
@@ -618,5 +642,7 @@ class RestaurantComandaGateway
                 UNIQUE (company_id, code)
             )'
         );
+
+        self::$restaurantTablesStorageEnsured = true;
     }
 }

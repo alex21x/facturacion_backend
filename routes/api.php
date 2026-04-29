@@ -157,6 +157,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::get('/tax-bridge/audit/{logId}', 'Api\\TaxBridgeAuditController@getLogDetails');
         Route::get('/restaurant/tables', 'Api\\RestaurantController@tables');
         Route::get('/restaurant/orders', 'Api\\RestaurantController@fetchOrders');
+        Route::get('/restaurant/orders/{id}', 'Api\\RestaurantController@showOrder');
+        Route::get('/restaurant/orders/{id}/preparation-requirements', 'Api\\RestaurantController@preparationRequirements');
+        Route::get('/restaurant/recipes/{menuProductId}', 'Api\\RestaurantController@getRecipe');
     });
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
@@ -188,6 +191,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::put('/restaurant/comandas/{id}/status', 'Api\\RestaurantController@updateComandaStatus');
         Route::post('/restaurant/orders', 'Api\\RestaurantController@createOrder');
         Route::post('/restaurant/orders/{id}/checkout', 'Api\\RestaurantController@checkoutOrder');
+        Route::put('/restaurant/recipes/{menuProductId}', 'Api\\RestaurantController@upsertRecipe');
         Route::post('/restaurant/tables', 'Api\\RestaurantController@createTable');
         Route::put('/restaurant/tables/{id}', 'Api\\RestaurantController@updateTable');
     });

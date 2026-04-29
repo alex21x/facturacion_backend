@@ -169,7 +169,9 @@ class RestaurantOrderService implements VerticalSalesPolicy
         string $kitchenStatus,
         string $search,
         int $page,
-        int $perPage
+        int $perPage,
+        bool $includeItems = false,
+        bool $includeMeta = false
     ): array {
         $base = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
@@ -191,7 +193,10 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 });
             });
 
-        $total = (clone $base)->count();
+        $total = null;
+        if ($includeMeta) {
+            $total = (clone $base)->count();
+        }
 
         $rows = $base
             ->select([
@@ -213,10 +218,24 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->forPage($page, $perPage)
             ->get();
 
-        // Enrich with items — single query, counts derived in-memory
+        // Enrich with per-order aggregates (lightweight for initial screen load)
         $ids = $rows->pluck('id')->all();
+        $aggregateMap = [];
         $itemMap = [];
         if (!empty($ids)) {
+            DB::table('sales.commercial_document_items')
+                ->whereIn('document_id', $ids)
+                ->selectRaw('document_id, COUNT(*) as line_count, COALESCE(SUM(qty), 0) as total_qty')
+                ->groupBy('document_id')
+                ->get()
+                ->each(function ($row) use (&$aggregateMap) {
+                    $aggregateMap[(int) $row->document_id] = [
+                        'line_count' => (int) $row->line_count,
+                        'total_qty' => (float) $row->total_qty,
+                    ];
+                });
+
+            if ($includeItems) {
             DB::table('sales.commercial_document_items')
                 ->whereIn('document_id', $ids)
                 ->orderBy('document_id')
@@ -247,14 +266,17 @@ class RestaurantOrderService implements VerticalSalesPolicy
                         'total'      => (float) $row->total,
                     ];
                 });
+            }
         }
 
-        $data = $rows->map(function ($row) use ($itemMap) {
+        $data = $rows->map(function ($row) use ($itemMap, $aggregateMap, $includeItems) {
             $arr   = (array) $row;
-            $items = $itemMap[(int) $row->id] ?? [];
-            $arr['items']      = $items;
-            $arr['line_count'] = count($items);
-            $arr['total_qty']  = array_sum(array_column($items, 'quantity'));
+            $agg = $aggregateMap[(int) $row->id] ?? ['line_count' => 0, 'total_qty' => 0.0];
+            $arr['line_count'] = (int) $agg['line_count'];
+            $arr['total_qty']  = (float) $agg['total_qty'];
+            if ($includeItems) {
+                $arr['items'] = $itemMap[(int) $row->id] ?? [];
+            }
             return $arr;
         });
 
@@ -263,10 +285,76 @@ class RestaurantOrderService implements VerticalSalesPolicy
             'meta' => [
                 'page'      => $page,
                 'per_page'  => $perPage,
-                'total'     => $total,
-                'last_page' => (int) ceil(max(1, $total) / $perPage),
+                'total'     => $includeMeta ? (int) $total : count($data),
+                'last_page' => $includeMeta ? (int) ceil(max(1, (int) $total) / $perPage) : 1,
             ],
         ];
+    }
+
+    public function fetchOrderDetail(int $companyId, int $orderId): array
+    {
+        $row = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->where('d.company_id', $companyId)
+            ->where('d.id', $orderId)
+            ->where('d.document_kind', 'SALES_ORDER')
+            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->select([
+                'd.id',
+                'd.branch_id',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.status',
+                'd.total',
+                'd.notes',
+                'd.customer_id',
+                DB::raw("COALESCE(c.legal_name, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,''))) AS customer_name"),
+                DB::raw("COALESCE(d.metadata->>'restaurant_order_status','PENDING') AS kitchen_status"),
+                DB::raw("COALESCE(d.metadata->>'table_label','') AS table_label"),
+                DB::raw("(d.metadata->>'restaurant_table_id') AS table_id"),
+            ])
+            ->first();
+
+        if (!$row) {
+            throw new \RuntimeException('Pedido no encontrado', 404);
+        }
+
+        $items = DB::table('sales.commercial_document_items')
+            ->where('document_id', $orderId)
+            ->orderBy('line_no')
+            ->get([
+                'line_no',
+                'product_id',
+                'unit_id',
+                'description',
+                'qty',
+                'unit_price',
+                'tax_total',
+                'subtotal',
+                'total',
+            ])
+            ->map(function ($item) {
+                return [
+                    'line_no' => (int) $item->line_no,
+                    'product_id' => $item->product_id !== null ? (int) $item->product_id : null,
+                    'unit_id' => $item->unit_id !== null ? (int) $item->unit_id : null,
+                    'description' => (string) $item->description,
+                    'quantity' => (float) $item->qty,
+                    'unit_price' => (float) $item->unit_price,
+                    'tax_total' => (float) $item->tax_total,
+                    'subtotal' => (float) $item->subtotal,
+                    'total' => (float) $item->total,
+                ];
+            })
+            ->all();
+
+        $arr = (array) $row;
+        $arr['items'] = $items;
+        $arr['line_count'] = count($items);
+        $arr['total_qty'] = array_sum(array_column($items, 'quantity'));
+
+        return $arr;
     }
 
     // =========================================================================

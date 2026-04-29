@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Restaurant\RestaurantComandaGateway;
 use App\Services\Restaurant\RestaurantOrderService;
+use App\Services\Restaurant\RestaurantRecipeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -15,6 +17,7 @@ class RestaurantController extends Controller
     public function __construct(
         private RestaurantComandaGateway $gateway,
         private RestaurantOrderService $orderService,
+        private RestaurantRecipeService $recipeService,
         private CompanyIgvRateService $companyIgvRateService
     ) {
     }
@@ -29,6 +32,11 @@ class RestaurantController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
+        $mode = (string) $request->query('mode', 'full');
+
+        if (!in_array($mode, ['full', 'orders_minimal'], true)) {
+            $mode = 'full';
+        }
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
@@ -55,69 +63,84 @@ class RestaurantController extends Controller
             $warehouseId = null;
         }
 
-        $currencies = DB::table('core.currencies')
-            ->select('id', 'code', 'name', 'symbol', 'is_default')
-            ->where('status', 1)
-            ->orderByDesc('is_default')
-            ->orderBy('name')
-            ->get();
+        $cacheKey = sprintf(
+            'restaurant_bootstrap:%d:%s:%s:%s',
+            $companyId,
+            $branchId ?? 'all',
+            $warehouseId ?? 'all',
+            $mode
+        );
 
-        $paymentMethods = DB::table('master.payment_types')
-            ->select([
-                'id',
-                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
-                'name',
-            ])
-            ->where(function ($query) {
-                $query->where('is_active', 1)
-                    ->orWhereIn('status', [1, 2]);
-            })
-            ->orderBy('name')
-            ->get();
+        $payload = Cache::remember($cacheKey, now()->addSeconds(20), function () use ($companyId, $branchId, $warehouseId, $mode) {
+            $currencies = DB::table('core.currencies')
+                ->select('id', 'code', 'name', 'symbol', 'is_default')
+                ->where('status', 1)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get();
 
-        $seriesQuery = DB::table('sales.series_numbers')
-            ->select('id', 'document_kind', 'series', 'current_number', 'is_enabled')
-            ->where('company_id', $companyId)
-            ->whereIn('document_kind', ['SALES_ORDER', 'INVOICE', 'RECEIPT'])
-            ->where('is_enabled', true)
-            ->orderBy('document_kind')
-            ->orderBy('series');
+            $paymentMethods = DB::table('master.payment_types')
+                ->select([
+                    'id',
+                    DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                    'name',
+                ])
+                ->where(function ($query) {
+                    $query->where('is_active', 1)
+                        ->orWhereIn('status', [1, 2]);
+                })
+                ->orderBy('name')
+                ->get();
 
-        if ($branchId !== null) {
-            $seriesQuery->where('branch_id', $branchId);
-        }
-
-        if ($warehouseId !== null) {
-            $seriesQuery->where('warehouse_id', $warehouseId);
-        }
-
-        $seriesNumbers = $seriesQuery->get();
-
-        $companyToggle = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
-            ->value('is_enabled');
-
-        $branchToggle = null;
-        if ($branchId !== null) {
-            $branchToggle = DB::table('appcfg.branch_feature_toggles')
+            $seriesQuery = DB::table('sales.series_numbers')
+                ->select('id', 'document_kind', 'series', 'current_number', 'is_enabled')
                 ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
+                ->whereIn(
+                    'document_kind',
+                    $mode === 'orders_minimal' ? ['SALES_ORDER'] : ['SALES_ORDER', 'INVOICE', 'RECEIPT']
+                )
+                ->where('is_enabled', true)
+                ->orderBy('document_kind')
+                ->orderBy('series');
+
+            if ($branchId !== null) {
+                $seriesQuery->where('branch_id', $branchId);
+            }
+
+            if ($warehouseId !== null) {
+                $seriesQuery->where('warehouse_id', $warehouseId);
+            }
+
+            $seriesNumbers = $seriesQuery->get();
+
+            $companyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
                 ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
                 ->value('is_enabled');
-        }
 
-        $restaurantPriceIncludesIgv = $branchToggle !== null
-            ? (bool) $branchToggle
-            : ($companyToggle !== null ? (bool) $companyToggle : true);
+            $branchToggle = null;
+            if ($branchId !== null) {
+                $branchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                    ->value('is_enabled');
+            }
 
-        return response()->json([
-            'currencies' => $currencies,
-            'payment_methods' => $paymentMethods,
-            'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
-            'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
-            'series_numbers' => $seriesNumbers,
-        ]);
+            $restaurantPriceIncludesIgv = $branchToggle !== null
+                ? (bool) $branchToggle
+                : ($companyToggle !== null ? (bool) $companyToggle : true);
+
+            return [
+                'currencies' => $currencies,
+                'payment_methods' => $paymentMethods,
+                'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
+                'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
+                'series_numbers' => $seriesNumbers,
+            ];
+        });
+
+        return response()->json($payload);
     }
 
     public function fetchOrders(Request $request)
@@ -128,7 +151,9 @@ class RestaurantController extends Controller
         $status    = strtoupper(trim((string) $request->query('status', '')));
         $search    = trim((string) $request->query('search', ''));
         $page      = max(1, (int) $request->query('page', 1));
-        $perPage   = min(100, max(10, (int) $request->query('per_page', 20)));
+        $perPage   = min(50, max(10, (int) $request->query('per_page', 12)));
+        $includeItems = filter_var($request->query('include_items', false), FILTER_VALIDATE_BOOLEAN);
+        $includeMeta = filter_var($request->query('include_meta', false), FILTER_VALIDATE_BOOLEAN);
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
@@ -142,7 +167,7 @@ class RestaurantController extends Controller
 
         try {
             $result = $this->orderService->fetchOrders(
-                $companyId, $branchId, $status, $search, $page, $perPage
+                $companyId, $branchId, $status, $search, $page, $perPage, $includeItems, $includeMeta
             );
         } catch (\RuntimeException $e) {
             $code = (int) $e->getCode();
@@ -150,6 +175,25 @@ class RestaurantController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    public function showOrder(Request $request, int $id)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->orderService->fetchOrderDetail($companyId, $id);
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json(['data' => $result]);
     }
 
     public function createOrder(Request $request)
@@ -341,6 +385,85 @@ class RestaurantController extends Controller
                 array_key_exists('table_label', $payload) ? (string) ($payload['table_label'] ?? '') : null,
                 $this->resolveBearerToken($request)
             );
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function getRecipe(Request $request, int $menuProductId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->recipeService->getRecipe($companyId, $menuProductId);
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function upsertRecipe(Request $request, int $menuProductId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'notes' => 'nullable|string|max:300',
+            'lines' => 'required|array|min:1',
+            'lines.*.ingredient_product_id' => 'required|integer|min:1',
+            'lines.*.qty_required_base' => 'required|numeric|min:0.00000001',
+            'lines.*.wastage_percent' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+
+        try {
+            $result = $this->recipeService->upsertRecipe(
+                $companyId,
+                $menuProductId,
+                $payload['lines'],
+                $payload['notes'] ?? null
+            );
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function preparationRequirements(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->recipeService->resolvePreparationRequirements($companyId, $id);
         } catch (\RuntimeException $e) {
             $code = (int) $e->getCode();
             return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);

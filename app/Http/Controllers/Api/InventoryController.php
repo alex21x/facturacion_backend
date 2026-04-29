@@ -81,9 +81,28 @@ class InventoryController extends Controller
             $limit = 500;
         }
 
+        $hasRestaurantRecipesTable = $this->restaurantRecipesTableExists();
+        $recipeFlagSelect = $hasRestaurantRecipesTable
+            ? DB::raw('CASE WHEN rr.menu_product_id IS NULL THEN false ELSE true END as has_recipe')
+            : DB::raw('false as has_recipe');
+
+        $recipeHeadersSubquery = null;
+        if ($hasRestaurantRecipesTable) {
+            $recipeHeadersSubquery = DB::table('restaurant.product_recipes')
+                ->select('menu_product_id');
+
+            if ($this->restaurantRecipesDeletedAtColumnExists()) {
+                $recipeHeadersSubquery->whereNull('deleted_at');
+            }
+
+            $recipeHeadersSubquery->groupBy('menu_product_id');
+        }
+
         if ($autocomplete) {
             $query = DB::table('inventory.products as p')
+                ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
                 ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
+                ->leftJoin('inventory.product_lines as pl', 'pl.id', '=', 'p.line_id')
                 ->select([
                     'p.id',
                     'p.sku',
@@ -104,13 +123,14 @@ class InventoryController extends Controller
                     'p.lot_tracking',
                     'p.has_expiration',
                     'p.status',
-                    DB::raw('NULL::text as category_name'),
-                    DB::raw('NULL::text as line_name'),
+                    DB::raw('c.name as category_name'),
+                    DB::raw('pl.name as line_name'),
                     DB::raw('NULL::text as brand_name'),
                     DB::raw('NULL::text as location_name'),
                     DB::raw('NULL::text as warranty_name'),
                     DB::raw('u.code as unit_code'),
                     DB::raw('u.name as unit_name'),
+                    $recipeFlagSelect,
                 ])
                 ->where('p.company_id', $companyId)
                 ->whereNull('p.deleted_at')
@@ -150,11 +170,18 @@ class InventoryController extends Controller
                     DB::raw('pw.name as warranty_name'),
                     DB::raw('u.code as unit_code'),
                     DB::raw('u.name as unit_name'),
+                    $recipeFlagSelect,
                 ])
                 ->where('p.company_id', $companyId)
                 ->whereNull('p.deleted_at')
                 ->orderBy('p.name')
                 ->limit($limit);
+        }
+
+        if ($recipeHeadersSubquery !== null) {
+            $query->leftJoinSub($recipeHeadersSubquery, 'rr', function ($join) {
+                $join->on('rr.menu_product_id', '=', 'p.id');
+            });
         }
 
         if ($search !== '') {
@@ -1432,6 +1459,23 @@ class InventoryController extends Controller
     private function canManageProducts($authUser, int $companyId): bool
     {
         return $this->isAllowedByProfileFeature($authUser, $companyId, self::FEATURE_PRODUCTS_BY_PROFILE);
+    }
+
+    private function restaurantRecipesTableExists(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'restaurant')
+            ->where('table_name', 'product_recipes')
+            ->exists();
+    }
+
+    private function restaurantRecipesDeletedAtColumnExists(): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', 'restaurant')
+            ->where('table_name', 'product_recipes')
+            ->where('column_name', 'deleted_at')
+            ->exists();
     }
 
     private function resolveDefaultUnitId(): ?int

@@ -1790,27 +1790,71 @@ class SalesController extends Controller
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
         $documentKind = $request->query('document_kind');
+        $documentKindId = (int) $request->query('document_kind_id', 0);
         $enabledOnly = filter_var($request->query('enabled_only', true), FILTER_VALIDATE_BOOLEAN);
 
-        $query = DB::table('sales.series_numbers')
-            ->where('company_id', $companyId)
+        $query = DB::table('sales.series_numbers as sn')
+            ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+            ->where('sn.company_id', $companyId)
+            ->select([
+                'sn.id',
+                'sn.company_id',
+                'sn.branch_id',
+                'sn.warehouse_id',
+                'sn.document_kind_id',
+                DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                'sn.series',
+                'sn.current_number',
+                'sn.number_padding',
+                'sn.reset_policy',
+                'sn.is_enabled',
+            ])
             ->orderBy('document_kind')
-            ->orderBy('series');
+            ->orderBy('sn.series');
 
         if ($branchId !== null && $branchId !== '') {
-            $query->where('branch_id', (int) $branchId);
+            $query->where('sn.branch_id', (int) $branchId);
         }
 
         if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('warehouse_id', (int) $warehouseId);
+            $query->where('sn.warehouse_id', (int) $warehouseId);
         }
 
-        if ($documentKind) {
-            $query->where('document_kind', $documentKind);
+        if ($documentKindId > 0) {
+            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
+            if (!is_array($catalogRow)) {
+                return response()->json([
+                    'message' => 'document_kind_id invalido',
+                ], 422);
+            }
+
+            $resolvedCode = strtoupper(trim((string) ($catalogRow['code'] ?? '')));
+            $query->where(function ($nested) use ($documentKindId, $resolvedCode) {
+                $nested->where('sn.document_kind_id', $documentKindId)
+                    ->orWhere(function ($legacy) use ($resolvedCode) {
+                        $legacy->whereNull('sn.document_kind_id')
+                            ->whereRaw('UPPER(sn.document_kind) = ?', [$resolvedCode]);
+                    });
+            });
+        } elseif ($documentKind) {
+            $catalogRow = $this->findDocumentKindCatalogRowByCode((string) $documentKind);
+            if (is_array($catalogRow)) {
+                $resolvedId = (int) ($catalogRow['id'] ?? 0);
+                $resolvedCode = strtoupper(trim((string) ($catalogRow['code'] ?? '')));
+                $query->where(function ($nested) use ($resolvedId, $resolvedCode) {
+                    $nested->where('sn.document_kind_id', $resolvedId)
+                        ->orWhere(function ($legacy) use ($resolvedCode) {
+                            $legacy->whereNull('sn.document_kind_id')
+                                ->whereRaw('UPPER(sn.document_kind) = ?', [$resolvedCode]);
+                        });
+                });
+            } else {
+                $query->whereRaw('UPPER(COALESCE(dk.code, sn.document_kind)) = ?', [strtoupper(trim((string) $documentKind))]);
+            }
         }
 
         if ($enabledOnly) {
-            $query->where('is_enabled', true);
+            $query->where('sn.is_enabled', true);
         }
 
         return response()->json([
@@ -2677,9 +2721,24 @@ class SalesController extends Controller
             : null;
 
         if ($series === null) {
+            $targetCatalog = $this->findDocumentKindCatalogRowByCode((string) $targetDocumentKind);
+            $targetDocumentKindId = is_array($targetCatalog) ? (int) ($targetCatalog['id'] ?? 0) : 0;
+            $targetDocumentKindCode = strtoupper(trim((string) ($targetCatalog['code'] ?? $targetDocumentKind)));
+
             $candidateSeries = DB::table('sales.series_numbers')
                 ->where('company_id', $companyId)
-                ->where('document_kind', $targetDocumentKind)
+                ->where(function ($query) use ($targetDocumentKindId, $targetDocumentKindCode) {
+                    if ($targetDocumentKindId > 0) {
+                        $query->where('document_kind_id', $targetDocumentKindId)
+                            ->orWhere(function ($legacy) use ($targetDocumentKindCode) {
+                                $legacy->whereNull('document_kind_id')
+                                    ->where('document_kind', $targetDocumentKindCode);
+                            });
+                        return;
+                    }
+
+                    $query->where('document_kind', $targetDocumentKindCode);
+                })
                 ->where('is_enabled', true)
                 ->when($source->branch_id !== null, function ($query) use ($source) {
                     $query->where(function ($nested) use ($source) {
@@ -4162,6 +4221,16 @@ class SalesController extends Controller
         return $this->documentKindCatalog()
             ->first(function ($row) use ($id) {
                 return (int) ($row['id'] ?? 0) === $id;
+            });
+    }
+
+    private function findDocumentKindCatalogRowByCode(string $code): ?array
+    {
+        $normalizedCode = strtoupper(trim($code));
+
+        return $this->documentKindCatalog()
+            ->first(function ($row) use ($normalizedCode) {
+                return strtoupper(trim((string) ($row['code'] ?? ''))) === $normalizedCode;
             });
     }
 

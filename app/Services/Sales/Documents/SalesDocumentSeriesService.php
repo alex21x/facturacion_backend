@@ -16,14 +16,16 @@ class SalesDocumentSeriesService
         string $series,
         ?int $branchId,
         ?int $warehouseId,
-        int $authUserId
+        int $authUserId,
+        ?int $documentKindId = null
     ): int {
         $seriesRow = $this->documentRepository->getSeriesNumber(
             $companyId,
             $documentKind,
             $series,
             $branchId,
-            $warehouseId
+            $warehouseId,
+            $documentKindId
         );
 
         if (!$seriesRow) {

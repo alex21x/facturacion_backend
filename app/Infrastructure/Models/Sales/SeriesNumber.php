@@ -36,11 +36,24 @@ class SeriesNumber extends Model
         return $query->where('company_id', $companyId);
     }
 
-    public function scopeForDocumentSeries(Builder $query, string $documentKind, string $series): Builder
+    public function scopeForDocumentSeries(Builder $query, string $documentKind, string $series, ?int $documentKindId = null): Builder
     {
+        $normalizedKind = strtoupper(trim($documentKind));
+
         return $query
-            ->where('document_kind', $documentKind)
-            ->where('series', $series);
+            ->where('series', $series)
+            ->where(function (Builder $nested) use ($documentKindId, $normalizedKind) {
+                if ($documentKindId !== null && $documentKindId > 0) {
+                    $nested->where('document_kind_id', $documentKindId)
+                        ->orWhere(function (Builder $legacy) use ($normalizedKind) {
+                            $legacy->whereNull('document_kind_id')
+                                ->whereRaw('UPPER(document_kind) = ?', [$normalizedKind]);
+                        });
+                    return;
+                }
+
+                $nested->whereRaw('UPPER(document_kind) = ?', [$normalizedKind]);
+            });
     }
 
     public function scopeEnabled(Builder $query): Builder

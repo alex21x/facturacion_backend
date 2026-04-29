@@ -92,23 +92,31 @@ class RestaurantController extends Controller
                 ->orderBy('name')
                 ->get();
 
-            $seriesQuery = DB::table('sales.series_numbers')
-                ->select('id', 'document_kind', 'series', 'current_number', 'is_enabled')
-                ->where('company_id', $companyId)
-                ->whereIn(
-                    'document_kind',
-                    $mode === 'orders_minimal' ? ['SALES_ORDER'] : ['SALES_ORDER', 'INVOICE', 'RECEIPT']
-                )
-                ->where('is_enabled', true)
+            $allowedKinds = $mode === 'orders_minimal'
+                ? ['SALES_ORDER']
+                : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
+
+            $seriesQuery = DB::table('sales.series_numbers as sn')
+                ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+                ->select([
+                    'sn.id',
+                    DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                    'sn.series',
+                    'sn.current_number',
+                    'sn.is_enabled',
+                ])
+                ->where('sn.company_id', $companyId)
+                ->whereRaw("UPPER(COALESCE(dk.code, sn.document_kind)) IN ('" . implode("','", $allowedKinds) . "')")
+                ->where('sn.is_enabled', true)
                 ->orderBy('document_kind')
-                ->orderBy('series');
+                ->orderBy('sn.series');
 
             if ($branchId !== null) {
-                $seriesQuery->where('branch_id', $branchId);
+                $seriesQuery->where('sn.branch_id', $branchId);
             }
 
             if ($warehouseId !== null) {
-                $seriesQuery->where('warehouse_id', $warehouseId);
+                $seriesQuery->where('sn.warehouse_id', $warehouseId);
             }
 
             $seriesNumbers = $seriesQuery->get();

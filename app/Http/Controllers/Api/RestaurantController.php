@@ -96,6 +96,7 @@ class RestaurantController extends Controller
                 ? ['SALES_ORDER']
                 : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
             $allowedKindIds = $this->resolveDocumentKindIdsByCodes($allowedKinds);
+            $allowedKindAliases = $this->resolveDocumentKindAliasesByCodes($allowedKinds);
 
             $seriesQuery = DB::table('sales.series_numbers as sn')
                 ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
@@ -108,18 +109,18 @@ class RestaurantController extends Controller
                     'sn.is_enabled',
                 ])
                 ->where('sn.company_id', $companyId)
-                ->where(function ($query) use ($allowedKinds, $allowedKindIds) {
+                ->where(function ($query) use ($allowedKinds, $allowedKindIds, $allowedKindAliases) {
                     if (!empty($allowedKindIds)) {
                         $query->whereIn('sn.document_kind_id', $allowedKindIds)
-                            ->orWhere(function ($legacy) use ($allowedKinds) {
+                            ->orWhere(function ($legacy) use ($allowedKindAliases) {
                                 $legacy->whereNull('sn.document_kind_id')
-                                    ->whereIn(DB::raw('UPPER(sn.document_kind)'), $allowedKinds);
+                                    ->whereIn(DB::raw("UPPER(TRIM(COALESCE(sn.document_kind, '')))") , $allowedKindAliases);
                             });
 
                         return;
                     }
 
-                    $query->whereIn(DB::raw('UPPER(COALESCE(dk.code, sn.document_kind))'), $allowedKinds);
+                    $query->whereIn(DB::raw('UPPER(TRIM(COALESCE(dk.code, sn.document_kind)))'), $allowedKindAliases);
                 })
                 ->where('sn.is_enabled', true)
                 ->orderBy('document_kind')
@@ -659,5 +660,31 @@ class RestaurantController extends Controller
             ->map(static fn ($id) => (int) $id)
             ->values()
             ->all();
+    }
+
+    private function resolveDocumentKindAliasesByCodes(array $codes): array
+    {
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $aliases = $normalizedCodes;
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        foreach ($rows as $row) {
+            $aliases[] = strtoupper(trim((string) ($row->code ?? '')));
+            $aliases[] = strtoupper(trim((string) ($row->label ?? '')));
+        }
+
+        return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
     }
 }

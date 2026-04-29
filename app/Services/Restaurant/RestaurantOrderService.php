@@ -576,20 +576,20 @@ class RestaurantOrderService implements VerticalSalesPolicy
     private function applyDocumentKindFilter($query, string $documentKindColumn, string $documentKindIdColumn, string $documentKindCode): void
     {
         $documentKindId = $this->resolveDocumentKindId($documentKindCode);
-        $normalizedCode = strtoupper(trim($documentKindCode));
+        $aliases = $this->resolveDocumentKindAliases($documentKindCode);
 
-        $query->where(function ($nested) use ($documentKindColumn, $documentKindIdColumn, $documentKindId, $normalizedCode) {
+        $query->where(function ($nested) use ($documentKindColumn, $documentKindIdColumn, $documentKindId, $aliases) {
             if ($documentKindId !== null) {
                 $nested->where($documentKindIdColumn, $documentKindId)
-                    ->orWhere(function ($legacy) use ($documentKindColumn, $documentKindIdColumn, $normalizedCode) {
+                    ->orWhere(function ($legacy) use ($documentKindColumn, $documentKindIdColumn, $aliases) {
                         $legacy->whereNull($documentKindIdColumn)
-                            ->whereRaw('UPPER(' . $documentKindColumn . ') = ?', [$normalizedCode]);
+                            ->whereIn(DB::raw('UPPER(TRIM(COALESCE(' . $documentKindColumn . ", '')))"), $aliases);
                     });
 
                 return;
             }
 
-            $nested->whereRaw('UPPER(' . $documentKindColumn . ') = ?', [$normalizedCode]);
+            $nested->whereIn(DB::raw('UPPER(TRIM(COALESCE(' . $documentKindColumn . ", '')))"), $aliases);
         });
     }
 
@@ -600,7 +600,11 @@ class RestaurantOrderService implements VerticalSalesPolicy
             return (int) $document->document_kind_id === $documentKindId;
         }
 
-        return strtoupper(trim((string) ($document->document_kind ?? ''))) === strtoupper(trim($documentKindCode));
+        return in_array(
+            strtoupper(trim((string) ($document->document_kind ?? ''))),
+            $this->resolveDocumentKindAliases($documentKindCode),
+            true
+        );
     }
 
     private function resolveDocumentKindId(string $documentKindCode): ?int
@@ -615,6 +619,27 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->value('id');
 
         return $id !== null ? (int) $id : null;
+    }
+
+    private function resolveDocumentKindAliases(string $documentKindCode): array
+    {
+        $normalizedCode = strtoupper(trim($documentKindCode));
+        if ($normalizedCode === '') {
+            return [];
+        }
+
+        $aliases = [$normalizedCode];
+        $row = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+            ->first();
+
+        if ($row) {
+            $aliases[] = strtoupper(trim((string) ($row->code ?? '')));
+            $aliases[] = strtoupper(trim((string) ($row->label ?? '')));
+        }
+
+        return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
     }
 
 }

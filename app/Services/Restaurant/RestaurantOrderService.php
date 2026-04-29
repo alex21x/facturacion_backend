@@ -89,6 +89,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         return [
             'document_kind'     => 'SALES_ORDER',
+            'document_kind_id'  => $this->resolveDocumentKindId('SALES_ORDER'),
             'series'            => trim((string) ($input['series'] ?? '')),
             'issue_at'          => trim((string) ($input['issue_at'] ?? now('America/Lima')->toDateString())),
             'due_at'            => null,
@@ -176,7 +177,6 @@ class RestaurantOrderService implements VerticalSalesPolicy
         $base = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
-            ->where('d.document_kind', 'SALES_ORDER')
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
             ->when($branchId !== null, fn ($q) => $q->where('d.branch_id', $branchId))
             ->when($kitchenStatus !== '', fn ($q) => $q->whereRaw(
@@ -192,6 +192,8 @@ class RestaurantOrderService implements VerticalSalesPolicy
                       ->orWhereRaw("LOWER(COALESCE(d.metadata->>'table_label','')) LIKE ?", [$needle]);
                 });
             });
+
+        $this->applyDocumentKindFilter($base, 'd.document_kind', 'd.document_kind_id', 'SALES_ORDER');
 
         $total = null;
         if ($includeMeta) {
@@ -293,11 +295,10 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
     public function fetchOrderDetail(int $companyId, int $orderId): array
     {
-        $row = DB::table('sales.commercial_documents as d')
+        $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
             ->where('d.id', $orderId)
-            ->where('d.document_kind', 'SALES_ORDER')
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
             ->select([
                 'd.id',
@@ -313,8 +314,11 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 DB::raw("COALESCE(d.metadata->>'restaurant_order_status','PENDING') AS kitchen_status"),
                 DB::raw("COALESCE(d.metadata->>'table_label','') AS table_label"),
                 DB::raw("(d.metadata->>'restaurant_table_id') AS table_id"),
-            ])
-            ->first();
+            ]);
+
+        $this->applyDocumentKindFilter($query, 'd.document_kind', 'd.document_kind_id', 'SALES_ORDER');
+
+        $row = $query->first();
 
         if (!$row) {
             throw new \RuntimeException('Pedido no encontrado', 404);
@@ -409,7 +413,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
             throw new \RuntimeException('Pedido no encontrado', 404);
         }
 
-        if ((string) $source->document_kind !== 'SALES_ORDER') {
+        if (!$this->documentMatchesKind($source, 'SALES_ORDER')) {
             throw new \RuntimeException('Solo se puede cobrar un pedido de venta (SALES_ORDER)', 422);
         }
 
@@ -418,12 +422,14 @@ class RestaurantOrderService implements VerticalSalesPolicy
         }
 
         // Guard: check if already converted to avoid double billing
-        $already = DB::table('sales.commercial_documents')
+        $alreadyQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
-            ->where('document_kind', $targetDocumentKind)
             ->whereNotIn('status', ['VOID', 'CANCELED'])
-            ->whereRaw("COALESCE((metadata->>'source_document_id')::BIGINT, 0) = ?", [$orderId])
-            ->exists();
+            ->whereRaw("COALESCE((metadata->>'source_document_id')::BIGINT, 0) = ?", [$orderId]);
+
+        $this->applyDocumentKindFilter($alreadyQuery, 'document_kind', 'document_kind_id', $targetDocumentKind);
+
+        $already = $alreadyQuery->exists();
 
         if ($already) {
             throw new \RuntimeException('Este pedido ya fue cobrado', 409);
@@ -431,16 +437,18 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         // ── 2. Resolve series ────────────────────────────────────────────────
         if ($series === null || trim($series) === '') {
-            $candidateSeries = DB::table('sales.series_numbers')
+            $candidateSeriesQuery = DB::table('sales.series_numbers')
                 ->where('company_id', $companyId)
-                ->where('document_kind', $targetDocumentKind)
                 ->where('is_enabled', true)
                 ->when($source->branch_id !== null, fn ($q) => $q->where(function ($n) use ($source) {
                     $n->where('branch_id', (int) $source->branch_id)->orWhereNull('branch_id');
                 }))
                 ->orderByDesc('branch_id')
-                ->orderBy('series')
-                ->value('series');
+                ->orderBy('series');
+
+            $this->applyDocumentKindFilter($candidateSeriesQuery, 'document_kind', 'document_kind_id', $targetDocumentKind);
+
+            $candidateSeries = $candidateSeriesQuery->value('series');
 
             if (!$candidateSeries) {
                 throw new \RuntimeException('No existe serie habilitada para ' . $targetDocumentKind, 422);
@@ -494,6 +502,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         $checkoutPayload = [
             'document_kind'     => $targetDocumentKind,
+            'document_kind_id'  => $this->resolveDocumentKindId($targetDocumentKind),
             'series'            => $series,
             'issue_at'          => now('America/Lima')->toDateString(),
             'due_at'            => null,
@@ -563,4 +572,49 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->where('table_name', 'tables')
             ->exists();
     }
+
+    private function applyDocumentKindFilter($query, string $documentKindColumn, string $documentKindIdColumn, string $documentKindCode): void
+    {
+        $documentKindId = $this->resolveDocumentKindId($documentKindCode);
+        $normalizedCode = strtoupper(trim($documentKindCode));
+
+        $query->where(function ($nested) use ($documentKindColumn, $documentKindIdColumn, $documentKindId, $normalizedCode) {
+            if ($documentKindId !== null) {
+                $nested->where($documentKindIdColumn, $documentKindId)
+                    ->orWhere(function ($legacy) use ($documentKindColumn, $documentKindIdColumn, $normalizedCode) {
+                        $legacy->whereNull($documentKindIdColumn)
+                            ->whereRaw('UPPER(' . $documentKindColumn . ') = ?', [$normalizedCode]);
+                    });
+
+                return;
+            }
+
+            $nested->whereRaw('UPPER(' . $documentKindColumn . ') = ?', [$normalizedCode]);
+        });
+    }
+
+    private function documentMatchesKind(object $document, string $documentKindCode): bool
+    {
+        $documentKindId = $this->resolveDocumentKindId($documentKindCode);
+        if ($documentKindId !== null && isset($document->document_kind_id) && $document->document_kind_id !== null) {
+            return (int) $document->document_kind_id === $documentKindId;
+        }
+
+        return strtoupper(trim((string) ($document->document_kind ?? ''))) === strtoupper(trim($documentKindCode));
+    }
+
+    private function resolveDocumentKindId(string $documentKindCode): ?int
+    {
+        $normalizedCode = strtoupper(trim($documentKindCode));
+        if ($normalizedCode === '') {
+            return null;
+        }
+
+        $id = DB::table('sales.document_kinds')
+            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
 }

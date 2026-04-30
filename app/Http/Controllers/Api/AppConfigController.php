@@ -2360,9 +2360,6 @@ class AppConfigController extends Controller
             $codes = $codes->merge(DB::table('appcfg.branch_feature_toggles')->distinct()->pluck('feature_code'));
         }
 
-        // Backward-compatible seed source while DB metadata is being populated.
-        $codes = $codes->merge(config('features.commerce_feature_codes', []));
-
         return $codes
             ->filter(fn ($code) => is_string($code) && trim((string) $code) !== '')
             ->map(fn ($code) => strtoupper(trim((string) $code)))

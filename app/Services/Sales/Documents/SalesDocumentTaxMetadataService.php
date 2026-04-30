@@ -212,12 +212,10 @@ class SalesDocumentTaxMetadataService
 
     private function resolveSunatOperationTypes(int $companyId, ?int $branchId): array
     {
-        $defaultRows = [
-            ['code' => '0101', 'name' => 'Venta interna', 'regime' => 'NONE'],
-            ['code' => '1001', 'name' => 'Operacion sujeta a detraccion', 'regime' => 'DETRACCION'],
-            ['code' => '2001', 'name' => 'Operacion sujeta a retencion', 'regime' => 'RETENCION'],
-            ['code' => '3001', 'name' => 'Operacion sujeta a percepcion', 'regime' => 'PERCEPCION'],
-        ];
+        $catalogRows = $this->resolveSunatOperationTypesFromCatalog();
+        if (count($catalogRows) > 0) {
+            return $catalogRows;
+        }
 
         $detraccionConfig = $this->decodeFeatureConfig(optional($this->resolveFeatureToggleRow($companyId, $branchId, 'SALES_DETRACCION_ENABLED'))->config);
         $retencionConfig = $this->decodeFeatureConfig(optional($this->resolveFeatureToggleRow($companyId, $branchId, 'SALES_RETENCION_ENABLED'))->config);
@@ -256,7 +254,44 @@ class SalesDocumentTaxMetadataService
             ->values()
             ->all();
 
-        return count($rows) > 0 ? $rows : $defaultRows;
+        if (count($rows) > 0) {
+            return $rows;
+        }
+
+        return [
+            ['code' => '0101', 'name' => 'Venta interna', 'regime' => 'NONE'],
+            ['code' => '1001', 'name' => 'Operacion sujeta a detraccion', 'regime' => 'DETRACCION'],
+            ['code' => '2001', 'name' => 'Operacion sujeta a retencion', 'regime' => 'RETENCION'],
+            ['code' => '3001', 'name' => 'Operacion sujeta a percepcion', 'regime' => 'PERCEPCION'],
+        ];
+    }
+
+    private function resolveSunatOperationTypesFromCatalog(): array
+    {
+        if (!$this->tableExists('master.sunat_operation_types')) {
+            return [];
+        }
+
+        return DB::table('master.sunat_operation_types')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('code')
+            ->get(['code', 'name', 'regime'])
+            ->map(function ($row) {
+                $regime = strtoupper(trim((string) ($row->regime ?? 'NONE')));
+                if (!in_array($regime, ['NONE', 'DETRACCION', 'RETENCION', 'PERCEPCION'], true)) {
+                    $regime = 'NONE';
+                }
+
+                return [
+                    'code' => strtoupper(trim((string) ($row->code ?? ''))),
+                    'name' => trim((string) ($row->name ?? '')),
+                    'regime' => $regime,
+                ];
+            })
+            ->filter(fn ($row) => is_array($row) && $row['code'] !== '' && $row['name'] !== '')
+            ->values()
+            ->all();
     }
 
     private function resolveFeatureAccountInfo(int $companyId, ?int $branchId, string $featureCode, string $fallbackKeyword): ?array

@@ -1998,6 +1998,7 @@ class SalesController extends Controller
             'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
+            'source_origin' => $request->query('source_origin'),
             'document_kind' => $request->query('document_kind'),
             'document_kind_id' => $request->query('document_kind_id'),
             'status' => $request->query('status'),
@@ -2036,6 +2037,20 @@ class SalesController extends Controller
                 'd.branch_id',
                 'd.document_kind',
                 'd.document_kind_id',
+                                DB::raw("COALESCE((d.metadata->>'conversion_origin'), '') as conversion_origin"),
+                                DB::raw("CASE
+                                        WHEN UPPER(COALESCE((d.metadata->>'conversion_origin'), '')) LIKE 'RESTAURANT%'
+                                            OR NULLIF(TRIM(COALESCE((d.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
+                                            OR EXISTS (
+                                                    SELECT 1
+                                                    FROM sales.commercial_documents dsrc2
+                                                    WHERE dsrc2.company_id = d.company_id
+                                                        AND dsrc2.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                                                        AND NULLIF(TRIM(COALESCE((dsrc2.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
+                                            )
+                                        THEN true
+                                        ELSE false
+                                END as has_restaurant_origin"),
                 DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
                 DB::raw("COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) as document_kind_base"),
                 DB::raw("CASE WHEN COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE') THEN true ELSE false END as is_tributary_document"),
@@ -2158,6 +2173,7 @@ class SalesController extends Controller
             'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
+            'source_origin' => $request->query('source_origin'),
             'document_kind' => $request->query('document_kind'),
             'document_kind_id' => $request->query('document_kind_id'),
             'status' => $request->query('status'),
@@ -2404,6 +2420,7 @@ class SalesController extends Controller
         $branchId = $filters['branch_id'] ?? null;
         $warehouseId = $filters['warehouse_id'] ?? null;
         $cashRegisterId = $filters['cash_register_id'] ?? null;
+        $sourceOrigin = strtoupper(trim((string) ($filters['source_origin'] ?? '')));
         $documentKind = $filters['document_kind'] ?? null;
         $documentKindId = $filters['document_kind_id'] ?? null;
         $status = $filters['status'] ?? null;
@@ -2433,6 +2450,20 @@ class SalesController extends Controller
 
         if ($cashRegisterId !== null && $cashRegisterId !== '') {
             $query->whereRaw("COALESCE((d.metadata->>'cash_register_id')::BIGINT, 0) = ?", [(int) $cashRegisterId]);
+        }
+
+        if ($sourceOrigin === 'RESTAURANT') {
+            $query->where(function ($nested) {
+                $nested->whereRaw("UPPER(COALESCE((d.metadata->>'conversion_origin'), '')) LIKE 'RESTAURANT%'")
+                    ->orWhereRaw("NULLIF(TRIM(COALESCE((d.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL")
+                    ->orWhereExists(function ($sourceQuery) {
+                        $sourceQuery->select(DB::raw('1'))
+                            ->from('sales.commercial_documents as dsrc')
+                            ->whereColumn('dsrc.company_id', 'd.company_id')
+                            ->whereRaw("dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)")
+                            ->whereRaw("NULLIF(TRIM(COALESCE((dsrc.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL");
+                    });
+            });
         }
 
         if ($documentKind) {

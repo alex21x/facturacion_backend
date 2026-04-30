@@ -37,10 +37,6 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/appcfg/igv-settings', 'Api\\AppConfigController@igvSettings');
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/ops/latency/summary', 'Api\\OpsLatencyController@summary');
-        Route::get('/cash/sessions', 'Api\\CashController@sessions');
-        Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
-        Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
-        Route::get('/cash/movements', 'Api\\CashController@movements');
     });
 
     Route::middleware(['rbac.module:APPCFG,view', 'throttle:6000,1'])->group(function () {
@@ -78,10 +74,6 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     Route::put('/appcfg/company-profile', 'Api\\AppConfigController@updateCompanyProfile');
     Route::post('/appcfg/company-logo', 'Api\\AppConfigController@uploadCompanyLogo');
     Route::post('/appcfg/company-cert', 'Api\\AppConfigController@uploadCompanyCert');
-
-    Route::post('/cash/sessions', 'Api\\CashController@openSession');
-    Route::put('/cash/sessions/{id}/close', 'Api\\CashController@closeSession');
-    Route::post('/cash/movements', 'Api\\CashController@createMovement');
 
         Route::post('/masters/warehouses', 'Api\\MasterDataController@createWarehouse');
         Route::put('/masters/warehouses/{id}', 'Api\\MasterDataController@updateWarehouse');
@@ -146,6 +138,11 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/sales/gre-guides/{id}/tax-bridge-audit', 'Api\\GreGuideController@taxBridgeAuditHistory');
         Route::get('/sales/gre-guides/{id}/print', 'Api\\GreGuideController@printable');
 
+        Route::get('/cash/sessions', 'Api\\CashController@sessions');
+        Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
+        Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
+        Route::get('/cash/movements', 'Api\\CashController@movements');
+
         // Restaurant operations (comandas & orders)
         Route::get('/restaurant/bootstrap', 'Api\\RestaurantController@bootstrap');
         Route::get('/restaurant/comandas', 'Api\\RestaurantController@comandas');
@@ -169,6 +166,10 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesController@voidCommercialDocument');
         Route::put('/sales/commercial-documents/{id}/retry-tax-bridge', 'Api\\SalesController@retryTaxBridgeSend');
         Route::put('/sales/commercial-documents/{id}/sunat-void', 'Api\\SalesController@sunatVoidCommunication');
+
+        Route::post('/cash/sessions', 'Api\\CashController@openSession');
+        Route::put('/cash/sessions/{id}/close', 'Api\\CashController@closeSession');
+        Route::post('/cash/movements', 'Api\\CashController@createMovement');
         Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');

@@ -177,7 +177,8 @@ class RestaurantOrderService implements VerticalSalesPolicy
         $base = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
-            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            // Issued orders are final for comanda operations and should not stay in the kitchen board.
+            ->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED'])
             ->when($branchId !== null, fn ($q) => $q->where('d.branch_id', $branchId))
             ->when($kitchenStatus !== '', fn ($q) => $q->whereRaw(
                 "UPPER(COALESCE(d.metadata->>'restaurant_order_status', 'PENDING')) = ?",
@@ -299,7 +300,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
             ->where('d.id', $orderId)
-            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED'])
             ->select([
                 'd.id',
                 'd.branch_id',
@@ -396,9 +397,9 @@ class RestaurantOrderService implements VerticalSalesPolicy
         ?int $paymentMethodId = null,
         ?string $notes = null
     ): array {
-        $allowed = ['INVOICE', 'RECEIPT'];
+        $allowed = ['INVOICE', 'RECEIPT', 'SALES_ORDER'];
         if (!in_array(strtoupper($targetDocumentKind), $allowed, true)) {
-            throw new \RuntimeException('Tipo de documento no válido para cobro. Use INVOICE o RECEIPT.', 422);
+            throw new \RuntimeException('Tipo de documento no válido para cobro. Use SALES_ORDER, INVOICE o RECEIPT.', 422);
         }
 
         $targetDocumentKind = strtoupper($targetDocumentKind);
@@ -421,13 +422,82 @@ class RestaurantOrderService implements VerticalSalesPolicy
             throw new \RuntimeException('No se puede cobrar un pedido anulado o cancelado', 422);
         }
 
-        // Guard: check if already converted to avoid double billing
+        $sourceBranchId = $source->branch_id !== null ? (int) $source->branch_id : null;
+        $sellerToCashierEnabled = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $sourceBranchId,
+            'SALES_SELLER_TO_CASHIER',
+            false
+        );
+
+        // Flag only sets the default in the UI; all three document kinds are always allowed.
+        // $sellerToCashierEnabled is retained for future logic (e.g. audit trails) but no longer restricts.
+        unset($sellerToCashierEnabled);
+
+        if ($targetDocumentKind === 'SALES_ORDER') {
+            $alreadyIssued = strtoupper((string) ($source->status ?? '')) === 'ISSUED';
+            if ($alreadyIssued) {
+                return [
+                    'id' => (int) $source->id,
+                    'document_kind' => 'SALES_ORDER',
+                    'series' => (string) $source->series,
+                    'number' => (int) $source->number,
+                    'total' => (float) $source->total,
+                    'status' => 'ISSUED',
+                    'pending_cashier_checkout' => true,
+                ];
+            }
+
+            $sourceMetadata = [];
+            if (isset($source->metadata) && $source->metadata !== null) {
+                $decoded = json_decode((string) $source->metadata, true);
+                if (is_array($decoded)) {
+                    $sourceMetadata = $decoded;
+                }
+            }
+
+            $requestMetadata = array_merge($sourceMetadata, [
+                'restaurant_checkout_request' => [
+                    'requested_by' => (int) ($authUser->id ?? 0),
+                    'requested_at' => now('America/Lima')->toIso8601String(),
+                    'mode' => 'SELLER_TO_CASHIER',
+                ],
+                'restaurant_order_status' => 'CHECKED_OUT',
+                'pending_cashier_checkout' => true,
+                'checkout_document_id' => (int) $source->id,
+                'checkout_document_kind' => 'SALES_ORDER',
+                'checkout_document_number' => (string) $source->series . '-' . (string) $source->number,
+                'checked_out_at' => now('America/Lima')->toIso8601String(),
+                'conversion_origin' => 'RESTAURANT_REQUEST',
+            ]);
+
+            DB::table('sales.commercial_documents')
+                ->where('id', $orderId)
+                ->where('company_id', $companyId)
+                ->update([
+                    'status' => 'ISSUED',
+                    'notes' => $notes ?? $source->notes,
+                    'metadata' => json_encode($requestMetadata, JSON_UNESCAPED_UNICODE),
+                    'updated_by' => (int) ($authUser->id ?? 0),
+                    'updated_at' => now(),
+                ]);
+
+            return [
+                'id' => (int) $source->id,
+                'document_kind' => 'SALES_ORDER',
+                'series' => (string) $source->series,
+                'number' => (int) $source->number,
+                'total' => (float) $source->total,
+                'status' => 'ISSUED',
+                'pending_cashier_checkout' => true,
+            ];
+        }
+
+        // Guard: if any non-void target exists for this source, avoid double billing.
         $alreadyQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->whereNotIn('status', ['VOID', 'CANCELED'])
             ->whereRaw("COALESCE((metadata->>'source_document_id')::BIGINT, 0) = ?", [$orderId]);
-
-        $this->applyDocumentKindFilter($alreadyQuery, 'document_kind', 'document_kind_id', $targetDocumentKind);
 
         $already = $alreadyQuery->exists();
 
@@ -516,7 +586,9 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 'source_document_kind'   => 'SALES_ORDER',
                 'source_document_number' => (string) $source->series . '-' . (string) $source->number,
                 'conversion_origin'      => 'RESTAURANT_CHECKOUT',
-                'stock_already_discounted' => false,
+                // Restaurant menu items should not trigger product-stock discount again at checkout.
+                // Real inventory consumption happens via recipe depletion on kitchen flow when enabled.
+                'stock_already_discounted' => true,
             ]),
             'items'    => $itemsPayload,
             'payments' => [],
@@ -547,6 +619,26 @@ class RestaurantOrderService implements VerticalSalesPolicy
             $source->warehouse_id !== null ? (int) $source->warehouse_id : null,
             $cashRegisterId
         );
+
+        // Mark source order as final to prevent re-checkout from Comandas.
+        $finalSourceMetadata = array_merge($sourceMetadata, [
+            'restaurant_order_status' => 'CHECKED_OUT',
+            'pending_cashier_checkout' => false,
+            'checkout_document_id' => (int) ($document['id'] ?? 0),
+            'checkout_document_kind' => (string) ($document['document_kind'] ?? $targetDocumentKind),
+            'checkout_document_number' => (string) (($document['series'] ?? '') . '-' . ($document['number'] ?? '')),
+            'checked_out_at' => now('America/Lima')->toIso8601String(),
+        ]);
+
+        DB::table('sales.commercial_documents')
+            ->where('id', $orderId)
+            ->where('company_id', $companyId)
+            ->update([
+                'status' => 'ISSUED',
+                'metadata' => json_encode($finalSourceMetadata, JSON_UNESCAPED_UNICODE),
+                'updated_by' => (int) ($authUser->id ?? 0),
+                'updated_at' => now(),
+            ]);
 
         // ── 5. Release mesa ──────────────────────────────────────────────────
         $tableId = $sourceMetadata['restaurant_table_id'] ?? null;
@@ -640,6 +732,34 @@ class RestaurantOrderService implements VerticalSalesPolicy
         }
 
         return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
+    }
+
+    private function isCommerceFeatureEnabledForContextWithDefault(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
+    {
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->select('is_enabled')
+                ->first();
+
+            if ($branchRow && $branchRow->is_enabled !== null) {
+                return (bool) $branchRow->is_enabled;
+            }
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->select('is_enabled')
+            ->first();
+
+        if ($companyRow && $companyRow->is_enabled !== null) {
+            return (bool) $companyRow->is_enabled;
+        }
+
+        return $defaultEnabled;
     }
 
 }

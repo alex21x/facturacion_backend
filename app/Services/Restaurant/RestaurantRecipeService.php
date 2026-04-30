@@ -2,7 +2,6 @@
 
 namespace App\Services\Restaurant;
 
-use App\Services\FeatureConfigService;
 use Illuminate\Support\Facades\DB;
 
 class RestaurantRecipeService
@@ -177,8 +176,12 @@ class RestaurantRecipeService
     {
         $this->ensureStorage();
 
-        // Resolve the recipes toggle dynamically from DB metadata/toggles.
-        $rawToggleValue = $this->resolveRestaurantRecipesToggleValue($companyId);
+        // If RESTAURANT_RECIPES_ENABLED flag is OFF, skip all recipe/stock validation
+        // and let the comanda flow freely.
+        $rawToggleValue = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+            ->value('is_enabled');
         $recipesEnabled = $this->toBoolFlag($rawToggleValue);
 
         if (!$recipesEnabled) {
@@ -541,24 +544,6 @@ class RestaurantRecipeService
         ];
     }
 
-    private function resolveRestaurantRecipesToggleValue(int $companyId)
-    {
-        $service = new FeatureConfigService();
-        $settings = $service->getCommerceSettings($companyId, null);
-        $features = collect($settings['features'] ?? []);
-
-        $recipesFeature = $features->first(function ($row) {
-            $featureCode = strtoupper(trim((string) ($row['feature_code'] ?? '')));
-            return $featureCode === 'RESTAURANT_RECIPES_ENABLED';
-        });
-
-        if (!is_array($recipesFeature)) {
-            return null;
-        }
-
-        return $recipesFeature['is_enabled'] ?? null;
-    }
-
     private function toBoolFlag($value): bool
     {
         if (is_bool($value)) {
@@ -613,5 +598,4 @@ class RestaurantRecipeService
         DB::statement('CREATE INDEX IF NOT EXISTS idx_restaurant_product_recipes_company_menu ON restaurant.product_recipes (company_id, menu_product_id)');
         DB::statement('CREATE INDEX IF NOT EXISTS idx_restaurant_recipe_items_recipe_sort ON restaurant.product_recipe_items (recipe_id, sort_order)');
     }
-
 }

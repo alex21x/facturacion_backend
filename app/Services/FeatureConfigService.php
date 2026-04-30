@@ -45,11 +45,12 @@ class FeatureConfigService
         $verticalPreferences = $this->getVerticalPreferencesForCompany($companyId);
 
         // Merge everything in memory (no additional queries)
+        $featureCodes = $this->getCommerceFeatureCodes();
         $labelsByCode = $this->getFeatureLabels();
         $categoriesByCode = $this->getFeatureCategories();
 
         $features = [];
-        foreach (config('features.commerce_feature_codes', []) as $code) {
+        foreach ($featureCodes as $code) {
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
 
@@ -261,7 +262,7 @@ class FeatureConfigService
             return [];
         }
 
-        $this->ensureFeatureLabelsPersisted(config('features.commerce_feature_codes', []));
+        $this->ensureFeatureLabelsPersisted($this->getCommerceFeatureCodes());
 
         $rows = DB::table('appcfg.feature_labels')
             ->get(['feature_code', $labelColumn]);
@@ -287,7 +288,7 @@ class FeatureConfigService
             return $cached;
         }
 
-        $codes = config('features.commerce_feature_codes', []);
+        $codes = $this->getCommerceFeatureCodes();
         $categories = [];
 
         if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
@@ -345,6 +346,39 @@ class FeatureConfigService
         Cache::put($cacheKey, $categories, self::CACHE_TTL);
 
         return $categories;
+    }
+
+    /**
+     * Resolve commerce feature universe from DB metadata and toggles.
+     */
+    private function getCommerceFeatureCodes(): array
+    {
+        $codes = collect();
+
+        if ($this->tableExists('appcfg', 'feature_labels')) {
+            $labelCodes = DB::table('appcfg.feature_labels')
+                ->when($this->columnExists('appcfg', 'feature_labels', 'status'), function ($query) {
+                    $query->where('status', 1);
+                })
+                ->pluck('feature_code');
+            $codes = $codes->merge($labelCodes);
+        }
+
+        if ($this->tableExists('appcfg', 'company_feature_toggles')) {
+            $codes = $codes->merge(DB::table('appcfg.company_feature_toggles')->distinct()->pluck('feature_code'));
+        }
+
+        if ($this->tableExists('appcfg', 'branch_feature_toggles')) {
+            $codes = $codes->merge(DB::table('appcfg.branch_feature_toggles')->distinct()->pluck('feature_code'));
+        }
+
+        return $codes
+            ->filter(fn ($code) => is_string($code) && trim((string) $code) !== '')
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
     }
 
     /**

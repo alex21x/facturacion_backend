@@ -170,11 +170,49 @@ class RestaurantController extends Controller
                 ? (bool) $branchToggle
                 : ($companyToggle !== null ? (bool) $companyToggle : true);
 
+            $recipesCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                ->value('is_enabled');
+
+            $recipesBranchToggle = null;
+            if ($branchId !== null) {
+                $recipesBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                    ->value('is_enabled');
+            }
+
+            $restaurantRecipesEnabled = $recipesBranchToggle !== null
+                ? (bool) $recipesBranchToggle
+                : ($recipesCompanyToggle !== null ? (bool) $recipesCompanyToggle : false);
+
+            $sellerToCashierCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                ->value('is_enabled');
+
+            $sellerToCashierBranchToggle = null;
+            if ($branchId !== null) {
+                $sellerToCashierBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                    ->value('is_enabled');
+            }
+
+            $sellerToCashierEnabled = $sellerToCashierBranchToggle !== null
+                ? (bool) $sellerToCashierBranchToggle
+                : ($sellerToCashierCompanyToggle !== null ? (bool) $sellerToCashierCompanyToggle : false);
+
             return [
                 'currencies' => $currencies,
                 'payment_methods' => $paymentMethods,
                 'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
                 'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
+                'restaurant_recipes_enabled' => $restaurantRecipesEnabled,
+                'sales_seller_to_cashier_enabled' => $sellerToCashierEnabled,
                 'document_kind_ids' => $documentKindIdsByCode,
                 'series_numbers' => $seriesNumbers,
             ];
@@ -262,6 +300,9 @@ class RestaurantController extends Controller
             'items.*.unit_id'     => 'nullable|integer|min:1',
             'items.*.tax_type'    => 'nullable|string|max:20',
             'items.*.tax_rate'    => 'nullable|numeric|min:0|max:100',
+            'items.*.subtotal'    => 'nullable|numeric|min:0',
+            'items.*.tax_total'   => 'nullable|numeric|min:0',
+            'items.*.total'       => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -334,7 +375,7 @@ class RestaurantController extends Controller
         $orderId   = (int) $id;
 
         $validator = Validator::make($request->all(), [
-            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT',
+            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT,SALES_ORDER',
             'series'               => 'nullable|string|max:10',
             'cash_register_id'     => 'nullable|integer|min:1',
             'payment_method_id'    => 'nullable|integer|min:1',

@@ -536,20 +536,35 @@ class SalesDocumentCreationService
             throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
         }
 
-        if ($cashRegisterId === null || $cashRegisterId <= 0) {
-            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
-        }
-
-        $openSessionExists = DB::table('sales.cash_sessions')
+        $openSessionsBase = DB::table('sales.cash_sessions')
             ->where('company_id', $companyId)
-            ->where('cash_register_id', $cashRegisterId)
             ->where('status', 'OPEN')
             ->when($branchId !== null, function ($query) use ($branchId) {
                 $query->where(function ($nested) use ($branchId) {
                     $nested->where('branch_id', $branchId)
                         ->orWhereNull('branch_id');
                 });
-            })
+            });
+
+        // POS resilience: if no cash_register_id was provided but exactly one OPEN session exists,
+        // allow the sale to proceed under that opened cashier context.
+        if ($cashRegisterId === null || $cashRegisterId <= 0) {
+            $openCount = (clone $openSessionsBase)->count();
+
+            if ($openCount === 0) {
+                throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+            }
+
+            if ($openCount > 1) {
+                throw new SalesDocumentException('Hay multiples cajas abiertas. Selecciona la caja activa para continuar.');
+            }
+
+            return;
+        }
+
+        $openSessionExists = (clone $openSessionsBase)
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
             ->exists();
 
         if (!$openSessionExists) {

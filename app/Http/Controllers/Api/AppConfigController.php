@@ -8,6 +8,7 @@ use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use App\Services\FeatureConfigService;
 use Carbon\Carbon;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
@@ -3132,6 +3133,13 @@ class AppConfigController extends Controller
                 'message' => 'Certificado guardado localmente, pero no se pudo registrar en el puente: ' . $e->getMessage(),
                 'has_cert' => true,
             ], 422);
+        } catch (ConnectionException $e) {
+            return response()->json([
+                'message' => 'Certificado guardado localmente, pero el puente no esta disponible por red/DNS. Reintenta cuando haya conectividad.',
+                'has_cert' => true,
+                'bridge_error' => substr($e->getMessage(), 0, 500),
+                'bridge_retry_recommended' => true,
+            ], 503);
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Certificado guardado localmente, pero ocurrio un error al registrar en el puente',

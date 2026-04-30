@@ -195,7 +195,12 @@ class SalesDocumentItemPreparationService
             $qty = (float) (($item['qty'] ?? $item['quantity'] ?? 0));
             $unitPrice = (float) ($item['unit_price'] ?? 0);
             $itemSubtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : ($qty * $unitPrice);
-            $itemTax = isset($item['tax_total']) ? (float) $item['tax_total'] : 0.0;
+            if (isset($item['tax_total'])) {
+                $itemTax = (float) $item['tax_total'];
+            } else {
+                $taxRate = max(0.0, (float) ($item['tax_rate'] ?? 0));
+                $itemTax = $taxRate > 0 ? ($itemSubtotal * ($taxRate / 100)) : 0.0;
+            }
             $itemDiscount = isset($item['discount_total']) ? (float) $item['discount_total'] : 0.0;
             $itemTotal = isset($item['total']) ? (float) $item['total'] : ($itemSubtotal + $itemTax - $itemDiscount);
 

@@ -176,13 +176,38 @@ class RestaurantRecipeService
     {
         $this->ensureStorage();
 
-        // If RESTAURANT_RECIPES_ENABLED flag is OFF, skip all recipe/stock validation
-        // and let the comanda flow freely.
-        $rawToggleValue = DB::table('appcfg.company_feature_toggles')
+        $order = DB::table('sales.commercial_documents')
+            ->where('id', $orderId)
+            ->where('company_id', $companyId)
+            ->first(['id', 'branch_id', 'warehouse_id', 'document_kind', 'status']);
+
+        if (!$order) {
+            throw new \RuntimeException('Pedido no encontrado', 404);
+        }
+
+        if ((string) $order->document_kind !== 'SALES_ORDER') {
+            throw new \RuntimeException('Solo aplica para pedidos de restaurante', 422);
+        }
+
+        // If RESTAURANT_RECIPES_ENABLED flag is OFF (branch override first, then company),
+        // skip all recipe/stock validation and let the comanda flow freely.
+        $rawCompanyToggle = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
             ->value('is_enabled');
-        $recipesEnabled = $this->toBoolFlag($rawToggleValue);
+
+        $rawBranchToggle = null;
+        if ($order->branch_id !== null) {
+            $rawBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', (int) $order->branch_id)
+                ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                ->value('is_enabled');
+        }
+
+        $recipesEnabled = $rawBranchToggle !== null
+            ? $this->toBoolFlag($rawBranchToggle)
+            : $this->toBoolFlag($rawCompanyToggle);
 
         if (!$recipesEnabled) {
             return [
@@ -192,19 +217,6 @@ class RestaurantRecipeService
                 'ingredients_summary' => [],
                 'can_prepare'         => true,
             ];
-        }
-
-        $order = DB::table('sales.commercial_documents')
-            ->where('id', $orderId)
-            ->where('company_id', $companyId)
-            ->first(['id', 'warehouse_id', 'document_kind', 'status']);
-
-        if (!$order) {
-            throw new \RuntimeException('Pedido no encontrado', 404);
-        }
-
-        if ((string) $order->document_kind !== 'SALES_ORDER') {
-            throw new \RuntimeException('Solo aplica para pedidos de restaurante', 422);
         }
 
         if ($order->warehouse_id === null) {

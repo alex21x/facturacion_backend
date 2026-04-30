@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -1982,7 +1983,7 @@ class AppConfigController extends Controller
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,RESTAURANT_RECIPES_ENABLED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
+            'features.*.feature_code' => ['required', 'string', 'max:100', Rule::in($this->resolveAllowedFeatureCodes())],
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);
@@ -2348,6 +2349,30 @@ class AppConfigController extends Controller
 
         $point = Carbon::createFromFormat('Y-m-d', $key, 'America/Lima');
         return $point->format('d/m');
+    }
+
+    /**
+     * Resolve the allowed feature codes for validation.
+     * Source of truth: appcfg.feature_labels (status=1).
+     * Fallback: config('features.commerce_feature_codes').
+     */
+    private function resolveAllowedFeatureCodes(): array
+    {
+        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
+            $codes = DB::table('appcfg.feature_labels')
+                ->where('status', 1)
+                ->pluck('feature_code')
+                ->map(fn ($c) => strtoupper(trim((string) $c)))
+                ->filter(fn ($c) => $c !== '')
+                ->values()
+                ->all();
+
+            if (!empty($codes)) {
+                return $codes;
+            }
+        }
+
+        return config('features.commerce_feature_codes', []);
     }
 
     private function resolveFeatureLabels(array $featureCodes): array

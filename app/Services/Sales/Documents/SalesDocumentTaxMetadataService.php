@@ -25,7 +25,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('Las detracciones no están habilitadas para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La detracción solo aplica a Facturas (INVOICE).');
             }
 
@@ -80,7 +80,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('La retención no está habilitada para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La retención de IGV solo aplica a Facturas (INVOICE).');
             }
 
@@ -117,7 +117,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('La percepción no está habilitada para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La percepción solo aplica a Facturas (INVOICE).');
             }
 
@@ -354,6 +354,24 @@ class SalesDocumentTaxMetadataService
         }
 
         return is_array($rawConfig) ? $rawConfig : [];
+    }
+
+    private function isInvoiceDocumentKind(string $documentKind): bool
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($this->tableExists('sales.document_kinds')) {
+            $row = DB::table('sales.document_kinds')
+                ->whereRaw('UPPER(TRIM(code)) = ?', [$normalized])
+                ->select('sunat_code')
+                ->first();
+
+            if ($row !== null) {
+                return (string) ($row->sunat_code ?? '') === '01';
+            }
+        }
+
+        return $normalized === 'INVOICE';
     }
 
     private function tableExists(string $qualifiedTable): bool

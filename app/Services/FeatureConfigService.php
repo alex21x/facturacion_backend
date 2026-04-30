@@ -52,6 +52,7 @@ class FeatureConfigService
         foreach ($this->getCommerceFeatureCodes() as $code) {
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
+            $hasExplicitToggle = $companyRow !== null || $branchRow !== null;
 
             $companyConfig = $companyRow ? $this->decodeJsonConfig($companyRow->config) : null;
             $branchConfig = $branchRow ? $this->decodeJsonConfig($branchRow->config) : null;
@@ -65,15 +66,18 @@ class FeatureConfigService
                 ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
                 : ($branchConfig ?? $companyConfig);
 
-            // Apply vertical override if exists
+            // Vertical preference acts only as fallback when there is no explicit
+            // company/branch toggle persisted for this feature.
             $verticalPref = $verticalPreferences[$code] ?? null;
-            if ($verticalPref && $verticalPref['resolved']) {
+            $verticalSource = null;
+            if (!$hasExplicitToggle && $verticalPref && $verticalPref['resolved']) {
                 if ($verticalPref['is_enabled'] !== null) {
                     $isEnabled = (bool)$verticalPref['is_enabled'];
                 }
                 if ($verticalPref['config'] !== null) {
                     $resolvedConfig = $verticalPref['config'];
                 }
+                $verticalSource = $verticalPref['source'] ?? null;
             }
 
             $features[] = [
@@ -83,7 +87,7 @@ class FeatureConfigService
                 'feature_category_label' => $categoriesByCode[$code]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey($code)),
                 'is_enabled' => $isEnabled,
                 'config' => $resolvedConfig,
-                'vertical_source' => $verticalPref['source'] ?? null,
+                'vertical_source' => $verticalSource,
             ];
         }
 

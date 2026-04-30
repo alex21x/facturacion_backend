@@ -16,9 +16,11 @@ class FeatureConfigService
      */
     public function getCommerceSettings(int $companyId, ?int $branchId = null): array
     {
-        // Cache key includes a hash of the feature codes list so any deploy that adds/removes
-        // feature codes automatically busts the cache without needing a manual cache:clear.
-        $codesHash = substr(md5(implode(',', config('features.commerce_feature_codes', []))), 0, 8);
+        // First resolve the actual codes list (DB-driven, cached separately with short TTL).
+        // The hash of this list is used in the per-company cache key so that adding/removing
+        // a feature in appcfg.feature_labels automatically busts the per-company caches.
+        $codes = $this->getCommerceFeatureCodes();
+        $codesHash = substr(md5(implode(',', $codes)), 0, 8);
         $cacheKey = self::CACHE_PREFIX . "company:{$companyId}:branch:" . ($branchId ?? 'null') . ":v:{$codesHash}";
         
         // Try cache first
@@ -51,7 +53,7 @@ class FeatureConfigService
         $categoriesByCode = $this->getFeatureCategories();
 
         $features = [];
-        foreach ($this->getCommerceFeatureCodes() as $code) {
+        foreach ($codes as $code) {
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
 
@@ -544,7 +546,7 @@ class FeatureConfigService
             $codes = config('features.commerce_feature_codes', []);
         }
 
-        Cache::put($cacheKey, $codes, self::CACHE_TTL);
+        Cache::put($cacheKey, $codes, 300); // 5 min — short TTL so new feature_labels rows appear quickly
 
         return $codes;
     }

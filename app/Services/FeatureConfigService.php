@@ -53,7 +53,7 @@ class FeatureConfigService
         $features = [];
         foreach ($featureCodes as $code) {
             $categoryKey = strtolower((string) ($categoriesByCode[$code]['key'] ?? $this->deriveFeatureCategoryKey($code)));
-            if ($categoryKey === 'restaurant' && !$isRestaurantVertical) {
+            if ($code === 'RESTAURANT_RECIPES_ENABLED' && !$isRestaurantVertical) {
                 continue;
             }
 

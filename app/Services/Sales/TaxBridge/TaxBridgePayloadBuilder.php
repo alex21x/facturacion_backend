@@ -65,14 +65,7 @@ class TaxBridgePayloadBuilder
             $document->document_kind_id !== null ? (int) $document->document_kind_id : null
         );
 
-        $docTypeMap = [
-            'INVOICE' => '01',
-            'RECEIPT' => '03',
-            'CREDIT_NOTE' => '07',
-            'DEBIT_NOTE' => '08',
-        ];
-
-        $tipoDocumento = $docTypeMap[$normalizedDocumentKind] ?? null;
+        $tipoDocumento = $this->resolveDocumentSunatCode($normalizedDocumentKind);
         if ($tipoDocumento === null) {
             return null;
         }
@@ -451,13 +444,33 @@ class TaxBridgePayloadBuilder
 
     private function legacyDocumentCode(string $documentKind): string
     {
-        return match ($this->resolveDocumentBaseKind($documentKind, null)) {
-            'INVOICE' => '01',
-            'RECEIPT' => '03',
+        return $this->resolveDocumentSunatCode($this->resolveDocumentBaseKind($documentKind, null)) ?? '';
+    }
+
+    private function resolveDocumentSunatCode(string $normalizedKind): ?string
+    {
+        static $fallback = [
+            'INVOICE'     => '01',
+            'RECEIPT'     => '03',
             'CREDIT_NOTE' => '07',
-            'DEBIT_NOTE' => '08',
-            default => '',
-        };
+            'DEBIT_NOTE'  => '08',
+        ];
+
+        if ($this->tableExists('sales.document_kinds')) {
+            $columns = $this->tableColumns('sales.document_kinds');
+            if (in_array('sunat_code', $columns, true)) {
+                $row = DB::table('sales.document_kinds')
+                    ->whereRaw('UPPER(TRIM(code)) = ?', [strtoupper(trim($normalizedKind))])
+                    ->whereNotNull('sunat_code')
+                    ->value('sunat_code');
+
+                if (is_string($row) && $row !== '') {
+                    return $row;
+                }
+            }
+        }
+
+        return $fallback[$normalizedKind] ?? null;
     }
 
     private function resolveDocumentBaseKind(string $documentKind, ?int $documentKindId): string

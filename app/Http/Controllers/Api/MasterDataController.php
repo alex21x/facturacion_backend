@@ -14,15 +14,6 @@ class MasterDataController extends Controller
 {
     private const ROLE_FUNCTIONAL_PROFILES = ['SELLER', 'CASHIER', 'GENERAL'];
 
-    private const DOCUMENT_KIND_CATALOG = [
-        ['code' => 'QUOTATION', 'label' => 'Cotizacion'],
-        ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta'],
-        ['code' => 'INVOICE', 'label' => 'Factura'],
-        ['code' => 'RECEIPT', 'label' => 'Boleta'],
-        ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito'],
-        ['code' => 'DEBIT_NOTE', 'label' => 'Nota de Debito'],
-    ];
-
     public function __construct(private GetMasterDataOptionsUseCase $getMasterDataOptionsUseCase)
     {
     }
@@ -1985,27 +1976,34 @@ class MasterDataController extends Controller
     {
         DB::statement("CREATE SEQUENCE IF NOT EXISTS sales.document_kinds_id_seq START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1");
         DB::statement("CREATE TABLE IF NOT EXISTS sales.document_kinds (id BIGINT PRIMARY KEY DEFAULT nextval('sales.document_kinds_id_seq'), code VARCHAR(30) NOT NULL UNIQUE, label VARCHAR(120) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+        DB::statement("ALTER TABLE sales.document_kinds ADD COLUMN IF NOT EXISTS sunat_code VARCHAR(4) NULL");
 
         $defaults = [
-            ['code' => 'QUOTATION', 'label' => 'Cotizacion', 'sort_order' => 10],
-            ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta', 'sort_order' => 20],
-            ['code' => 'INVOICE', 'label' => 'Factura', 'sort_order' => 30],
-            ['code' => 'RECEIPT', 'label' => 'Boleta', 'sort_order' => 40],
-            ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito', 'sort_order' => 50],
-            ['code' => 'DEBIT_NOTE', 'label' => 'Nota de Debito', 'sort_order' => 60],
+            ['code' => 'QUOTATION',   'label' => 'Cotizacion',      'sort_order' => 10, 'sunat_code' => null],
+            ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta', 'sort_order' => 20, 'sunat_code' => null],
+            ['code' => 'INVOICE',     'label' => 'Factura',         'sort_order' => 30, 'sunat_code' => '01'],
+            ['code' => 'RECEIPT',     'label' => 'Boleta',          'sort_order' => 40, 'sunat_code' => '03'],
+            ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito', 'sort_order' => 50, 'sunat_code' => '07'],
+            ['code' => 'DEBIT_NOTE',  'label' => 'Nota de Debito',  'sort_order' => 60, 'sunat_code' => '08'],
         ];
 
         foreach ($defaults as $row) {
             $exists = DB::table('sales.document_kinds')->where('code', $row['code'])->exists();
             if (!$exists) {
                 DB::table('sales.document_kinds')->insert([
-                    'code' => $row['code'],
-                    'label' => $row['label'],
+                    'code'       => $row['code'],
+                    'label'      => $row['label'],
                     'sort_order' => $row['sort_order'],
+                    'sunat_code' => $row['sunat_code'],
                     'is_enabled' => true,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+            } elseif ($row['sunat_code'] !== null) {
+                DB::table('sales.document_kinds')
+                    ->where('code', $row['code'])
+                    ->whereNull('sunat_code')
+                    ->update(['sunat_code' => $row['sunat_code'], 'updated_at' => now()]);
             }
         }
     }

@@ -77,40 +77,6 @@ class AppConfigController extends Controller
         'PURCHASES_PERCEPCION_ENABLED',
     ];
 
-    private const FEATURE_LABELS_FALLBACK = [
-        'DOC_KIND_CREDIT_NOTE' => 'Notas de crédito',
-        'DOC_KIND_CREDIT_NOTE_' => 'Notas de crédito',
-        'DOC_KIND_DEBIT_NOTE' => 'Notas de débito',
-        'DOC_KIND_DEBIT_NOTE_' => 'Notas de débito',
-        'RESTAURANT_MENU_IGV_INCLUDED' => 'Menú con IGV incluido',
-        'RESTAURANT_RECIPES_ENABLED'    => 'Validar recetas en comandas',
-        'PRODUCT_MULTI_UOM' => 'Múltiples unidades por producto',
-        'PRODUCT_UOM_CONVERSIONS' => 'Conversión de unidades',
-        'PRODUCT_WHOLESALE_PRICING' => 'Precios por volumen',
-        'INVENTORY_PRODUCTS_BY_PROFILE' => 'Productos según perfil',
-        'INVENTORY_PRODUCT_MASTERS_BY_PROFILE' => 'Catálogo según perfil',
-        'SALES_CUSTOMER_PRICE_PROFILE' => 'Precios por cliente',
-        'SALES_WORKSHOP_MULTI_VEHICLE' => 'Taller: clientes con multiples vehiculos',
-        'SALES_SELLER_TO_CASHIER' => 'Flujo vendedor a caja',
-        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => 'Editar emitidos antes de respuesta final SUNAT',
-        'SALES_ANTICIPO_ENABLED' => 'Cobro con anticipo',
-        'SALES_TAX_BRIDGE' => 'Envío a SUNAT',
-        'SALES_TAX_BRIDGE_DEBUG_VIEW' => 'Ver diagnóstico SUNAT',
-        'SALES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en ventas',
-        'SALES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en ventas',
-        'SALES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en ventas',
-        'SALES_DETRACCION_ENABLED' => 'Usar detracción en ventas',
-        'SALES_RETENCION_ENABLED' => 'Usar retención en ventas',
-        'SALES_PERCEPCION_ENABLED' => 'Usar percepción en ventas',
-        'PURCHASES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en compras',
-        'PURCHASES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en compras',
-        'PURCHASES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en compras',
-        'PURCHASES_DETRACCION_ENABLED' => 'Usar detracción en compras',
-        'PURCHASES_RETENCION_COMPRADOR_ENABLED' => 'Retención compra por comprador',
-        'PURCHASES_RETENCION_PROVEEDOR_ENABLED' => 'Retención compra por proveedor',
-        'PURCHASES_PERCEPCION_ENABLED' => 'Usar percepción en compras',
-    ];
-
     public function operationalContext(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -419,8 +385,9 @@ class AppConfigController extends Controller
         $this->ensureFeatureLabelsPersisted($featureCodes->all());
 
         $labelsByCode = $this->resolveFeatureLabels($featureCodes->all());
+        $categoriesByCode = $this->resolveFeatureCategories($featureCodes->all());
 
-        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode) {
+        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode, $categoriesByCode) {
             $company = $companyFeatures->get($featureCode);
             $branch = $branchFeatures->get($featureCode);
 
@@ -448,6 +415,8 @@ class AppConfigController extends Controller
             return [
                 'feature_code' => $featureCode,
                 'feature_label' => $labelsByCode[(string) $featureCode] ?? (string) $featureCode,
+                'feature_category_key' => $categoriesByCode[(string) $featureCode]['key'] ?? $this->deriveFeatureCategoryKey((string) $featureCode),
+                'feature_category_label' => $categoriesByCode[(string) $featureCode]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey((string) $featureCode)),
                 'is_enabled' => $isEnabled,
                 'company_enabled' => $company ? (bool) $company->is_enabled : null,
                 'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
@@ -2414,11 +2383,79 @@ class AppConfigController extends Controller
         foreach ($codes as $code) {
             $code = (string) $code;
             if (!array_key_exists($code, $labels)) {
-                $labels[$code] = self::FEATURE_LABELS_FALLBACK[$code] ?? $code;
+                $labels[$code] = $this->humanizeFeatureCode($code);
             }
         }
 
         return $labels;
+    }
+
+    private function resolveFeatureCategories(array $featureCodes): array
+    {
+        $codes = collect($featureCodes)
+            ->filter(function ($code) {
+                return is_string($code) && $code !== '';
+            })
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return [];
+        }
+
+        $categories = [];
+        $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+        $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+
+        if ($this->tableExists('appcfg', 'feature_labels') && ($hasCategoryKey || $hasCategoryLabel)) {
+            $columns = ['feature_code'];
+            if ($hasCategoryKey) {
+                $columns[] = 'category_key';
+            }
+            if ($hasCategoryLabel) {
+                $columns[] = 'category_label';
+            }
+
+            $rows = DB::table('appcfg.feature_labels')
+                ->whereIn('feature_code', $codes->all())
+                ->where('status', 1)
+                ->get($columns);
+
+            foreach ($rows as $row) {
+                $code = (string) ($row->feature_code ?? '');
+                if ($code === '') {
+                    continue;
+                }
+
+                $key = strtolower(trim((string) (($row->category_key ?? '') ?: $this->deriveFeatureCategoryKey($code))));
+                if ($key === '') {
+                    $key = $this->deriveFeatureCategoryKey($code);
+                }
+
+                $label = trim((string) ($row->category_label ?? ''));
+                if ($label === '') {
+                    $label = $this->humanizeCategoryKey($key);
+                }
+
+                $categories[$code] = [
+                    'key' => $key,
+                    'label' => $label,
+                ];
+            }
+        }
+
+        foreach ($codes as $code) {
+            $code = (string) $code;
+            if (!array_key_exists($code, $categories)) {
+                $key = $this->deriveFeatureCategoryKey($code);
+                $categories[$code] = [
+                    'key' => $key,
+                    'label' => $this->humanizeCategoryKey($key),
+                ];
+            }
+        }
+
+        return $categories;
     }
 
     private function ensureFeatureLabelsPersisted(array $featureCodes): void
@@ -2437,35 +2474,97 @@ class AppConfigController extends Controller
             return;
         }
 
+        $columns = ['feature_code', 'label_es'];
+        $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+        $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+
+        if ($hasCategoryKey) {
+            $columns[] = 'category_key';
+        }
+        if ($hasCategoryLabel) {
+            $columns[] = 'category_label';
+        }
+
         $existing = DB::table('appcfg.feature_labels')
             ->whereIn('feature_code', $codes->all())
-            ->get(['feature_code', 'label_es'])
+            ->get($columns)
             ->keyBy('feature_code');
 
         foreach ($codes as $code) {
-            $fallbackLabel = self::FEATURE_LABELS_FALLBACK[$code] ?? null;
-            if ($fallbackLabel === null) {
-                continue;
-            }
+            $fallbackLabel = $this->humanizeFeatureCode((string) $code);
 
             $current = $existing->get($code);
             $currentLabel = trim((string) ($current->label_es ?? ''));
+            $categoryKey = $this->deriveFeatureCategoryKey((string) $code);
+            $categoryLabel = $this->humanizeCategoryKey($categoryKey);
             $shouldReplace = $current === null || $currentLabel === '' || strcasecmp($currentLabel, $code) === 0;
+            $currentCategoryKey = strtolower(trim((string) ($current->category_key ?? '')));
+            $currentCategoryLabel = trim((string) ($current->category_label ?? ''));
+            $shouldUpdateCategory = $current === null || $currentCategoryKey === '' || $currentCategoryLabel === '';
 
-            if (!$shouldReplace) {
+            if (!$shouldReplace && !$shouldUpdateCategory) {
                 continue;
+            }
+
+            $values = [
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($shouldReplace) {
+                $values['label_es'] = $fallbackLabel;
+                $values['description'] = $fallbackLabel;
+            }
+
+            if ($hasCategoryKey) {
+                $values['category_key'] = $categoryKey;
+            }
+            if ($hasCategoryLabel) {
+                $values['category_label'] = $categoryLabel;
             }
 
             DB::table('appcfg.feature_labels')->updateOrInsert(
                 ['feature_code' => $code],
-                [
-                    'label_es' => $fallbackLabel,
-                    'description' => $fallbackLabel,
-                    'status' => 1,
-                    'updated_at' => now(),
-                ]
+                $values
             );
         }
+    }
+
+    private function humanizeFeatureCode(string $code): string
+    {
+        $normalized = strtoupper(trim($code));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $humanized = str_replace('_', ' ', $normalized);
+        $humanized = preg_replace('/\s+/', ' ', $humanized ?? '') ?? $normalized;
+
+        return Str::title(Str::lower(trim($humanized)));
+    }
+
+    private function deriveFeatureCategoryKey(string $featureCode): string
+    {
+        $normalized = strtoupper(trim($featureCode));
+        if ($normalized === '') {
+            return 'general';
+        }
+
+        $parts = explode('_', $normalized, 2);
+        $candidate = strtolower(trim((string) ($parts[0] ?? '')));
+
+        return $candidate !== '' ? $candidate : 'general';
+    }
+
+    private function humanizeCategoryKey(string $categoryKey): string
+    {
+        $normalized = strtolower(trim($categoryKey));
+        if ($normalized === '') {
+            return 'General';
+        }
+
+        return Str::title(str_replace('_', ' ', $normalized));
     }
 
     private function ensureCompanyAccessLinksForCompanies($companies): void
@@ -3063,6 +3162,9 @@ class AppConfigController extends Controller
     public function companyCommerceAdminMatrix(Request $request)
     {
         $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
+        $this->ensureFeatureLabelsPersisted($ADMIN_FEATURE_CODES);
+        $labelsByCode = $this->resolveFeatureLabels($ADMIN_FEATURE_CODES);
+        $categoriesByCode = $this->resolveFeatureCategories($ADMIN_FEATURE_CODES);
 
         $companies = DB::table('core.companies')
             ->where('id', '!=', self::SYSTEM_COMPANY_ID)
@@ -3096,6 +3198,8 @@ class AppConfigController extends Controller
 
         return response()->json([
             'feature_codes' => $ADMIN_FEATURE_CODES,
+            'feature_labels' => $labelsByCode,
+            'feature_categories' => $categoriesByCode,
             'companies' => $rows,
         ]);
     }

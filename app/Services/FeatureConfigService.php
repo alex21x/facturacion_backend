@@ -378,14 +378,6 @@ class FeatureConfigService
             $codes = $codes->merge(DB::table('appcfg.branch_feature_toggles')->distinct()->pluck('feature_code'));
         }
 
-        if ($this->tableExists('appcfg', 'vertical_feature_templates')) {
-            $codes = $codes->merge(DB::table('appcfg.vertical_feature_templates')->distinct()->pluck('feature_code'));
-        }
-
-        if ($this->tableExists('appcfg', 'company_vertical_feature_overrides')) {
-            $codes = $codes->merge(DB::table('appcfg.company_vertical_feature_overrides')->distinct()->pluck('feature_code'));
-        }
-
         return $codes
             ->filter(fn ($code) => is_string($code) && trim((string) $code) !== '')
             ->map(fn ($code) => strtoupper(trim((string) $code)))

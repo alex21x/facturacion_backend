@@ -2,7 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -37,6 +36,9 @@ return new class extends Migration
                 ON CONFLICT (code) DO UPDATE SET sunat_code = EXCLUDED.sunat_code, updated_at = NOW()
             ", [$code, $code, 0, $sunatCode]);
         }
+
+        DB::statement("UPDATE sales.document_kinds SET sunat_code = '07', updated_at = NOW() WHERE UPPER(TRIM(code)) LIKE 'CREDIT_NOTE%'");
+        DB::statement("UPDATE sales.document_kinds SET sunat_code = '08', updated_at = NOW() WHERE UPPER(TRIM(code)) LIKE 'DEBIT_NOTE%'");
     }
 
     public function down(): void

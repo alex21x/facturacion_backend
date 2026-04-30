@@ -51,7 +51,7 @@ class FeatureConfigService
         $categoriesByCode = $this->getFeatureCategories();
 
         $features = [];
-        foreach (config('features.commerce_feature_codes', []) as $code) {
+        foreach ($this->getCommerceFeatureCodes() as $code) {
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
 
@@ -263,7 +263,7 @@ class FeatureConfigService
             return [];
         }
 
-        $this->ensureFeatureLabelsPersisted(config('features.commerce_feature_codes', []));
+        $this->ensureFeatureLabelsPersisted($this->getCommerceFeatureCodes());
 
         $rows = DB::table('appcfg.feature_labels')
             ->get(['feature_code', $labelColumn]);
@@ -289,7 +289,7 @@ class FeatureConfigService
             return $cached;
         }
 
-        $codes = config('features.commerce_feature_codes', []);
+        $codes = $this->getCommerceFeatureCodes();
         $categories = [];
 
         if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
@@ -507,6 +507,46 @@ class FeatureConfigService
         }
 
         return $columnCache[$key];
+    }
+
+    /**
+     * Get the canonical list of commerce feature codes.
+     * Source of truth: appcfg.feature_labels (status=1), ordered by feature_code.
+     * Fallback: config('features.commerce_feature_codes') for environments where
+     * the migration has not run yet (empty array by default after cleanup).
+     */
+    private function getCommerceFeatureCodes(): array
+    {
+        $cacheKey = self::CACHE_PREFIX . 'commerce_codes';
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $codes = [];
+
+        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
+            $rows = DB::table('appcfg.feature_labels')
+                ->where('status', 1)
+                ->orderBy('feature_code')
+                ->pluck('feature_code')
+                ->map(fn ($c) => strtoupper(trim((string) $c)))
+                ->filter(fn ($c) => $c !== '')
+                ->values()
+                ->all();
+
+            $codes = $rows;
+        }
+
+        // Fallback: use config list if DB is empty or table missing
+        if (empty($codes)) {
+            $codes = config('features.commerce_feature_codes', []);
+        }
+
+        Cache::put($cacheKey, $codes, self::CACHE_TTL);
+
+        return $codes;
     }
 
     /**

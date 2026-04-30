@@ -254,16 +254,7 @@ class SalesDocumentTaxMetadataService
             ->values()
             ->all();
 
-        if (count($rows) > 0) {
-            return $rows;
-        }
-
-        return [
-            ['code' => '0101', 'name' => 'Venta interna', 'regime' => 'NONE'],
-            ['code' => '1001', 'name' => 'Operacion sujeta a detraccion', 'regime' => 'DETRACCION'],
-            ['code' => '2001', 'name' => 'Operacion sujeta a retencion', 'regime' => 'RETENCION'],
-            ['code' => '3001', 'name' => 'Operacion sujeta a percepcion', 'regime' => 'PERCEPCION'],
-        ];
+        return $rows;
     }
 
     private function resolveSunatOperationTypesFromCatalog(): array

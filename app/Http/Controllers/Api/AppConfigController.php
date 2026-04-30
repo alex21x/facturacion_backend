@@ -16,7 +16,6 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rule;
 
 class AppConfigController extends Controller
 {
@@ -24,6 +23,59 @@ class AppConfigController extends Controller
 
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
+
+    private const COMMERCE_FEATURE_CODES = [
+        'RESTAURANT_MENU_IGV_INCLUDED',
+        'RESTAURANT_RECIPES_ENABLED',
+        'PRODUCT_MULTI_UOM',
+        'PRODUCT_UOM_CONVERSIONS',
+        'PRODUCT_WHOLESALE_PRICING',
+        'INVENTORY_PRODUCTS_BY_PROFILE',
+        'INVENTORY_PRODUCT_MASTERS_BY_PROFILE',
+        'SALES_CUSTOMER_PRICE_PROFILE',
+        'SALES_WORKSHOP_MULTI_VEHICLE',
+        'SALES_SELLER_TO_CASHIER',
+        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
+        'SALES_ANTICIPO_ENABLED',
+        'SALES_TAX_BRIDGE',
+        'SALES_TAX_BRIDGE_DEBUG_VIEW',
+        'SALES_GLOBAL_DISCOUNT_ENABLED',
+        'SALES_ITEM_DISCOUNT_ENABLED',
+        'SALES_FREE_ITEMS_ENABLED',
+        'SALES_DETRACCION_ENABLED',
+        'SALES_RETENCION_ENABLED',
+        'SALES_PERCEPCION_ENABLED',
+        'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
+        'PURCHASES_ITEM_DISCOUNT_ENABLED',
+        'PURCHASES_FREE_ITEMS_ENABLED',
+        'PURCHASES_DETRACCION_ENABLED',
+        'PURCHASES_RETENCION_COMPRADOR_ENABLED',
+        'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
+        'PURCHASES_PERCEPCION_ENABLED',
+    ];
+
+    private const ADMIN_COMMERCE_FEATURE_CODES = [
+        'SALES_CUSTOMER_PRICE_PROFILE',
+        'SALES_WORKSHOP_MULTI_VEHICLE',
+        'SALES_SELLER_TO_CASHIER',
+        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL',
+        'SALES_ANTICIPO_ENABLED',
+        'SALES_TAX_BRIDGE',
+        'SALES_TAX_BRIDGE_DEBUG_VIEW',
+        'SALES_GLOBAL_DISCOUNT_ENABLED',
+        'SALES_ITEM_DISCOUNT_ENABLED',
+        'SALES_FREE_ITEMS_ENABLED',
+        'SALES_DETRACCION_ENABLED',
+        'SALES_RETENCION_ENABLED',
+        'SALES_PERCEPCION_ENABLED',
+        'PURCHASES_GLOBAL_DISCOUNT_ENABLED',
+        'PURCHASES_ITEM_DISCOUNT_ENABLED',
+        'PURCHASES_FREE_ITEMS_ENABLED',
+        'PURCHASES_DETRACCION_ENABLED',
+        'PURCHASES_RETENCION_COMPRADOR_ENABLED',
+        'PURCHASES_RETENCION_PROVEEDOR_ENABLED',
+        'PURCHASES_PERCEPCION_ENABLED',
+    ];
 
     public function operationalContext(Request $request)
     {
@@ -1925,13 +1977,12 @@ class AppConfigController extends Controller
     public function updateCommerceSettings(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $commerceFeatureCodes = $this->getCommerceFeatureCodes();
 
         $validator = Validator::make($request->all(), [
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => ['required', 'string', Rule::in($commerceFeatureCodes)],
+            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,RESTAURANT_RECIPES_ENABLED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);
@@ -2337,50 +2388,6 @@ class AppConfigController extends Controller
         }
 
         return $labels;
-    }
-
-    private function getCommerceFeatureCodes(): array
-    {
-        $codes = collect();
-
-        if ($this->tableExists('appcfg', 'feature_labels')) {
-            $labelCodes = DB::table('appcfg.feature_labels')
-                ->when($this->columnExists('appcfg', 'feature_labels', 'status'), function ($query) {
-                    $query->where('status', 1);
-                })
-                ->pluck('feature_code');
-            $codes = $codes->merge($labelCodes);
-        }
-
-        if ($this->tableExists('appcfg', 'company_feature_toggles')) {
-            $codes = $codes->merge(DB::table('appcfg.company_feature_toggles')->distinct()->pluck('feature_code'));
-        }
-
-        if ($this->tableExists('appcfg', 'branch_feature_toggles')) {
-            $codes = $codes->merge(DB::table('appcfg.branch_feature_toggles')->distinct()->pluck('feature_code'));
-        }
-
-        return $codes
-            ->filter(fn ($code) => is_string($code) && trim((string) $code) !== '')
-            ->map(fn ($code) => strtoupper(trim((string) $code)))
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-    }
-
-    private function getAdminCommerceFeatureCodes(): array
-    {
-        $allCodes = $this->getCommerceFeatureCodes();
-        $categoriesByCode = $this->resolveFeatureCategories($allCodes);
-
-        return collect($allCodes)
-            ->filter(function ($code) use ($categoriesByCode) {
-                $categoryKey = strtolower((string) ($categoriesByCode[$code]['key'] ?? $this->deriveFeatureCategoryKey((string) $code)));
-                return in_array($categoryKey, ['sales', 'purchases'], true);
-            })
-            ->values()
-            ->all();
     }
 
     private function resolveFeatureCategories(array $featureCodes): array
@@ -3154,7 +3161,7 @@ class AppConfigController extends Controller
 
     public function companyCommerceAdminMatrix(Request $request)
     {
-        $ADMIN_FEATURE_CODES = $this->getAdminCommerceFeatureCodes();
+        $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
         $this->ensureFeatureLabelsPersisted($ADMIN_FEATURE_CODES);
         $labelsByCode = $this->resolveFeatureLabels($ADMIN_FEATURE_CODES);
         $categoriesByCode = $this->resolveFeatureCategories($ADMIN_FEATURE_CODES);
@@ -3199,7 +3206,7 @@ class AppConfigController extends Controller
 
     public function updateCompanyCommerceAdminMatrix(Request $request)
     {
-        $ADMIN_FEATURE_CODES = $this->getAdminCommerceFeatureCodes();
+        $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
 
         $authUser = $request->attributes->get('auth_user');
 

@@ -48,9 +48,15 @@ class FeatureConfigService
         $featureCodes = $this->getCommerceFeatureCodes();
         $labelsByCode = $this->getFeatureLabels();
         $categoriesByCode = $this->getFeatureCategories();
+        $isRestaurantVertical = $this->isRestaurantVerticalCompany($companyId);
 
         $features = [];
         foreach ($featureCodes as $code) {
+            $categoryKey = strtolower((string) ($categoriesByCode[$code]['key'] ?? $this->deriveFeatureCategoryKey($code)));
+            if ($categoryKey === 'restaurant' && !$isRestaurantVertical) {
+                continue;
+            }
+
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
 
@@ -80,8 +86,8 @@ class FeatureConfigService
             $features[] = [
                 'feature_code' => $code,
                 'feature_label' => $labelsByCode[$code] ?? $code,
-                'feature_category_key' => $categoriesByCode[$code]['key'] ?? $this->deriveFeatureCategoryKey($code),
-                'feature_category_label' => $categoriesByCode[$code]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey($code)),
+                'feature_category_key' => $categoryKey,
+                'feature_category_label' => $categoriesByCode[$code]['label'] ?? $this->humanizeCategoryKey($categoryKey),
                 'is_enabled' => $isEnabled,
                 'config' => $resolvedConfig,
                 'vertical_source' => $verticalPref['source'] ?? null,
@@ -372,6 +378,14 @@ class FeatureConfigService
             $codes = $codes->merge(DB::table('appcfg.branch_feature_toggles')->distinct()->pluck('feature_code'));
         }
 
+        if ($this->tableExists('appcfg', 'vertical_feature_templates')) {
+            $codes = $codes->merge(DB::table('appcfg.vertical_feature_templates')->distinct()->pluck('feature_code'));
+        }
+
+        if ($this->tableExists('appcfg', 'company_vertical_feature_overrides')) {
+            $codes = $codes->merge(DB::table('appcfg.company_vertical_feature_overrides')->distinct()->pluck('feature_code'));
+        }
+
         return $codes
             ->filter(fn ($code) => is_string($code) && trim((string) $code) !== '')
             ->map(fn ($code) => strtoupper(trim((string) $code)))
@@ -379,6 +393,38 @@ class FeatureConfigService
             ->sort()
             ->values()
             ->all();
+    }
+
+    private function isRestaurantVerticalCompany(int $companyId): bool
+    {
+        if (!$this->tableExists('appcfg', 'company_verticals') || !$this->tableExists('appcfg', 'verticals')) {
+            return false;
+        }
+
+        $query = DB::table('appcfg.company_verticals as cv')
+            ->join('appcfg.verticals as v', 'v.id', '=', 'cv.vertical_id')
+            ->where('cv.company_id', $companyId);
+
+        if ($this->columnExists('appcfg', 'company_verticals', 'status')) {
+            $query->where('cv.status', 1);
+        }
+        if ($this->columnExists('appcfg', 'company_verticals', 'is_primary')) {
+            $query->where('cv.is_primary', true);
+        }
+        if ($this->columnExists('appcfg', 'verticals', 'status')) {
+            $query->where('v.status', 1);
+        }
+
+        $row = $query
+            ->orderByDesc('cv.id')
+            ->first(['v.code']);
+
+        if (!$row) {
+            return false;
+        }
+
+        $code = strtoupper(trim((string) ($row->code ?? '')));
+        return str_contains($code, 'RESTAUR');
     }
 
     /**

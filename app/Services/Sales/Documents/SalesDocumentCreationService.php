@@ -100,6 +100,13 @@ class SalesDocumentCreationService
                     $cashRegisterId = null;
                 }
 
+                $cashRegisterId = $this->resolveActorCashRegisterId(
+                    $authUser,
+                    $cashRegisterId,
+                    $roleProfile,
+                    $roleCode
+                );
+
                 $documentStatus = $payload['status'] ?? 'DRAFT';
                 $normalizedDocumentKind = $this->normalizeDocumentKind((string) $payload['document_kind']);
                 $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument((string) $payload['document_kind']);
@@ -110,7 +117,7 @@ class SalesDocumentCreationService
                     && strtoupper((string) $documentStatus) === 'ISSUED';
 
                 if ($requiresOpenCashSession) {
-                    $this->assertOpenCashSessionForIssuedSale(
+                    $cashRegisterId = $this->resolveCashRegisterIdForIssuedSale(
                         (int) $companyId,
                         $branchId !== null ? (int) $branchId : null,
                         $cashRegisterId !== null ? (int) $cashRegisterId : null
@@ -126,6 +133,9 @@ class SalesDocumentCreationService
 
                 $affectsStock = !$stockAlreadyDiscounted && CommercialDocumentPolicy::shouldAffectStock((string) $payload['document_kind'], (string) $documentStatus);
                 $settings = $this->inventorySettingsForCompany($companyId);
+                $resolvedDocumentKindId = isset($payload['document_kind_id']) && $payload['document_kind_id'] !== null
+                    ? (int) $payload['document_kind_id']
+                    : $this->resolveDocumentKindId((string) $payload['document_kind']);
 
                 $nextNumber = $this->seriesService->reserveNextNumber(
                     $companyId,
@@ -133,7 +143,8 @@ class SalesDocumentCreationService
                     (string) $payload['series'],
                     $branchId,
                     $warehouseId,
-                    (int) $authUser->id
+                    (int) $authUser->id,
+                    $resolvedDocumentKindId
                 );
 
                 $processedItems = $this->itemPreparationService->prepareProcessedItems(
@@ -202,7 +213,6 @@ class SalesDocumentCreationService
                 $payload['metadata'] = $metadata;
 
                 $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
-                $resolvedDocumentKindId = $this->resolveDocumentKindId((string) $payload['document_kind']);
 
                 $documentId = $this->documentRepository->create([
                     'company_id' => $companyId,
@@ -527,31 +537,59 @@ class SalesDocumentCreationService
         return $this->support->resolveAuthRoleContext($userId, $companyId);
     }
 
-    private function assertOpenCashSessionForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): void
+    private function resolveCashRegisterIdForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): ?int
     {
         if (!$this->cashSessionsTableExists()) {
             throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
         }
 
-        if ($cashRegisterId === null || $cashRegisterId <= 0) {
-            throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
-        }
-
-        $openSessionExists = DB::table('sales.cash_sessions')
+        $openSessionsBase = DB::table('sales.cash_sessions')
             ->where('company_id', $companyId)
-            ->where('cash_register_id', $cashRegisterId)
             ->where('status', 'OPEN')
             ->when($branchId !== null, function ($query) use ($branchId) {
                 $query->where(function ($nested) use ($branchId) {
                     $nested->where('branch_id', $branchId)
                         ->orWhereNull('branch_id');
                 });
-            })
+            });
+
+        // POS resilience: if no cash_register_id was provided but exactly one OPEN session exists,
+        // infer and persist that cash register so the movement lands in the active cash session.
+        if ($cashRegisterId === null || $cashRegisterId <= 0) {
+            $openSessions = (clone $openSessionsBase)
+                ->select('cash_register_id')
+                ->orderByDesc('opened_at')
+                ->limit(2)
+                ->get();
+
+            $openCount = $openSessions->count();
+
+            if ($openCount === 0) {
+                throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
+            }
+
+            if ($openCount > 1) {
+                throw new SalesDocumentException('Hay multiples cajas abiertas. Selecciona la caja activa para continuar.');
+            }
+
+            $resolvedCashRegisterId = (int) ($openSessions->first()->cash_register_id ?? 0);
+            if ($resolvedCashRegisterId <= 0) {
+                throw new SalesDocumentException('No se pudo resolver la caja activa para la venta.');
+            }
+
+            return $resolvedCashRegisterId;
+        }
+
+        $openSessionExists = (clone $openSessionsBase)
+            ->where('company_id', $companyId)
+            ->where('cash_register_id', $cashRegisterId)
             ->exists();
 
         if (!$openSessionExists) {
             throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
         }
+
+        return $cashRegisterId;
     }
 
     private function cashSessionsTableExists(): bool
@@ -560,6 +598,20 @@ class SalesDocumentCreationService
             ->where('table_schema', 'sales')
             ->where('table_name', 'cash_sessions')
             ->exists();
+    }
+
+    private function resolveActorCashRegisterId(object $authUser, $cashRegisterId, string $roleProfile, string $roleCode): ?int
+    {
+        $providedCashRegisterId = $cashRegisterId !== null ? (int) $cashRegisterId : null;
+        $preferredCashRegisterId = isset($authUser->preferred_cash_register_id)
+            ? (int) $authUser->preferred_cash_register_id
+            : 0;
+
+        if ($providedCashRegisterId !== null && $providedCashRegisterId > 0) {
+            return $providedCashRegisterId;
+        }
+
+        return $preferredCashRegisterId > 0 ? $preferredCashRegisterId : null;
     }
 
 }

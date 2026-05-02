@@ -8,11 +8,13 @@ use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use App\Services\FeatureConfigService;
 use Carbon\Carbon;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -26,6 +28,7 @@ class AppConfigController extends Controller
 
     private const COMMERCE_FEATURE_CODES = [
         'RESTAURANT_MENU_IGV_INCLUDED',
+        'RESTAURANT_RECIPES_ENABLED',
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',
@@ -76,46 +79,13 @@ class AppConfigController extends Controller
         'PURCHASES_PERCEPCION_ENABLED',
     ];
 
-    private const FEATURE_LABELS_FALLBACK = [
-        'DOC_KIND_CREDIT_NOTE' => 'Notas de crédito',
-        'DOC_KIND_CREDIT_NOTE_' => 'Notas de crédito',
-        'DOC_KIND_DEBIT_NOTE' => 'Notas de débito',
-        'DOC_KIND_DEBIT_NOTE_' => 'Notas de débito',
-        'RESTAURANT_MENU_IGV_INCLUDED' => 'Menú con IGV incluido',
-        'PRODUCT_MULTI_UOM' => 'Múltiples unidades por producto',
-        'PRODUCT_UOM_CONVERSIONS' => 'Conversión de unidades',
-        'PRODUCT_WHOLESALE_PRICING' => 'Precios por volumen',
-        'INVENTORY_PRODUCTS_BY_PROFILE' => 'Productos según perfil',
-        'INVENTORY_PRODUCT_MASTERS_BY_PROFILE' => 'Catálogo según perfil',
-        'SALES_CUSTOMER_PRICE_PROFILE' => 'Precios por cliente',
-        'SALES_WORKSHOP_MULTI_VEHICLE' => 'Taller: clientes con multiples vehiculos',
-        'SALES_SELLER_TO_CASHIER' => 'Flujo vendedor a caja',
-        'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => 'Editar emitidos antes de respuesta final SUNAT',
-        'SALES_ANTICIPO_ENABLED' => 'Cobro con anticipo',
-        'SALES_TAX_BRIDGE' => 'Envío a SUNAT',
-        'SALES_TAX_BRIDGE_DEBUG_VIEW' => 'Ver diagnóstico SUNAT',
-        'SALES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en ventas',
-        'SALES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en ventas',
-        'SALES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en ventas',
-        'SALES_DETRACCION_ENABLED' => 'Usar detracción en ventas',
-        'SALES_RETENCION_ENABLED' => 'Usar retención en ventas',
-        'SALES_PERCEPCION_ENABLED' => 'Usar percepción en ventas',
-        'PURCHASES_GLOBAL_DISCOUNT_ENABLED' => 'Descuento global en compras',
-        'PURCHASES_ITEM_DISCOUNT_ENABLED' => 'Descuento por item en compras',
-        'PURCHASES_FREE_ITEMS_ENABLED' => 'Operaciones gratuitas en compras',
-        'PURCHASES_DETRACCION_ENABLED' => 'Usar detracción en compras',
-        'PURCHASES_RETENCION_COMPRADOR_ENABLED' => 'Retención compra por comprador',
-        'PURCHASES_RETENCION_PROVEEDOR_ENABLED' => 'Retención compra por proveedor',
-        'PURCHASES_PERCEPCION_ENABLED' => 'Usar percepción en compras',
-    ];
-
     public function operationalContext(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchId = $request->query('branch_id', $authUser->branch_id);
-        $warehouseId = $request->query('warehouse_id');
-        $cashRegisterId = $request->query('cash_register_id');
+        $warehouseId = $request->query('warehouse_id', $authUser->preferred_warehouse_id ?? null);
+        $cashRegisterId = $request->query('cash_register_id', $authUser->preferred_cash_register_id ?? null);
 
         if ($companyId !== (int) $authUser->company_id) {
             return response()->json([
@@ -136,6 +106,14 @@ class AppConfigController extends Controller
         $resolvedCashRegisterId = null;
         if ($cashRegisterId !== null && $cashRegisterId !== '') {
             $resolvedCashRegisterId = (int) $cashRegisterId;
+        }
+
+        $stationContext = $this->resolveAuthenticatedStationContext($request, $companyId);
+
+        if ($stationContext !== null) {
+            $resolvedBranchId = $stationContext['branch_id'];
+            $resolvedWarehouseId = $stationContext['warehouse_id'];
+            $resolvedCashRegisterId = $stationContext['cash_register_id'];
         }
 
         $company = DB::table('core.companies')
@@ -189,9 +167,18 @@ class AppConfigController extends Controller
             ->orderBy('name')
             ->get();
 
+        if ($resolvedWarehouseId !== null && !$warehouses->contains('id', $resolvedWarehouseId)) {
+            $resolvedWarehouseId = $warehouses->first()->id ?? null;
+        }
+
+        if ($resolvedCashRegisterId !== null && !$cashRegisters->contains('id', $resolvedCashRegisterId)) {
+            $resolvedCashRegisterId = $cashRegisters->first()->id ?? null;
+        }
+
         return response()->json([
             'company' => $company,
             'active_vertical' => $this->resolveActiveCompanyVertical($companyId),
+            'station' => $stationContext,
             'branches' => $branches,
             'warehouses' => $warehouses,
             'cash_registers' => $cashRegisters,
@@ -200,6 +187,11 @@ class AppConfigController extends Controller
                 'branch_id' => $resolvedBranchId,
                 'warehouse_id' => $resolvedWarehouseId,
                 'cash_register_id' => $resolvedCashRegisterId,
+            ],
+            'selection_locks' => [
+                'branch' => $stationContext !== null && $stationContext['branch_id'] !== null,
+                'warehouse' => $stationContext !== null && $stationContext['warehouse_id'] !== null,
+                'cash_register' => $stationContext !== null && $stationContext['cash_register_id'] !== null,
             ],
             'limits' => [
                 'platform' => $this->fetchPlatformLimits(),
@@ -417,8 +409,9 @@ class AppConfigController extends Controller
         $this->ensureFeatureLabelsPersisted($featureCodes->all());
 
         $labelsByCode = $this->resolveFeatureLabels($featureCodes->all());
+        $categoriesByCode = $this->resolveFeatureCategories($featureCodes->all());
 
-        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode) {
+        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode, $categoriesByCode) {
             $company = $companyFeatures->get($featureCode);
             $branch = $branchFeatures->get($featureCode);
 
@@ -446,6 +439,8 @@ class AppConfigController extends Controller
             return [
                 'feature_code' => $featureCode,
                 'feature_label' => $labelsByCode[(string) $featureCode] ?? (string) $featureCode,
+                'feature_category_key' => $categoriesByCode[(string) $featureCode]['key'] ?? $this->deriveFeatureCategoryKey((string) $featureCode),
+                'feature_category_label' => $categoriesByCode[(string) $featureCode]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey((string) $featureCode)),
                 'is_enabled' => $isEnabled,
                 'company_enabled' => $company ? (bool) $company->is_enabled : null,
                 'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
@@ -1430,6 +1425,12 @@ class AppConfigController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
 
+        if (!$this->tableExists('inventory', 'warehouses')) {
+            return response()->json([
+                'message' => 'No se puede crear empresa: falta tabla de almacenes (inventory.warehouses).',
+            ], 409);
+        }
+
         $validator = Validator::make($request->all(), [
             'tax_id' => 'required|string|min:8|max:20',
             'legal_name' => 'required|string|min:3|max:200',
@@ -1509,9 +1510,9 @@ class AppConfigController extends Controller
             }
         }
 
-        $createDefaultWarehouse = array_key_exists('create_default_warehouse', $payload)
-            ? (bool) $payload['create_default_warehouse']
-            : true;
+        // Business rule: every company must have at least one active warehouse
+        // bound to its main branch to avoid null warehouse flows in operations.
+        $createDefaultWarehouse = true;
         $createDefaultCashRegister = array_key_exists('create_default_cash_register', $payload)
             ? (bool) $payload['create_default_cash_register']
             : true;
@@ -1578,15 +1579,30 @@ class AppConfigController extends Controller
                 );
             }
 
-            if ($createDefaultWarehouse && $this->tableExists('inventory', 'warehouses')) {
-                $defaultWarehouseId = (int) DB::table('inventory.warehouses')->insertGetId([
-                    'company_id' => $companyId,
-                    'branch_id' => $branchId,
-                    'code' => trim((string) ($payload['default_warehouse_code'] ?? 'ALM-001')),
-                    'name' => trim((string) ($payload['default_warehouse_name'] ?? 'Almacen Principal')),
-                    'address' => $payload['address'] ?? null,
-                    'status' => 1,
-                ]);
+            if ($createDefaultWarehouse) {
+                $existingWarehouse = DB::table('inventory.warehouses')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where(function ($query) use ($branchId) {
+                        $query->where('branch_id', $branchId)
+                            ->orWhereNull('branch_id');
+                    })
+                    ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$branchId])
+                    ->orderBy('name')
+                    ->first(['id']);
+
+                if ($existingWarehouse) {
+                    $defaultWarehouseId = (int) $existingWarehouse->id;
+                } else {
+                    $defaultWarehouseId = (int) DB::table('inventory.warehouses')->insertGetId([
+                        'company_id' => $companyId,
+                        'branch_id' => $branchId,
+                        'code' => trim((string) ($payload['default_warehouse_code'] ?? 'ALM-001')),
+                        'name' => trim((string) ($payload['default_warehouse_name'] ?? 'Almacen Principal')),
+                        'address' => $payload['address'] ?? null,
+                        'status' => 1,
+                    ]);
+                }
             }
 
             if ($createDefaultCashRegister && $this->tableExists('sales', 'cash_registers')) {
@@ -1990,7 +2006,7 @@ class AppConfigController extends Controller
             'company_id' => 'nullable|integer|min:1',
             'branch_id' => 'nullable|integer|min:1',
             'features' => 'required|array|min:1',
-            'features.*.feature_code' => 'required|string|in:RESTAURANT_MENU_IGV_INCLUDED,PRODUCT_MULTI_UOM,PRODUCT_UOM_CONVERSIONS,PRODUCT_WHOLESALE_PRICING,INVENTORY_PRODUCTS_BY_PROFILE,INVENTORY_PRODUCT_MASTERS_BY_PROFILE,SALES_CUSTOMER_PRICE_PROFILE,SALES_SELLER_TO_CASHIER,SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL,SALES_ANTICIPO_ENABLED,SALES_TAX_BRIDGE,SALES_TAX_BRIDGE_DEBUG_VIEW,SALES_GLOBAL_DISCOUNT_ENABLED,SALES_ITEM_DISCOUNT_ENABLED,SALES_FREE_ITEMS_ENABLED,SALES_DETRACCION_ENABLED,SALES_RETENCION_ENABLED,SALES_PERCEPCION_ENABLED,PURCHASES_GLOBAL_DISCOUNT_ENABLED,PURCHASES_ITEM_DISCOUNT_ENABLED,PURCHASES_FREE_ITEMS_ENABLED,PURCHASES_DETRACCION_ENABLED,PURCHASES_RETENCION_COMPRADOR_ENABLED,PURCHASES_RETENCION_PROVEEDOR_ENABLED,PURCHASES_PERCEPCION_ENABLED',
+            'features.*.feature_code' => ['required', 'string', 'max:100', Rule::in($this->resolveAllowedFeatureCodes())],
             'features.*.is_enabled' => 'required|boolean',
             'features.*.config' => 'nullable',
         ]);
@@ -2266,6 +2282,72 @@ class AppConfigController extends Controller
         ];
     }
 
+    private function resolveAuthenticatedStationContext(Request $request, int $companyId): ?array
+    {
+        $sessionId = (int) ($request->attributes->get('auth_session_id') ?? 0);
+        if ($sessionId <= 0) {
+            return null;
+        }
+
+        if (!$this->tableExists('appcfg', 'pos_stations') || !$this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+            return null;
+        }
+
+        $sessionDeviceId = DB::table('auth.refresh_tokens')
+            ->where('id', $sessionId)
+            ->value('device_id');
+
+        $deviceId = trim((string) ($sessionDeviceId ?? ''));
+        if ($deviceId === '') {
+            return null;
+        }
+
+        $station = DB::table('appcfg.pos_stations as ps')
+            ->join('sales.cash_registers as cr', function ($join) use ($companyId) {
+                $join->on('cr.id', '=', 'ps.cash_register_id')
+                    ->where('cr.company_id', '=', $companyId)
+                    ->where('cr.status', '=', 1);
+            })
+            ->select([
+                'ps.id',
+                'ps.company_id',
+                'ps.cash_register_id',
+                'ps.code',
+                'ps.name',
+                'ps.device_id',
+                'ps.device_name',
+                'ps.status',
+                'cr.branch_id',
+                'cr.warehouse_id',
+                'cr.code as cash_register_code',
+                'cr.name as cash_register_name',
+            ])
+            ->where('ps.company_id', $companyId)
+            ->where('ps.status', 1)
+            ->whereRaw('LOWER(ps.device_id) = ?', [mb_strtolower($deviceId)])
+            ->orderBy('ps.id')
+            ->first();
+
+        if (!$station) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $station->id,
+            'company_id' => (int) $station->company_id,
+            'cash_register_id' => (int) $station->cash_register_id,
+            'branch_id' => $station->branch_id !== null ? (int) $station->branch_id : null,
+            'warehouse_id' => $station->warehouse_id !== null ? (int) $station->warehouse_id : null,
+            'code' => (string) $station->code,
+            'name' => (string) $station->name,
+            'device_id' => (string) $station->device_id,
+            'device_name' => $station->device_name !== null ? (string) $station->device_name : null,
+            'status' => (int) $station->status,
+            'cash_register_code' => (string) $station->cash_register_code,
+            'cash_register_name' => (string) $station->cash_register_name,
+        ];
+    }
+
     private function tableExists(string $schema, string $table): bool
     {
         return DB::table('information_schema.tables')
@@ -2358,6 +2440,30 @@ class AppConfigController extends Controller
         return $point->format('d/m');
     }
 
+    /**
+     * Resolve the allowed feature codes for validation.
+     * Source of truth: appcfg.feature_labels (status=1).
+     * Fallback: config('features.commerce_feature_codes').
+     */
+    private function resolveAllowedFeatureCodes(): array
+    {
+        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
+            $codes = DB::table('appcfg.feature_labels')
+                ->where('status', 1)
+                ->pluck('feature_code')
+                ->map(fn ($c) => strtoupper(trim((string) $c)))
+                ->filter(fn ($c) => $c !== '')
+                ->values()
+                ->all();
+
+            if (!empty($codes)) {
+                return $codes;
+            }
+        }
+
+        return config('features.commerce_feature_codes', []);
+    }
+
     private function resolveFeatureLabels(array $featureCodes): array
     {
         $codes = collect($featureCodes)
@@ -2391,11 +2497,79 @@ class AppConfigController extends Controller
         foreach ($codes as $code) {
             $code = (string) $code;
             if (!array_key_exists($code, $labels)) {
-                $labels[$code] = self::FEATURE_LABELS_FALLBACK[$code] ?? $code;
+                $labels[$code] = $this->humanizeFeatureCode($code);
             }
         }
 
         return $labels;
+    }
+
+    private function resolveFeatureCategories(array $featureCodes): array
+    {
+        $codes = collect($featureCodes)
+            ->filter(function ($code) {
+                return is_string($code) && $code !== '';
+            })
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return [];
+        }
+
+        $categories = [];
+        $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+        $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+
+        if ($this->tableExists('appcfg', 'feature_labels') && ($hasCategoryKey || $hasCategoryLabel)) {
+            $columns = ['feature_code'];
+            if ($hasCategoryKey) {
+                $columns[] = 'category_key';
+            }
+            if ($hasCategoryLabel) {
+                $columns[] = 'category_label';
+            }
+
+            $rows = DB::table('appcfg.feature_labels')
+                ->whereIn('feature_code', $codes->all())
+                ->where('status', 1)
+                ->get($columns);
+
+            foreach ($rows as $row) {
+                $code = (string) ($row->feature_code ?? '');
+                if ($code === '') {
+                    continue;
+                }
+
+                $key = strtolower(trim((string) (($row->category_key ?? '') ?: $this->deriveFeatureCategoryKey($code))));
+                if ($key === '') {
+                    $key = $this->deriveFeatureCategoryKey($code);
+                }
+
+                $label = trim((string) ($row->category_label ?? ''));
+                if ($label === '') {
+                    $label = $this->humanizeCategoryKey($key);
+                }
+
+                $categories[$code] = [
+                    'key' => $key,
+                    'label' => $label,
+                ];
+            }
+        }
+
+        foreach ($codes as $code) {
+            $code = (string) $code;
+            if (!array_key_exists($code, $categories)) {
+                $key = $this->deriveFeatureCategoryKey($code);
+                $categories[$code] = [
+                    'key' => $key,
+                    'label' => $this->humanizeCategoryKey($key),
+                ];
+            }
+        }
+
+        return $categories;
     }
 
     private function ensureFeatureLabelsPersisted(array $featureCodes): void
@@ -2414,35 +2588,97 @@ class AppConfigController extends Controller
             return;
         }
 
+        $columns = ['feature_code', 'label_es'];
+        $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+        $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+
+        if ($hasCategoryKey) {
+            $columns[] = 'category_key';
+        }
+        if ($hasCategoryLabel) {
+            $columns[] = 'category_label';
+        }
+
         $existing = DB::table('appcfg.feature_labels')
             ->whereIn('feature_code', $codes->all())
-            ->get(['feature_code', 'label_es'])
+            ->get($columns)
             ->keyBy('feature_code');
 
         foreach ($codes as $code) {
-            $fallbackLabel = self::FEATURE_LABELS_FALLBACK[$code] ?? null;
-            if ($fallbackLabel === null) {
-                continue;
-            }
+            $fallbackLabel = $this->humanizeFeatureCode((string) $code);
 
             $current = $existing->get($code);
             $currentLabel = trim((string) ($current->label_es ?? ''));
+            $categoryKey = $this->deriveFeatureCategoryKey((string) $code);
+            $categoryLabel = $this->humanizeCategoryKey($categoryKey);
             $shouldReplace = $current === null || $currentLabel === '' || strcasecmp($currentLabel, $code) === 0;
+            $currentCategoryKey = strtolower(trim((string) ($current->category_key ?? '')));
+            $currentCategoryLabel = trim((string) ($current->category_label ?? ''));
+            $shouldUpdateCategory = $current === null || $currentCategoryKey === '' || $currentCategoryLabel === '';
 
-            if (!$shouldReplace) {
+            if (!$shouldReplace && !$shouldUpdateCategory) {
                 continue;
+            }
+
+            $values = [
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($shouldReplace) {
+                $values['label_es'] = $fallbackLabel;
+                $values['description'] = $fallbackLabel;
+            }
+
+            if ($hasCategoryKey) {
+                $values['category_key'] = $categoryKey;
+            }
+            if ($hasCategoryLabel) {
+                $values['category_label'] = $categoryLabel;
             }
 
             DB::table('appcfg.feature_labels')->updateOrInsert(
                 ['feature_code' => $code],
-                [
-                    'label_es' => $fallbackLabel,
-                    'description' => $fallbackLabel,
-                    'status' => 1,
-                    'updated_at' => now(),
-                ]
+                $values
             );
         }
+    }
+
+    private function humanizeFeatureCode(string $code): string
+    {
+        $normalized = strtoupper(trim($code));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $humanized = str_replace('_', ' ', $normalized);
+        $humanized = preg_replace('/\s+/', ' ', $humanized ?? '') ?? $normalized;
+
+        return Str::title(Str::lower(trim($humanized)));
+    }
+
+    private function deriveFeatureCategoryKey(string $featureCode): string
+    {
+        $normalized = strtoupper(trim($featureCode));
+        if ($normalized === '') {
+            return 'general';
+        }
+
+        $parts = explode('_', $normalized, 2);
+        $candidate = strtolower(trim((string) ($parts[0] ?? '')));
+
+        return $candidate !== '' ? $candidate : 'general';
+    }
+
+    private function humanizeCategoryKey(string $categoryKey): string
+    {
+        $normalized = strtolower(trim($categoryKey));
+        if ($normalized === '') {
+            return 'General';
+        }
+
+        return Str::title(str_replace('_', ' ', $normalized));
     }
 
     private function ensureCompanyAccessLinksForCompanies($companies): void
@@ -2985,6 +3221,13 @@ class AppConfigController extends Controller
                 'message' => 'Certificado guardado localmente, pero no se pudo registrar en el puente: ' . $e->getMessage(),
                 'has_cert' => true,
             ], 422);
+        } catch (ConnectionException $e) {
+            return response()->json([
+                'message' => 'Certificado guardado localmente, pero el puente no esta disponible por red/DNS. Reintenta cuando haya conectividad.',
+                'has_cert' => true,
+                'bridge_error' => substr($e->getMessage(), 0, 500),
+                'bridge_retry_recommended' => true,
+            ], 503);
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Certificado guardado localmente, pero ocurrio un error al registrar en el puente',
@@ -3040,6 +3283,9 @@ class AppConfigController extends Controller
     public function companyCommerceAdminMatrix(Request $request)
     {
         $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
+        $this->ensureFeatureLabelsPersisted($ADMIN_FEATURE_CODES);
+        $labelsByCode = $this->resolveFeatureLabels($ADMIN_FEATURE_CODES);
+        $categoriesByCode = $this->resolveFeatureCategories($ADMIN_FEATURE_CODES);
 
         $companies = DB::table('core.companies')
             ->where('id', '!=', self::SYSTEM_COMPANY_ID)
@@ -3073,6 +3319,8 @@ class AppConfigController extends Controller
 
         return response()->json([
             'feature_codes' => $ADMIN_FEATURE_CODES,
+            'feature_labels' => $labelsByCode,
+            'feature_categories' => $categoriesByCode,
             'companies' => $rows,
         ]);
     }

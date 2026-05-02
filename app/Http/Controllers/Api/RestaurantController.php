@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Restaurant\RestaurantComandaGateway;
 use App\Services\Restaurant\RestaurantOrderService;
+use App\Services\Restaurant\RestaurantRecipeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -13,13 +16,210 @@ class RestaurantController extends Controller
 {
     public function __construct(
         private RestaurantComandaGateway $gateway,
-        private RestaurantOrderService $orderService
+        private RestaurantOrderService $orderService,
+        private RestaurantRecipeService $recipeService,
+        private CompanyIgvRateService $companyIgvRateService
     ) {
     }
 
     // =========================================================================
     // Restaurant order endpoints (vertical-specific, does NOT touch retail)
     // =========================================================================
+
+    public function bootstrap(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $branchId = $request->query('branch_id', $authUser->branch_id);
+        $warehouseId = $request->query('warehouse_id');
+        $mode = (string) $request->query('mode', 'full');
+
+        if (!in_array($mode, ['full', 'orders_minimal'], true)) {
+            $mode = 'full';
+        }
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if ($branchId !== null && $branchId !== '') {
+            $branchId = (int) $branchId;
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$branchExists) {
+                return response()->json(['message' => 'Invalid branch scope'], 422);
+            }
+        } else {
+            $branchId = null;
+        }
+
+        if ($warehouseId !== null && $warehouseId !== '') {
+            $warehouseId = (int) $warehouseId;
+        } else {
+            $warehouseId = null;
+        }
+
+        $cacheKey = sprintf(
+            'restaurant_bootstrap:%d:%s:%s:%s',
+            $companyId,
+            $branchId ?? 'all',
+            $warehouseId ?? 'all',
+            $mode
+        );
+
+        $payload = Cache::remember($cacheKey, now()->addSeconds(20), function () use ($companyId, $branchId, $warehouseId, $mode) {
+            $currencies = DB::table('core.currencies')
+                ->select('id', 'code', 'name', 'symbol', 'is_default')
+                ->where('status', 1)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get();
+
+            $paymentMethods = DB::table('master.payment_types')
+                ->select([
+                    'id',
+                    DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                    'name',
+                ])
+                ->where(function ($query) {
+                    $query->where('is_active', 1)
+                        ->orWhereIn('status', [1, 2]);
+                })
+                ->orderBy('name')
+                ->get();
+
+            $allowedKinds = $mode === 'orders_minimal'
+                ? ['SALES_ORDER']
+                : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
+            $documentKindIdsByCode = $this->resolveDocumentKindIdMapByCodes($allowedKinds);
+            $allowedKindIds = $this->resolveDocumentKindIdsByCodes($allowedKinds);
+            $allowedKindAliases = $this->resolveDocumentKindAliasesByCodes($allowedKinds);
+
+            $seriesQuery = DB::table('sales.series_numbers as sn')
+                ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+                ->select([
+                    'sn.id',
+                    'sn.document_kind_id',
+                    DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                    'sn.series',
+                    'sn.current_number',
+                    'sn.is_enabled',
+                ])
+                ->where('sn.company_id', $companyId)
+                ->where(function ($query) use ($allowedKinds, $allowedKindIds, $allowedKindAliases) {
+                    if (!empty($allowedKindIds)) {
+                        $query->whereIn('sn.document_kind_id', $allowedKindIds)
+                            ->orWhere(function ($legacy) use ($allowedKindAliases) {
+                                $legacy->whereNull('sn.document_kind_id')
+                                    ->whereIn(DB::raw("UPPER(TRIM(COALESCE(sn.document_kind, '')))") , $allowedKindAliases);
+                            });
+
+                        return;
+                    }
+
+                    $query->whereIn(DB::raw('UPPER(TRIM(COALESCE(dk.code, sn.document_kind)))'), $allowedKindAliases);
+                })
+                ->where('sn.is_enabled', true)
+                ->orderBy('document_kind')
+                ->orderBy('sn.series');
+
+            if ($branchId !== null) {
+                $seriesQuery->where('sn.branch_id', $branchId);
+            }
+
+            if ($warehouseId !== null) {
+                $seriesQuery->where('sn.warehouse_id', $warehouseId);
+            }
+
+            $seriesNumbers = $seriesQuery->get()->map(function ($row) {
+                $documentKindId = isset($row->document_kind_id) && $row->document_kind_id !== null
+                    ? (int) $row->document_kind_id
+                    : null;
+
+                $normalizedCode = $this->resolveCanonicalDocumentKindCode(
+                    (string) ($row->document_kind ?? ''),
+                    $documentKindId
+                );
+
+                if ($normalizedCode !== null) {
+                    $row->document_kind = $normalizedCode;
+                }
+
+                return $row;
+            })->values();
+
+            $companyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                ->value('is_enabled');
+
+            $branchToggle = null;
+            if ($branchId !== null) {
+                $branchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                    ->value('is_enabled');
+            }
+
+            $restaurantPriceIncludesIgv = $branchToggle !== null
+                ? (bool) $branchToggle
+                : ($companyToggle !== null ? (bool) $companyToggle : true);
+
+            $recipesCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                ->value('is_enabled');
+
+            $recipesBranchToggle = null;
+            if ($branchId !== null) {
+                $recipesBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                    ->value('is_enabled');
+            }
+
+            $restaurantRecipesEnabled = $recipesBranchToggle !== null
+                ? (bool) $recipesBranchToggle
+                : ($recipesCompanyToggle !== null ? (bool) $recipesCompanyToggle : false);
+
+            $sellerToCashierCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                ->value('is_enabled');
+
+            $sellerToCashierBranchToggle = null;
+            if ($branchId !== null) {
+                $sellerToCashierBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                    ->value('is_enabled');
+            }
+
+            $sellerToCashierEnabled = $sellerToCashierBranchToggle !== null
+                ? (bool) $sellerToCashierBranchToggle
+                : ($sellerToCashierCompanyToggle !== null ? (bool) $sellerToCashierCompanyToggle : false);
+
+            return [
+                'currencies' => $currencies,
+                'payment_methods' => $paymentMethods,
+                'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
+                'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
+                'restaurant_recipes_enabled' => $restaurantRecipesEnabled,
+                'sales_seller_to_cashier_enabled' => $sellerToCashierEnabled,
+                'document_kind_ids' => $documentKindIdsByCode,
+                'series_numbers' => $seriesNumbers,
+            ];
+        });
+
+        return response()->json($payload);
+    }
 
     public function fetchOrders(Request $request)
     {
@@ -29,7 +229,9 @@ class RestaurantController extends Controller
         $status    = strtoupper(trim((string) $request->query('status', '')));
         $search    = trim((string) $request->query('search', ''));
         $page      = max(1, (int) $request->query('page', 1));
-        $perPage   = min(100, max(10, (int) $request->query('per_page', 20)));
+        $perPage   = min(50, max(10, (int) $request->query('per_page', 12)));
+        $includeItems = filter_var($request->query('include_items', false), FILTER_VALIDATE_BOOLEAN);
+        $includeMeta = filter_var($request->query('include_meta', false), FILTER_VALIDATE_BOOLEAN);
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
@@ -43,7 +245,7 @@ class RestaurantController extends Controller
 
         try {
             $result = $this->orderService->fetchOrders(
-                $companyId, $branchId, $status, $search, $page, $perPage
+                $companyId, $branchId, $status, $search, $page, $perPage, $includeItems, $includeMeta
             );
         } catch (\RuntimeException $e) {
             $code = (int) $e->getCode();
@@ -51,6 +253,25 @@ class RestaurantController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    public function showOrder(Request $request, int $id)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->orderService->fetchOrderDetail($companyId, $id);
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json(['data' => $result]);
     }
 
     public function createOrder(Request $request)
@@ -79,6 +300,9 @@ class RestaurantController extends Controller
             'items.*.unit_id'     => 'nullable|integer|min:1',
             'items.*.tax_type'    => 'nullable|string|max:20',
             'items.*.tax_rate'    => 'nullable|numeric|min:0|max:100',
+            'items.*.subtotal'    => 'nullable|numeric|min:0',
+            'items.*.tax_total'   => 'nullable|numeric|min:0',
+            'items.*.total'       => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -100,6 +324,30 @@ class RestaurantController extends Controller
 
         if (!$branchExists) {
             return response()->json(['message' => 'Invalid branch scope'], 422);
+        }
+
+        if ($warehouseId !== null) {
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('id', $warehouseId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->where(function ($query) use ($branchId) {
+                    $query->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                })
+                ->exists();
+
+            if (!$warehouseExists) {
+                return response()->json(['message' => 'Invalid warehouse scope'], 422);
+            }
+        } else {
+            $warehouseId = $this->resolveDefaultWarehouseId($companyId, $branchId);
+
+            if ($warehouseId === null) {
+                return response()->json([
+                    'message' => 'No existe almacén activo para la sucursal seleccionada. Crea uno en Maestros > Almacenes.',
+                ], 422);
+            }
         }
 
         try {
@@ -127,7 +375,7 @@ class RestaurantController extends Controller
         $orderId   = (int) $id;
 
         $validator = Validator::make($request->all(), [
-            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT',
+            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT,SALES_ORDER',
             'series'               => 'nullable|string|max:10',
             'cash_register_id'     => 'nullable|integer|min:1',
             'payment_method_id'    => 'nullable|integer|min:1',
@@ -242,6 +490,85 @@ class RestaurantController extends Controller
                 array_key_exists('table_label', $payload) ? (string) ($payload['table_label'] ?? '') : null,
                 $this->resolveBearerToken($request)
             );
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function getRecipe(Request $request, int $menuProductId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->recipeService->getRecipe($companyId, $menuProductId);
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function upsertRecipe(Request $request, int $menuProductId)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'notes' => 'nullable|string|max:300',
+            'lines' => 'required|array|min:1',
+            'lines.*.ingredient_product_id' => 'required|integer|min:1',
+            'lines.*.qty_required_base' => 'required|numeric|min:0.00000001',
+            'lines.*.wastage_percent' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+
+        try {
+            $result = $this->recipeService->upsertRecipe(
+                $companyId,
+                $menuProductId,
+                $payload['lines'],
+                $payload['notes'] ?? null
+            );
+        } catch (\RuntimeException $e) {
+            $code = (int) $e->getCode();
+            return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
+        }
+
+        return response()->json($result);
+    }
+
+    public function preparationRequirements(Request $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->recipeService->resolvePreparationRequirements($companyId, $id);
         } catch (\RuntimeException $e) {
             $code = (int) $e->getCode();
             return response()->json(['message' => $e->getMessage()], $code >= 400 && $code <= 599 ? $code : 500);
@@ -396,5 +723,127 @@ class RestaurantController extends Controller
 
         $token = trim(substr($raw, 7));
         return $token !== '' ? $token : null;
+    }
+
+    private function resolveDocumentKindIdsByCodes(array $codes): array
+    {
+        $normalized = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        return DB::table('sales.document_kinds')
+            ->whereIn(DB::raw('UPPER(code)'), $normalized)
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    private function resolveDefaultWarehouseId(int $companyId, int $branchId): ?int
+    {
+        $warehouse = DB::table('inventory.warehouses')
+            ->select('id')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->where(function ($query) use ($branchId) {
+                $query->where('branch_id', $branchId)
+                    ->orWhereNull('branch_id');
+            })
+            ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$branchId])
+            ->orderBy('name')
+            ->first();
+
+        return $warehouse ? (int) $warehouse->id : null;
+    }
+
+    private function resolveDocumentKindAliasesByCodes(array $codes): array
+    {
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $aliases = $normalizedCodes;
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        foreach ($rows as $row) {
+            $aliases[] = strtoupper(trim((string) ($row->code ?? '')));
+            $aliases[] = strtoupper(trim((string) ($row->label ?? '')));
+        }
+
+        return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
+    }
+
+    private function resolveDocumentKindIdMapByCodes(array $codes): array
+    {
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('id', 'code')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $code = strtoupper(trim((string) ($row->code ?? '')));
+            if ($code === '') {
+                continue;
+            }
+            $map[$code] = (int) $row->id;
+        }
+
+        return $map;
+    }
+
+    private function resolveCanonicalDocumentKindCode(string $documentKindValue, ?int $documentKindId = null): ?string
+    {
+        if ($documentKindId !== null) {
+            $codeById = DB::table('sales.document_kinds')
+                ->where('id', $documentKindId)
+                ->value('code');
+
+            if ($codeById !== null && trim((string) $codeById) !== '') {
+                return strtoupper(trim((string) $codeById));
+            }
+        }
+
+        $normalizedValue = strtoupper(trim($documentKindValue));
+        if ($normalizedValue === '') {
+            return null;
+        }
+
+        $row = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->where(function ($query) use ($normalizedValue) {
+                $query->whereRaw('UPPER(TRIM(code)) = ?', [$normalizedValue])
+                    ->orWhereRaw('UPPER(TRIM(label)) = ?', [$normalizedValue]);
+            })
+            ->first();
+
+        if ($row && isset($row->code) && trim((string) $row->code) !== '') {
+            return strtoupper(trim((string) $row->code));
+        }
+
+        return $normalizedValue;
     }
 }

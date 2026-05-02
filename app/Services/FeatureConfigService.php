@@ -46,11 +46,13 @@ class FeatureConfigService
 
         // Merge everything in memory (no additional queries)
         $labelsByCode = $this->getFeatureLabels();
+        $categoriesByCode = $this->getFeatureCategories();
 
         $features = [];
-        foreach (config('features.commerce_feature_codes', []) as $code) {
+        foreach ($this->getCommerceFeatureCodes() as $code) {
             $companyRow = $companyFeatures->get($code);
             $branchRow = $branchFeatures->get($code);
+            $hasExplicitToggle = $companyRow !== null || $branchRow !== null;
 
             $companyConfig = $companyRow ? $this->decodeJsonConfig($companyRow->config) : null;
             $branchConfig = $branchRow ? $this->decodeJsonConfig($branchRow->config) : null;
@@ -64,23 +66,28 @@ class FeatureConfigService
                 ? array_merge(is_array($companyConfig) ? $companyConfig : [], is_array($branchConfig) ? $branchConfig : [])
                 : ($branchConfig ?? $companyConfig);
 
-            // Apply vertical override if exists
+            // Vertical preference acts only as fallback when there is no explicit
+            // company/branch toggle persisted for this feature.
             $verticalPref = $verticalPreferences[$code] ?? null;
-            if ($verticalPref && $verticalPref['resolved']) {
+            $verticalSource = null;
+            if (!$hasExplicitToggle && $verticalPref && $verticalPref['resolved']) {
                 if ($verticalPref['is_enabled'] !== null) {
                     $isEnabled = (bool)$verticalPref['is_enabled'];
                 }
                 if ($verticalPref['config'] !== null) {
                     $resolvedConfig = $verticalPref['config'];
                 }
+                $verticalSource = $verticalPref['source'] ?? null;
             }
 
             $features[] = [
                 'feature_code' => $code,
                 'feature_label' => $labelsByCode[$code] ?? $code,
+                'feature_category_key' => $categoriesByCode[$code]['key'] ?? $this->deriveFeatureCategoryKey($code),
+                'feature_category_label' => $categoriesByCode[$code]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey($code)),
                 'is_enabled' => $isEnabled,
                 'config' => $resolvedConfig,
-                'vertical_source' => $verticalPref['source'] ?? null,
+                'vertical_source' => $verticalSource,
             ];
         }
 
@@ -258,6 +265,8 @@ class FeatureConfigService
             return [];
         }
 
+        $this->ensureFeatureLabelsPersisted($this->getCommerceFeatureCodes());
+
         $rows = DB::table('appcfg.feature_labels')
             ->get(['feature_code', $labelColumn]);
 
@@ -268,6 +277,188 @@ class FeatureConfigService
         Cache::put($cacheKey, $labels, self::CACHE_TTL);
 
         return $labels;
+    }
+
+    /**
+     * Get feature categories (cached or from db).
+     */
+    private function getFeatureCategories(): array
+    {
+        $cacheKey = self::CACHE_PREFIX . 'categories';
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $codes = $this->getCommerceFeatureCodes();
+        $categories = [];
+
+        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
+            $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+            $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+
+            if ($hasCategoryKey || $hasCategoryLabel) {
+                $columns = ['feature_code'];
+                if ($hasCategoryKey) {
+                    $columns[] = 'category_key';
+                }
+                if ($hasCategoryLabel) {
+                    $columns[] = 'category_label';
+                }
+
+                $rows = DB::table('appcfg.feature_labels')
+                    ->whereIn('feature_code', $codes)
+                    ->where('status', 1)
+                    ->get($columns);
+
+                foreach ($rows as $row) {
+                    $code = (string) ($row->feature_code ?? '');
+                    if ($code === '') {
+                        continue;
+                    }
+
+                    $key = strtolower(trim((string) (($row->category_key ?? '') ?: $this->deriveFeatureCategoryKey($code))));
+                    if ($key === '') {
+                        $key = $this->deriveFeatureCategoryKey($code);
+                    }
+
+                    $label = trim((string) ($row->category_label ?? ''));
+                    if ($label === '') {
+                        $label = $this->humanizeCategoryKey($key);
+                    }
+
+                    $categories[$code] = [
+                        'key' => $key,
+                        'label' => $label,
+                    ];
+                }
+            }
+        }
+
+        foreach ($codes as $code) {
+            if (!array_key_exists($code, $categories)) {
+                $key = $this->deriveFeatureCategoryKey((string) $code);
+                $categories[$code] = [
+                    'key' => $key,
+                    'label' => $this->humanizeCategoryKey($key),
+                ];
+            }
+        }
+
+        Cache::put($cacheKey, $categories, self::CACHE_TTL);
+
+        return $categories;
+    }
+
+    /**
+     * Persist labels for any new feature codes so API stays DB-driven.
+     */
+    private function ensureFeatureLabelsPersisted(array $featureCodes): void
+    {
+        if (!$this->tableExists('appcfg', 'feature_labels')) {
+            return;
+        }
+
+        $codes = collect($featureCodes)
+            ->filter(fn ($code) => is_string($code) && trim($code) !== '')
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return;
+        }
+
+        $columns = ['feature_code', 'label_es'];
+        $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
+        $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
+        if ($hasCategoryKey) {
+            $columns[] = 'category_key';
+        }
+        if ($hasCategoryLabel) {
+            $columns[] = 'category_label';
+        }
+
+        $existing = DB::table('appcfg.feature_labels')
+            ->whereIn('feature_code', $codes->all())
+            ->get($columns)
+            ->keyBy('feature_code');
+
+        foreach ($codes as $code) {
+            $label = $this->humanizeFeatureCode((string) $code);
+            $current = $existing->get($code);
+            $currentLabel = trim((string) ($current->label_es ?? ''));
+            $categoryKey = $this->deriveFeatureCategoryKey((string) $code);
+            $categoryLabel = $this->humanizeCategoryKey($categoryKey);
+            $shouldReplace = $current === null || $currentLabel === '' || strcasecmp($currentLabel, $code) === 0;
+            $currentCategoryKey = strtolower(trim((string) ($current->category_key ?? '')));
+            $currentCategoryLabel = trim((string) ($current->category_label ?? ''));
+            $shouldUpdateCategory = $current === null || $currentCategoryKey === '' || $currentCategoryLabel === '';
+
+            if (!$shouldReplace && !$shouldUpdateCategory) {
+                continue;
+            }
+
+            $values = [
+                'status' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($shouldReplace) {
+                $values['label_es'] = $label;
+                $values['description'] = $label;
+            }
+
+            if ($hasCategoryKey) {
+                $values['category_key'] = $categoryKey;
+            }
+            if ($hasCategoryLabel) {
+                $values['category_label'] = $categoryLabel;
+            }
+
+            DB::table('appcfg.feature_labels')->updateOrInsert(
+                ['feature_code' => $code],
+                $values
+            );
+        }
+    }
+
+    private function humanizeFeatureCode(string $code): string
+    {
+        $normalized = strtoupper(trim($code));
+        if ($normalized === '') {
+            return '';
+        }
+
+        $humanized = str_replace('_', ' ', $normalized);
+        $humanized = preg_replace('/\s+/', ' ', $humanized ?? '') ?? $normalized;
+
+        return ucwords(strtolower(trim($humanized)));
+    }
+
+    private function deriveFeatureCategoryKey(string $featureCode): string
+    {
+        $normalized = strtoupper(trim($featureCode));
+        if ($normalized === '') {
+            return 'general';
+        }
+
+        $parts = explode('_', $normalized, 2);
+        $candidate = strtolower(trim((string) ($parts[0] ?? '')));
+
+        return $candidate !== '' ? $candidate : 'general';
+    }
+
+    private function humanizeCategoryKey(string $categoryKey): string
+    {
+        $normalized = strtolower(trim($categoryKey));
+        if ($normalized === '') {
+            return 'General';
+        }
+
+        return ucwords(str_replace('_', ' ', $normalized));
     }
 
     /**
@@ -318,6 +509,46 @@ class FeatureConfigService
         }
 
         return $columnCache[$key];
+    }
+
+    /**
+     * Get the canonical list of commerce feature codes.
+     * Source of truth: appcfg.feature_labels (status=1), ordered by feature_code.
+     * Fallback: config('features.commerce_feature_codes') for environments where
+     * the migration has not run yet (empty array by default after cleanup).
+     */
+    private function getCommerceFeatureCodes(): array
+    {
+        $cacheKey = self::CACHE_PREFIX . 'commerce_codes';
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $codes = [];
+
+        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
+            $rows = DB::table('appcfg.feature_labels')
+                ->where('status', 1)
+                ->orderBy('feature_code')
+                ->pluck('feature_code')
+                ->map(fn ($c) => strtoupper(trim((string) $c)))
+                ->filter(fn ($c) => $c !== '')
+                ->values()
+                ->all();
+
+            $codes = $rows;
+        }
+
+        // Fallback: use config list if DB is empty or table missing
+        if (empty($codes)) {
+            $codes = config('features.commerce_feature_codes', []);
+        }
+
+        Cache::put($cacheKey, $codes, self::CACHE_TTL);
+
+        return $codes;
     }
 
     /**

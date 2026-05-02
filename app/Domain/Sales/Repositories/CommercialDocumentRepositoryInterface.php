@@ -16,7 +16,9 @@ interface CommercialDocumentRepositoryInterface
 
     public function incrementSeriesNumber(int $seriesId, int $userId): void;
 
-    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId): ?object;
+    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId, ?int $documentKindId = null): ?object;
+
+    public function getSeriesNumberAnyWarehouse(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $documentKindId = null): ?object;
 
     public function deleteItemsAndPayments(int $documentId): void;
 }

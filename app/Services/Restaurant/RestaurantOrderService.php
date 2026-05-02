@@ -89,6 +89,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         return [
             'document_kind'     => 'SALES_ORDER',
+            'document_kind_id'  => $this->resolveDocumentKindId('SALES_ORDER'),
             'series'            => trim((string) ($input['series'] ?? '')),
             'issue_at'          => trim((string) ($input['issue_at'] ?? now('America/Lima')->toDateString())),
             'due_at'            => null,
@@ -169,13 +170,15 @@ class RestaurantOrderService implements VerticalSalesPolicy
         string $kitchenStatus,
         string $search,
         int $page,
-        int $perPage
+        int $perPage,
+        bool $includeItems = false,
+        bool $includeMeta = false
     ): array {
         $base = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
-            ->where('d.document_kind', 'SALES_ORDER')
-            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            // Issued orders are final for comanda operations and should not stay in the kitchen board.
+            ->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED'])
             ->when($branchId !== null, fn ($q) => $q->where('d.branch_id', $branchId))
             ->when($kitchenStatus !== '', fn ($q) => $q->whereRaw(
                 "UPPER(COALESCE(d.metadata->>'restaurant_order_status', 'PENDING')) = ?",
@@ -191,7 +194,12 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 });
             });
 
-        $total = (clone $base)->count();
+        $this->applyDocumentKindFilter($base, 'd.document_kind', 'd.document_kind_id', 'SALES_ORDER');
+
+        $total = null;
+        if ($includeMeta) {
+            $total = (clone $base)->count();
+        }
 
         $rows = $base
             ->select([
@@ -213,23 +221,24 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->forPage($page, $perPage)
             ->get();
 
-        // Enrich with item count per order
+        // Enrich with per-order aggregates (lightweight for initial screen load)
         $ids = $rows->pluck('id')->all();
-        $itemCounts = [];
+        $aggregateMap = [];
         $itemMap = [];
         if (!empty($ids)) {
             DB::table('sales.commercial_document_items')
                 ->whereIn('document_id', $ids)
-                ->selectRaw('document_id, COUNT(*) AS line_count, COALESCE(SUM(qty), 0) AS total_qty')
+                ->selectRaw('document_id, COUNT(*) as line_count, COALESCE(SUM(qty), 0) as total_qty')
                 ->groupBy('document_id')
                 ->get()
-                ->each(function ($row) use (&$itemCounts) {
-                    $itemCounts[(int) $row->document_id] = [
+                ->each(function ($row) use (&$aggregateMap) {
+                    $aggregateMap[(int) $row->document_id] = [
                         'line_count' => (int) $row->line_count,
-                        'total_qty'  => (float) $row->total_qty,
+                        'total_qty' => (float) $row->total_qty,
                     ];
                 });
 
+            if ($includeItems) {
             DB::table('sales.commercial_document_items')
                 ->whereIn('document_id', $ids)
                 ->orderBy('document_id')
@@ -249,25 +258,28 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 ->each(function ($row) use (&$itemMap) {
                     $documentId = (int) $row->document_id;
                     $itemMap[$documentId][] = [
-                        'line_no' => (int) $row->line_no,
+                        'line_no'    => (int) $row->line_no,
                         'product_id' => $row->product_id !== null ? (int) $row->product_id : null,
-                        'unit_id' => $row->unit_id !== null ? (int) $row->unit_id : null,
+                        'unit_id'    => $row->unit_id !== null ? (int) $row->unit_id : null,
                         'description' => (string) $row->description,
-                        'quantity' => (float) $row->qty,
+                        'quantity'   => (float) $row->qty,
                         'unit_price' => (float) $row->unit_price,
-                        'tax_total' => (float) $row->tax_total,
-                        'subtotal' => (float) $row->subtotal,
-                        'total' => (float) $row->total,
+                        'tax_total'  => (float) $row->tax_total,
+                        'subtotal'   => (float) $row->subtotal,
+                        'total'      => (float) $row->total,
                     ];
                 });
+            }
         }
 
-        $data = $rows->map(function ($row) use ($itemCounts, $itemMap) {
-            $arr = (array) $row;
-            $counts = $itemCounts[(int) $row->id] ?? ['line_count' => 0, 'total_qty' => 0.0];
-            $arr['line_count'] = $counts['line_count'];
-            $arr['total_qty']  = $counts['total_qty'];
-            $arr['items'] = $itemMap[(int) $row->id] ?? [];
+        $data = $rows->map(function ($row) use ($itemMap, $aggregateMap, $includeItems) {
+            $arr   = (array) $row;
+            $agg = $aggregateMap[(int) $row->id] ?? ['line_count' => 0, 'total_qty' => 0.0];
+            $arr['line_count'] = (int) $agg['line_count'];
+            $arr['total_qty']  = (float) $agg['total_qty'];
+            if ($includeItems) {
+                $arr['items'] = $itemMap[(int) $row->id] ?? [];
+            }
             return $arr;
         });
 
@@ -276,10 +288,78 @@ class RestaurantOrderService implements VerticalSalesPolicy
             'meta' => [
                 'page'      => $page,
                 'per_page'  => $perPage,
-                'total'     => $total,
-                'last_page' => (int) ceil(max(1, $total) / $perPage),
+                'total'     => $includeMeta ? (int) $total : count($data),
+                'last_page' => $includeMeta ? (int) ceil(max(1, (int) $total) / $perPage) : 1,
             ],
         ];
+    }
+
+    public function fetchOrderDetail(int $companyId, int $orderId): array
+    {
+        $query = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->where('d.company_id', $companyId)
+            ->where('d.id', $orderId)
+            ->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED'])
+            ->select([
+                'd.id',
+                'd.branch_id',
+                'd.series',
+                'd.number',
+                'd.issue_at',
+                'd.status',
+                'd.total',
+                'd.notes',
+                'd.customer_id',
+                DB::raw("COALESCE(c.legal_name, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,''))) AS customer_name"),
+                DB::raw("COALESCE(d.metadata->>'restaurant_order_status','PENDING') AS kitchen_status"),
+                DB::raw("COALESCE(d.metadata->>'table_label','') AS table_label"),
+                DB::raw("(d.metadata->>'restaurant_table_id') AS table_id"),
+            ]);
+
+        $this->applyDocumentKindFilter($query, 'd.document_kind', 'd.document_kind_id', 'SALES_ORDER');
+
+        $row = $query->first();
+
+        if (!$row) {
+            throw new \RuntimeException('Pedido no encontrado', 404);
+        }
+
+        $items = DB::table('sales.commercial_document_items')
+            ->where('document_id', $orderId)
+            ->orderBy('line_no')
+            ->get([
+                'line_no',
+                'product_id',
+                'unit_id',
+                'description',
+                'qty',
+                'unit_price',
+                'tax_total',
+                'subtotal',
+                'total',
+            ])
+            ->map(function ($item) {
+                return [
+                    'line_no' => (int) $item->line_no,
+                    'product_id' => $item->product_id !== null ? (int) $item->product_id : null,
+                    'unit_id' => $item->unit_id !== null ? (int) $item->unit_id : null,
+                    'description' => (string) $item->description,
+                    'quantity' => (float) $item->qty,
+                    'unit_price' => (float) $item->unit_price,
+                    'tax_total' => (float) $item->tax_total,
+                    'subtotal' => (float) $item->subtotal,
+                    'total' => (float) $item->total,
+                ];
+            })
+            ->all();
+
+        $arr = (array) $row;
+        $arr['items'] = $items;
+        $arr['line_count'] = count($items);
+        $arr['total_qty'] = array_sum(array_column($items, 'quantity'));
+
+        return $arr;
     }
 
     // =========================================================================
@@ -317,9 +397,9 @@ class RestaurantOrderService implements VerticalSalesPolicy
         ?int $paymentMethodId = null,
         ?string $notes = null
     ): array {
-        $allowed = ['INVOICE', 'RECEIPT'];
+        $allowed = ['INVOICE', 'RECEIPT', 'SALES_ORDER'];
         if (!in_array(strtoupper($targetDocumentKind), $allowed, true)) {
-            throw new \RuntimeException('Tipo de documento no válido para cobro. Use INVOICE o RECEIPT.', 422);
+            throw new \RuntimeException('Tipo de documento no válido para cobro. Use SALES_ORDER, INVOICE o RECEIPT.', 422);
         }
 
         $targetDocumentKind = strtoupper($targetDocumentKind);
@@ -334,7 +414,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
             throw new \RuntimeException('Pedido no encontrado', 404);
         }
 
-        if ((string) $source->document_kind !== 'SALES_ORDER') {
+        if (!$this->documentMatchesKind($source, 'SALES_ORDER')) {
             throw new \RuntimeException('Solo se puede cobrar un pedido de venta (SALES_ORDER)', 422);
         }
 
@@ -342,13 +422,84 @@ class RestaurantOrderService implements VerticalSalesPolicy
             throw new \RuntimeException('No se puede cobrar un pedido anulado o cancelado', 422);
         }
 
-        // Guard: check if already converted to avoid double billing
-        $already = DB::table('sales.commercial_documents')
+        $sourceBranchId = $source->branch_id !== null ? (int) $source->branch_id : null;
+        $sellerToCashierEnabled = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $sourceBranchId,
+            'SALES_SELLER_TO_CASHIER',
+            false
+        );
+
+        // Flag only sets the default in the UI; all three document kinds are always allowed.
+        // $sellerToCashierEnabled is retained for future logic (e.g. audit trails) but no longer restricts.
+        unset($sellerToCashierEnabled);
+
+        if ($targetDocumentKind === 'SALES_ORDER') {
+            $alreadyIssued = strtoupper((string) ($source->status ?? '')) === 'ISSUED';
+            if ($alreadyIssued) {
+                return [
+                    'id' => (int) $source->id,
+                    'document_kind' => 'SALES_ORDER',
+                    'series' => (string) $source->series,
+                    'number' => (int) $source->number,
+                    'total' => (float) $source->total,
+                    'status' => 'ISSUED',
+                    'pending_cashier_checkout' => true,
+                ];
+            }
+
+            $sourceMetadata = [];
+            if (isset($source->metadata) && $source->metadata !== null) {
+                $decoded = json_decode((string) $source->metadata, true);
+                if (is_array($decoded)) {
+                    $sourceMetadata = $decoded;
+                }
+            }
+
+            $requestMetadata = array_merge($sourceMetadata, [
+                'restaurant_checkout_request' => [
+                    'requested_by' => (int) ($authUser->id ?? 0),
+                    'requested_at' => now('America/Lima')->toIso8601String(),
+                    'mode' => 'SELLER_TO_CASHIER',
+                ],
+                'restaurant_order_status' => 'CHECKED_OUT',
+                'pending_cashier_checkout' => true,
+                'checkout_document_id' => (int) $source->id,
+                'checkout_document_kind' => 'SALES_ORDER',
+                'checkout_document_number' => (string) $source->series . '-' . (string) $source->number,
+                'checked_out_at' => now('America/Lima')->toIso8601String(),
+                'conversion_origin' => 'RESTAURANT_REQUEST',
+            ]);
+
+            DB::table('sales.commercial_documents')
+                ->where('id', $orderId)
+                ->where('company_id', $companyId)
+                ->update([
+                    'status' => 'ISSUED',
+                    'notes' => $notes ?? $source->notes,
+                    'metadata' => json_encode($requestMetadata, JSON_UNESCAPED_UNICODE),
+                    'updated_by' => (int) ($authUser->id ?? 0),
+                    'updated_at' => now(),
+                ]);
+
+            return [
+                'id' => (int) $source->id,
+                'document_kind' => 'SALES_ORDER',
+                'series' => (string) $source->series,
+                'number' => (int) $source->number,
+                'total' => (float) $source->total,
+                'status' => 'ISSUED',
+                'pending_cashier_checkout' => true,
+            ];
+        }
+
+        // Guard: if any non-void target exists for this source, avoid double billing.
+        $alreadyQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
-            ->where('document_kind', $targetDocumentKind)
             ->whereNotIn('status', ['VOID', 'CANCELED'])
-            ->whereRaw("COALESCE((metadata->>'source_document_id')::BIGINT, 0) = ?", [$orderId])
-            ->exists();
+            ->whereRaw("COALESCE((metadata->>'source_document_id')::BIGINT, 0) = ?", [$orderId]);
+
+        $already = $alreadyQuery->exists();
 
         if ($already) {
             throw new \RuntimeException('Este pedido ya fue cobrado', 409);
@@ -356,16 +507,18 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         // ── 2. Resolve series ────────────────────────────────────────────────
         if ($series === null || trim($series) === '') {
-            $candidateSeries = DB::table('sales.series_numbers')
+            $candidateSeriesQuery = DB::table('sales.series_numbers')
                 ->where('company_id', $companyId)
-                ->where('document_kind', $targetDocumentKind)
                 ->where('is_enabled', true)
                 ->when($source->branch_id !== null, fn ($q) => $q->where(function ($n) use ($source) {
                     $n->where('branch_id', (int) $source->branch_id)->orWhereNull('branch_id');
                 }))
                 ->orderByDesc('branch_id')
-                ->orderBy('series')
-                ->value('series');
+                ->orderBy('series');
+
+            $this->applyDocumentKindFilter($candidateSeriesQuery, 'document_kind', 'document_kind_id', $targetDocumentKind);
+
+            $candidateSeries = $candidateSeriesQuery->value('series');
 
             if (!$candidateSeries) {
                 throw new \RuntimeException('No existe serie habilitada para ' . $targetDocumentKind, 422);
@@ -419,6 +572,7 @@ class RestaurantOrderService implements VerticalSalesPolicy
 
         $checkoutPayload = [
             'document_kind'     => $targetDocumentKind,
+            'document_kind_id'  => $this->resolveDocumentKindId($targetDocumentKind),
             'series'            => $series,
             'issue_at'          => now('America/Lima')->toDateString(),
             'due_at'            => null,
@@ -432,7 +586,9 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 'source_document_kind'   => 'SALES_ORDER',
                 'source_document_number' => (string) $source->series . '-' . (string) $source->number,
                 'conversion_origin'      => 'RESTAURANT_CHECKOUT',
-                'stock_already_discounted' => false,
+                // Restaurant menu items should not trigger product-stock discount again at checkout.
+                // Real inventory consumption happens via recipe depletion on kitchen flow when enabled.
+                'stock_already_discounted' => true,
             ]),
             'items'    => $itemsPayload,
             'payments' => [],
@@ -464,6 +620,26 @@ class RestaurantOrderService implements VerticalSalesPolicy
             $cashRegisterId
         );
 
+        // Mark source order as final to prevent re-checkout from Comandas.
+        $finalSourceMetadata = array_merge($sourceMetadata, [
+            'restaurant_order_status' => 'CHECKED_OUT',
+            'pending_cashier_checkout' => false,
+            'checkout_document_id' => (int) ($document['id'] ?? 0),
+            'checkout_document_kind' => (string) ($document['document_kind'] ?? $targetDocumentKind),
+            'checkout_document_number' => (string) (($document['series'] ?? '') . '-' . ($document['number'] ?? '')),
+            'checked_out_at' => now('America/Lima')->toIso8601String(),
+        ]);
+
+        DB::table('sales.commercial_documents')
+            ->where('id', $orderId)
+            ->where('company_id', $companyId)
+            ->update([
+                'status' => 'ISSUED',
+                'metadata' => json_encode($finalSourceMetadata, JSON_UNESCAPED_UNICODE),
+                'updated_by' => (int) ($authUser->id ?? 0),
+                'updated_at' => now(),
+            ]);
+
         // ── 5. Release mesa ──────────────────────────────────────────────────
         $tableId = $sourceMetadata['restaurant_table_id'] ?? null;
         if ($tableId !== null && $this->tablesStorageExists()) {
@@ -488,4 +664,102 @@ class RestaurantOrderService implements VerticalSalesPolicy
             ->where('table_name', 'tables')
             ->exists();
     }
+
+    private function applyDocumentKindFilter($query, string $documentKindColumn, string $documentKindIdColumn, string $documentKindCode): void
+    {
+        $documentKindId = $this->resolveDocumentKindId($documentKindCode);
+        $aliases = $this->resolveDocumentKindAliases($documentKindCode);
+
+        $query->where(function ($nested) use ($documentKindColumn, $documentKindIdColumn, $documentKindId, $aliases) {
+            if ($documentKindId !== null) {
+                $nested->where($documentKindIdColumn, $documentKindId)
+                    ->orWhere(function ($legacy) use ($documentKindColumn, $documentKindIdColumn, $aliases) {
+                        $legacy->whereNull($documentKindIdColumn)
+                            ->whereIn(DB::raw('UPPER(TRIM(COALESCE(' . $documentKindColumn . ", '')))"), $aliases);
+                    });
+
+                return;
+            }
+
+            $nested->whereIn(DB::raw('UPPER(TRIM(COALESCE(' . $documentKindColumn . ", '')))"), $aliases);
+        });
+    }
+
+    private function documentMatchesKind(object $document, string $documentKindCode): bool
+    {
+        $documentKindId = $this->resolveDocumentKindId($documentKindCode);
+        if ($documentKindId !== null && isset($document->document_kind_id) && $document->document_kind_id !== null) {
+            return (int) $document->document_kind_id === $documentKindId;
+        }
+
+        return in_array(
+            strtoupper(trim((string) ($document->document_kind ?? ''))),
+            $this->resolveDocumentKindAliases($documentKindCode),
+            true
+        );
+    }
+
+    private function resolveDocumentKindId(string $documentKindCode): ?int
+    {
+        $normalizedCode = strtoupper(trim($documentKindCode));
+        if ($normalizedCode === '') {
+            return null;
+        }
+
+        $id = DB::table('sales.document_kinds')
+            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
+    private function resolveDocumentKindAliases(string $documentKindCode): array
+    {
+        $normalizedCode = strtoupper(trim($documentKindCode));
+        if ($normalizedCode === '') {
+            return [];
+        }
+
+        $aliases = [$normalizedCode];
+        $row = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+            ->first();
+
+        if ($row) {
+            $aliases[] = strtoupper(trim((string) ($row->code ?? '')));
+            $aliases[] = strtoupper(trim((string) ($row->label ?? '')));
+        }
+
+        return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
+    }
+
+    private function isCommerceFeatureEnabledForContextWithDefault(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
+    {
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->select('is_enabled')
+                ->first();
+
+            if ($branchRow && $branchRow->is_enabled !== null) {
+                return (bool) $branchRow->is_enabled;
+            }
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->select('is_enabled')
+            ->first();
+
+        if ($companyRow && $companyRow->is_enabled !== null) {
+            return (bool) $companyRow->is_enabled;
+        }
+
+        return $defaultEnabled;
+    }
+
 }

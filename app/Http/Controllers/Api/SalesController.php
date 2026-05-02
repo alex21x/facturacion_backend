@@ -1568,6 +1568,21 @@ class SalesController extends Controller
         $warehouseId = $payload['warehouse_id'] ?? null;
         $cashRegisterId = $payload['cash_register_id'] ?? null;
 
+        // Fallback: if no warehouse_id in payload, try user's preferred warehouse, then first active warehouse for company
+        if ($warehouseId === null) {
+            $warehouseId = $authUser->preferred_warehouse_id ?? null;
+        }
+        if ($warehouseId === null) {
+            $fallbackWarehouse = DB::table('inventory.warehouses')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->orderBy('id')
+                ->value('id');
+            if ($fallbackWarehouse !== null) {
+                $warehouseId = $fallbackWarehouse;
+            }
+        }
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json([
                 'message' => 'Invalid company scope',
@@ -1790,27 +1805,71 @@ class SalesController extends Controller
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
         $documentKind = $request->query('document_kind');
+        $documentKindId = (int) $request->query('document_kind_id', 0);
         $enabledOnly = filter_var($request->query('enabled_only', true), FILTER_VALIDATE_BOOLEAN);
 
-        $query = DB::table('sales.series_numbers')
-            ->where('company_id', $companyId)
+        $query = DB::table('sales.series_numbers as sn')
+            ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+            ->where('sn.company_id', $companyId)
+            ->select([
+                'sn.id',
+                'sn.company_id',
+                'sn.branch_id',
+                'sn.warehouse_id',
+                'sn.document_kind_id',
+                DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                'sn.series',
+                'sn.current_number',
+                'sn.number_padding',
+                'sn.reset_policy',
+                'sn.is_enabled',
+            ])
             ->orderBy('document_kind')
-            ->orderBy('series');
+            ->orderBy('sn.series');
 
         if ($branchId !== null && $branchId !== '') {
-            $query->where('branch_id', (int) $branchId);
+            $query->where('sn.branch_id', (int) $branchId);
         }
 
         if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('warehouse_id', (int) $warehouseId);
+            $query->where('sn.warehouse_id', (int) $warehouseId);
         }
 
-        if ($documentKind) {
-            $query->where('document_kind', $documentKind);
+        if ($documentKindId > 0) {
+            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
+            if (!is_array($catalogRow)) {
+                return response()->json([
+                    'message' => 'document_kind_id invalido',
+                ], 422);
+            }
+
+            $resolvedCode = strtoupper(trim((string) ($catalogRow['code'] ?? '')));
+            $query->where(function ($nested) use ($documentKindId, $resolvedCode) {
+                $nested->where('sn.document_kind_id', $documentKindId)
+                    ->orWhere(function ($legacy) use ($resolvedCode) {
+                        $legacy->whereNull('sn.document_kind_id')
+                            ->whereRaw('UPPER(sn.document_kind) = ?', [$resolvedCode]);
+                    });
+            });
+        } elseif ($documentKind) {
+            $catalogRow = $this->findDocumentKindCatalogRowByCode((string) $documentKind);
+            if (is_array($catalogRow)) {
+                $resolvedId = (int) ($catalogRow['id'] ?? 0);
+                $resolvedCode = strtoupper(trim((string) ($catalogRow['code'] ?? '')));
+                $query->where(function ($nested) use ($resolvedId, $resolvedCode) {
+                    $nested->where('sn.document_kind_id', $resolvedId)
+                        ->orWhere(function ($legacy) use ($resolvedCode) {
+                            $legacy->whereNull('sn.document_kind_id')
+                                ->whereRaw('UPPER(sn.document_kind) = ?', [$resolvedCode]);
+                        });
+                });
+            } else {
+                $query->whereRaw('UPPER(COALESCE(dk.code, sn.document_kind)) = ?', [strtoupper(trim((string) $documentKind))]);
+            }
         }
 
         if ($enabledOnly) {
-            $query->where('is_enabled', true);
+            $query->where('sn.is_enabled', true);
         }
 
         return response()->json([
@@ -1954,6 +2013,7 @@ class SalesController extends Controller
             'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
+            'source_origin' => $request->query('source_origin'),
             'document_kind' => $request->query('document_kind'),
             'document_kind_id' => $request->query('document_kind_id'),
             'status' => $request->query('status'),
@@ -1992,6 +2052,20 @@ class SalesController extends Controller
                 'd.branch_id',
                 'd.document_kind',
                 'd.document_kind_id',
+                                DB::raw("COALESCE((d.metadata->>'conversion_origin'), '') as conversion_origin"),
+                                DB::raw("CASE
+                                        WHEN UPPER(COALESCE((d.metadata->>'conversion_origin'), '')) LIKE 'RESTAURANT%'
+                                            OR NULLIF(TRIM(COALESCE((d.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
+                                            OR EXISTS (
+                                                    SELECT 1
+                                                    FROM sales.commercial_documents dsrc2
+                                                    WHERE dsrc2.company_id = d.company_id
+                                                        AND dsrc2.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                                                        AND NULLIF(TRIM(COALESCE((dsrc2.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
+                                            )
+                                        THEN true
+                                        ELSE false
+                                END as has_restaurant_origin"),
                 DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
                 DB::raw("COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) as document_kind_base"),
                 DB::raw("CASE WHEN COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE') THEN true ELSE false END as is_tributary_document"),
@@ -2114,6 +2188,7 @@ class SalesController extends Controller
             'branch_id' => $branchIdFilter,
             'warehouse_id' => $request->query('warehouse_id'),
             'cash_register_id' => $request->query('cash_register_id'),
+            'source_origin' => $request->query('source_origin'),
             'document_kind' => $request->query('document_kind'),
             'document_kind_id' => $request->query('document_kind_id'),
             'status' => $request->query('status'),
@@ -2360,6 +2435,7 @@ class SalesController extends Controller
         $branchId = $filters['branch_id'] ?? null;
         $warehouseId = $filters['warehouse_id'] ?? null;
         $cashRegisterId = $filters['cash_register_id'] ?? null;
+        $sourceOrigin = strtoupper(trim((string) ($filters['source_origin'] ?? '')));
         $documentKind = $filters['document_kind'] ?? null;
         $documentKindId = $filters['document_kind_id'] ?? null;
         $status = $filters['status'] ?? null;
@@ -2389,6 +2465,20 @@ class SalesController extends Controller
 
         if ($cashRegisterId !== null && $cashRegisterId !== '') {
             $query->whereRaw("COALESCE((d.metadata->>'cash_register_id')::BIGINT, 0) = ?", [(int) $cashRegisterId]);
+        }
+
+        if ($sourceOrigin === 'RESTAURANT') {
+            $query->where(function ($nested) {
+                $nested->whereRaw("UPPER(COALESCE((d.metadata->>'conversion_origin'), '')) LIKE 'RESTAURANT%'")
+                    ->orWhereRaw("NULLIF(TRIM(COALESCE((d.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL")
+                    ->orWhereExists(function ($sourceQuery) {
+                        $sourceQuery->select(DB::raw('1'))
+                            ->from('sales.commercial_documents as dsrc')
+                            ->whereColumn('dsrc.company_id', 'd.company_id')
+                            ->whereRaw("dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)")
+                            ->whereRaw("NULLIF(TRIM(COALESCE((dsrc.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL");
+                    });
+            });
         }
 
         if ($documentKind) {
@@ -2677,9 +2767,24 @@ class SalesController extends Controller
             : null;
 
         if ($series === null) {
+            $targetCatalog = $this->findDocumentKindCatalogRowByCode((string) $targetDocumentKind);
+            $targetDocumentKindId = is_array($targetCatalog) ? (int) ($targetCatalog['id'] ?? 0) : 0;
+            $targetDocumentKindCode = strtoupper(trim((string) ($targetCatalog['code'] ?? $targetDocumentKind)));
+
             $candidateSeries = DB::table('sales.series_numbers')
                 ->where('company_id', $companyId)
-                ->where('document_kind', $targetDocumentKind)
+                ->where(function ($query) use ($targetDocumentKindId, $targetDocumentKindCode) {
+                    if ($targetDocumentKindId > 0) {
+                        $query->where('document_kind_id', $targetDocumentKindId)
+                            ->orWhere(function ($legacy) use ($targetDocumentKindCode) {
+                                $legacy->whereNull('document_kind_id')
+                                    ->where('document_kind', $targetDocumentKindCode);
+                            });
+                        return;
+                    }
+
+                    $query->where('document_kind', $targetDocumentKindCode);
+                })
                 ->where('is_enabled', true)
                 ->when($source->branch_id !== null, function ($query) use ($source) {
                     $query->where(function ($nested) use ($source) {
@@ -4162,6 +4267,16 @@ class SalesController extends Controller
         return $this->documentKindCatalog()
             ->first(function ($row) use ($id) {
                 return (int) ($row['id'] ?? 0) === $id;
+            });
+    }
+
+    private function findDocumentKindCatalogRowByCode(string $code): ?array
+    {
+        $normalizedCode = strtoupper(trim($code));
+
+        return $this->documentKindCatalog()
+            ->first(function ($row) use ($normalizedCode) {
+                return strtoupper(trim((string) ($row['code'] ?? ''))) === $normalizedCode;
             });
     }
 

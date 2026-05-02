@@ -739,4 +739,5 @@ class CashController extends Controller
 
         return $normalized;
     }
+
 }

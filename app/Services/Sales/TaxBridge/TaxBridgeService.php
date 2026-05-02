@@ -1452,8 +1452,8 @@ class TaxBridgeService
         $cfg = array_merge(
             [
                 'bridge_mode' => 'PRODUCTION',
-                'production_url' => '',
-                'beta_url' => '',
+                'production_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNAT',
+                'beta_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA',
                 'timeout_seconds' => 15,
                 'auth_scheme' => 'none',
                 'token' => '',
@@ -1476,9 +1476,13 @@ class TaxBridgeService
             $mode = 'PRODUCTION';
         }
 
+        $productionUrl = trim((string) ($cfg['production_url'] ?? ''));
+        $betaUrl = trim((string) ($cfg['beta_url'] ?? ''));
+
+        // Fallback between BETA/PRODUCTION when one URL is missing to avoid false CONFIG_INCOMPLETE.
         $rawBaseUrl = $mode === 'BETA'
-            ? trim((string) ($cfg['beta_url'] ?? ''))
-            : trim((string) ($cfg['production_url'] ?? ''));
+            ? ($betaUrl !== '' ? $betaUrl : $productionUrl)
+            : ($productionUrl !== '' ? $productionUrl : $betaUrl);
 
         return [
             'enabled' => (bool) $enabled,

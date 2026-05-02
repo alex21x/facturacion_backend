@@ -25,7 +25,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('Las detracciones no están habilitadas para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La detracción solo aplica a Facturas (INVOICE).');
             }
 
@@ -80,7 +80,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('La retención no está habilitada para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La retención de IGV solo aplica a Facturas (INVOICE).');
             }
 
@@ -117,7 +117,7 @@ class SalesDocumentTaxMetadataService
                 throw new SalesDocumentException('La percepción no está habilitada para esta empresa/sucursal.');
             }
 
-            if ($documentKind !== 'INVOICE') {
+            if (!$this->isInvoiceDocumentKind($documentKind)) {
                 throw new SalesDocumentException('La percepción solo aplica a Facturas (INVOICE).');
             }
 
@@ -212,12 +212,10 @@ class SalesDocumentTaxMetadataService
 
     private function resolveSunatOperationTypes(int $companyId, ?int $branchId): array
     {
-        $defaultRows = [
-            ['code' => '0101', 'name' => 'Venta interna', 'regime' => 'NONE'],
-            ['code' => '1001', 'name' => 'Operacion sujeta a detraccion', 'regime' => 'DETRACCION'],
-            ['code' => '2001', 'name' => 'Operacion sujeta a retencion', 'regime' => 'RETENCION'],
-            ['code' => '3001', 'name' => 'Operacion sujeta a percepcion', 'regime' => 'PERCEPCION'],
-        ];
+        $catalogRows = $this->resolveSunatOperationTypesFromCatalog();
+        if (count($catalogRows) > 0) {
+            return $catalogRows;
+        }
 
         $detraccionConfig = $this->decodeFeatureConfig(optional($this->resolveFeatureToggleRow($companyId, $branchId, 'SALES_DETRACCION_ENABLED'))->config);
         $retencionConfig = $this->decodeFeatureConfig(optional($this->resolveFeatureToggleRow($companyId, $branchId, 'SALES_RETENCION_ENABLED'))->config);
@@ -256,7 +254,35 @@ class SalesDocumentTaxMetadataService
             ->values()
             ->all();
 
-        return count($rows) > 0 ? $rows : $defaultRows;
+        return $rows;
+    }
+
+    private function resolveSunatOperationTypesFromCatalog(): array
+    {
+        if (!$this->tableExists('master.sunat_operation_types')) {
+            return [];
+        }
+
+        return DB::table('master.sunat_operation_types')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('code')
+            ->get(['code', 'name', 'regime'])
+            ->map(function ($row) {
+                $regime = strtoupper(trim((string) ($row->regime ?? 'NONE')));
+                if (!in_array($regime, ['NONE', 'DETRACCION', 'RETENCION', 'PERCEPCION'], true)) {
+                    $regime = 'NONE';
+                }
+
+                return [
+                    'code' => strtoupper(trim((string) ($row->code ?? ''))),
+                    'name' => trim((string) ($row->name ?? '')),
+                    'regime' => $regime,
+                ];
+            })
+            ->filter(fn ($row) => is_array($row) && $row['code'] !== '' && $row['name'] !== '')
+            ->values()
+            ->all();
     }
 
     private function resolveFeatureAccountInfo(int $companyId, ?int $branchId, string $featureCode, string $fallbackKeyword): ?array
@@ -354,6 +380,24 @@ class SalesDocumentTaxMetadataService
         }
 
         return is_array($rawConfig) ? $rawConfig : [];
+    }
+
+    private function isInvoiceDocumentKind(string $documentKind): bool
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($this->tableExists('sales.document_kinds')) {
+            $row = DB::table('sales.document_kinds')
+                ->whereRaw('UPPER(TRIM(code)) = ?', [$normalized])
+                ->select('sunat_code')
+                ->first();
+
+            if ($row !== null) {
+                return (string) ($row->sunat_code ?? '') === '01';
+            }
+        }
+
+        return $normalized === 'INVOICE';
     }
 
     private function tableExists(string $qualifiedTable): bool

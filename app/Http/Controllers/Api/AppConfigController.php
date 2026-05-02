@@ -84,8 +84,8 @@ class AppConfigController extends Controller
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchId = $request->query('branch_id', $authUser->branch_id);
-        $warehouseId = $request->query('warehouse_id');
-        $cashRegisterId = $request->query('cash_register_id');
+        $warehouseId = $request->query('warehouse_id', $authUser->preferred_warehouse_id ?? null);
+        $cashRegisterId = $request->query('cash_register_id', $authUser->preferred_cash_register_id ?? null);
 
         if ($companyId !== (int) $authUser->company_id) {
             return response()->json([
@@ -106,6 +106,14 @@ class AppConfigController extends Controller
         $resolvedCashRegisterId = null;
         if ($cashRegisterId !== null && $cashRegisterId !== '') {
             $resolvedCashRegisterId = (int) $cashRegisterId;
+        }
+
+        $stationContext = $this->resolveAuthenticatedStationContext($request, $companyId);
+
+        if ($stationContext !== null) {
+            $resolvedBranchId = $stationContext['branch_id'];
+            $resolvedWarehouseId = $stationContext['warehouse_id'];
+            $resolvedCashRegisterId = $stationContext['cash_register_id'];
         }
 
         $company = DB::table('core.companies')
@@ -159,9 +167,18 @@ class AppConfigController extends Controller
             ->orderBy('name')
             ->get();
 
+        if ($resolvedWarehouseId !== null && !$warehouses->contains('id', $resolvedWarehouseId)) {
+            $resolvedWarehouseId = $warehouses->first()->id ?? null;
+        }
+
+        if ($resolvedCashRegisterId !== null && !$cashRegisters->contains('id', $resolvedCashRegisterId)) {
+            $resolvedCashRegisterId = $cashRegisters->first()->id ?? null;
+        }
+
         return response()->json([
             'company' => $company,
             'active_vertical' => $this->resolveActiveCompanyVertical($companyId),
+            'station' => $stationContext,
             'branches' => $branches,
             'warehouses' => $warehouses,
             'cash_registers' => $cashRegisters,
@@ -170,6 +187,11 @@ class AppConfigController extends Controller
                 'branch_id' => $resolvedBranchId,
                 'warehouse_id' => $resolvedWarehouseId,
                 'cash_register_id' => $resolvedCashRegisterId,
+            ],
+            'selection_locks' => [
+                'branch' => $stationContext !== null && $stationContext['branch_id'] !== null,
+                'warehouse' => $stationContext !== null && $stationContext['warehouse_id'] !== null,
+                'cash_register' => $stationContext !== null && $stationContext['cash_register_id'] !== null,
             ],
             'limits' => [
                 'platform' => $this->fetchPlatformLimits(),
@@ -2257,6 +2279,72 @@ class AppConfigController extends Controller
             'enabled_branches' => (int) DB::table('core.branches')->where('company_id', $companyId)->where('status', 1)->count(),
             'enabled_warehouses' => (int) DB::table('inventory.warehouses')->where('company_id', $companyId)->where('status', 1)->count(),
             'enabled_cash_registers' => (int) DB::table('sales.cash_registers')->where('company_id', $companyId)->where('status', 1)->count(),
+        ];
+    }
+
+    private function resolveAuthenticatedStationContext(Request $request, int $companyId): ?array
+    {
+        $sessionId = (int) ($request->attributes->get('auth_session_id') ?? 0);
+        if ($sessionId <= 0) {
+            return null;
+        }
+
+        if (!$this->tableExists('appcfg', 'pos_stations') || !$this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+            return null;
+        }
+
+        $sessionDeviceId = DB::table('auth.refresh_tokens')
+            ->where('id', $sessionId)
+            ->value('device_id');
+
+        $deviceId = trim((string) ($sessionDeviceId ?? ''));
+        if ($deviceId === '') {
+            return null;
+        }
+
+        $station = DB::table('appcfg.pos_stations as ps')
+            ->join('sales.cash_registers as cr', function ($join) use ($companyId) {
+                $join->on('cr.id', '=', 'ps.cash_register_id')
+                    ->where('cr.company_id', '=', $companyId)
+                    ->where('cr.status', '=', 1);
+            })
+            ->select([
+                'ps.id',
+                'ps.company_id',
+                'ps.cash_register_id',
+                'ps.code',
+                'ps.name',
+                'ps.device_id',
+                'ps.device_name',
+                'ps.status',
+                'cr.branch_id',
+                'cr.warehouse_id',
+                'cr.code as cash_register_code',
+                'cr.name as cash_register_name',
+            ])
+            ->where('ps.company_id', $companyId)
+            ->where('ps.status', 1)
+            ->whereRaw('LOWER(ps.device_id) = ?', [mb_strtolower($deviceId)])
+            ->orderBy('ps.id')
+            ->first();
+
+        if (!$station) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $station->id,
+            'company_id' => (int) $station->company_id,
+            'cash_register_id' => (int) $station->cash_register_id,
+            'branch_id' => $station->branch_id !== null ? (int) $station->branch_id : null,
+            'warehouse_id' => $station->warehouse_id !== null ? (int) $station->warehouse_id : null,
+            'code' => (string) $station->code,
+            'name' => (string) $station->name,
+            'device_id' => (string) $station->device_id,
+            'device_name' => $station->device_name !== null ? (string) $station->device_name : null,
+            'status' => (int) $station->status,
+            'cash_register_code' => (string) $station->cash_register_code,
+            'cash_register_name' => (string) $station->cash_register_name,
         ];
     }
 

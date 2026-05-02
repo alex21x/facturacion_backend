@@ -100,6 +100,13 @@ class SalesDocumentCreationService
                     $cashRegisterId = null;
                 }
 
+                $cashRegisterId = $this->resolveActorCashRegisterId(
+                    $authUser,
+                    $cashRegisterId,
+                    $roleProfile,
+                    $roleCode
+                );
+
                 $documentStatus = $payload['status'] ?? 'DRAFT';
                 $normalizedDocumentKind = $this->normalizeDocumentKind((string) $payload['document_kind']);
                 $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument((string) $payload['document_kind']);
@@ -110,7 +117,7 @@ class SalesDocumentCreationService
                     && strtoupper((string) $documentStatus) === 'ISSUED';
 
                 if ($requiresOpenCashSession) {
-                    $this->assertOpenCashSessionForIssuedSale(
+                    $cashRegisterId = $this->resolveCashRegisterIdForIssuedSale(
                         (int) $companyId,
                         $branchId !== null ? (int) $branchId : null,
                         $cashRegisterId !== null ? (int) $cashRegisterId : null
@@ -530,7 +537,7 @@ class SalesDocumentCreationService
         return $this->support->resolveAuthRoleContext($userId, $companyId);
     }
 
-    private function assertOpenCashSessionForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): void
+    private function resolveCashRegisterIdForIssuedSale(int $companyId, ?int $branchId, ?int $cashRegisterId): ?int
     {
         if (!$this->cashSessionsTableExists()) {
             throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
@@ -547,9 +554,15 @@ class SalesDocumentCreationService
             });
 
         // POS resilience: if no cash_register_id was provided but exactly one OPEN session exists,
-        // allow the sale to proceed under that opened cashier context.
+        // infer and persist that cash register so the movement lands in the active cash session.
         if ($cashRegisterId === null || $cashRegisterId <= 0) {
-            $openCount = (clone $openSessionsBase)->count();
+            $openSessions = (clone $openSessionsBase)
+                ->select('cash_register_id')
+                ->orderByDesc('opened_at')
+                ->limit(2)
+                ->get();
+
+            $openCount = $openSessions->count();
 
             if ($openCount === 0) {
                 throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
@@ -559,7 +572,12 @@ class SalesDocumentCreationService
                 throw new SalesDocumentException('Hay multiples cajas abiertas. Selecciona la caja activa para continuar.');
             }
 
-            return;
+            $resolvedCashRegisterId = (int) ($openSessions->first()->cash_register_id ?? 0);
+            if ($resolvedCashRegisterId <= 0) {
+                throw new SalesDocumentException('No se pudo resolver la caja activa para la venta.');
+            }
+
+            return $resolvedCashRegisterId;
         }
 
         $openSessionExists = (clone $openSessionsBase)
@@ -570,6 +588,8 @@ class SalesDocumentCreationService
         if (!$openSessionExists) {
             throw new SalesDocumentException('La caja debe aperturarse antes de realizar la venta.');
         }
+
+        return $cashRegisterId;
     }
 
     private function cashSessionsTableExists(): bool
@@ -578,6 +598,20 @@ class SalesDocumentCreationService
             ->where('table_schema', 'sales')
             ->where('table_name', 'cash_sessions')
             ->exists();
+    }
+
+    private function resolveActorCashRegisterId(object $authUser, $cashRegisterId, string $roleProfile, string $roleCode): ?int
+    {
+        $providedCashRegisterId = $cashRegisterId !== null ? (int) $cashRegisterId : null;
+        $preferredCashRegisterId = isset($authUser->preferred_cash_register_id)
+            ? (int) $authUser->preferred_cash_register_id
+            : 0;
+
+        if ($providedCashRegisterId !== null && $providedCashRegisterId > 0) {
+            return $providedCashRegisterId;
+        }
+
+        return $preferredCashRegisterId > 0 ? $preferredCashRegisterId : null;
     }
 
 }

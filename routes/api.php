@@ -22,11 +22,11 @@ Route::middleware('throttle:2000,1')->group(function () {
 Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
+    Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
 
     Route::middleware('rbac.module:APPCFG,view')->group(function () {
         Route::get('/appcfg/modules', 'Api\\AppConfigController@modules');
         Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
-        Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
         Route::get('/appcfg/home-metrics-summary', 'Api\\AppConfigController@homeMetricsSummary');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
@@ -43,9 +43,11 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/masters/dashboard', 'Api\\MasterDataController@dashboard');
         Route::get('/masters/options', 'Api\\MasterDataController@options');
         Route::get('/masters/access-control', 'Api\\MasterDataController@accessControl')->middleware('admin.only');
+        Route::get('/masters/functional-profiles', 'Api\\MasterDataController@functionalProfiles')->middleware('admin.only');
         Route::get('/masters/units', 'Api\\MasterDataController@units');
         Route::get('/masters/warehouses', 'Api\\MasterDataController@warehouses');
         Route::get('/masters/cash-registers', 'Api\\MasterDataController@cashRegisters');
+        Route::get('/masters/pos-stations', 'Api\MasterDataController@posStations');
         Route::get('/masters/payment-methods', 'Api\\MasterDataController@paymentMethods');
         Route::get('/masters/series', 'Api\\MasterDataController@series');
         Route::get('/masters/price-tiers', 'Api\\MasterDataController@priceTiers');
@@ -81,6 +83,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::post('/masters/cash-registers', 'Api\\MasterDataController@createCashRegister');
         Route::put('/masters/cash-registers/{id}', 'Api\\MasterDataController@updateCashRegister');
 
+        Route::post('/masters/pos-stations', 'Api\MasterDataController@createPosStation');
+        Route::put('/masters/pos-stations/{id}', 'Api\MasterDataController@updatePosStation');
+
         Route::post('/masters/payment-methods', 'Api\\MasterDataController@createPaymentMethod');
         Route::put('/masters/payment-methods/{id}', 'Api\\MasterDataController@updatePaymentMethod');
 
@@ -98,6 +103,8 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::put('/masters/units', 'Api\\MasterDataController@updateUnits');
         Route::post('/masters/roles', 'Api\\MasterDataController@createRole')->middleware('admin.only');
         Route::put('/masters/roles/{id}', 'Api\\MasterDataController@updateRole')->middleware('admin.only');
+        Route::post('/masters/functional-profiles', 'Api\\MasterDataController@createFunctionalProfile')->middleware('admin.only');
+        Route::put('/masters/functional-profiles/{code}', 'Api\\MasterDataController@updateFunctionalProfile')->middleware('admin.only');
         Route::post('/masters/users', 'Api\\MasterDataController@createUser')->middleware('admin.only');
         Route::put('/masters/users/{id}', 'Api\\MasterDataController@updateUser')->middleware('admin.only');
     });

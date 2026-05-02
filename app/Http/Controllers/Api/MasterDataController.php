@@ -12,7 +12,11 @@ use Illuminate\Support\Facades\Validator;
 
 class MasterDataController extends Controller
 {
-    private const ROLE_FUNCTIONAL_PROFILES = ['SELLER', 'CASHIER', 'GENERAL'];
+    private const ROLE_FUNCTIONAL_PROFILES = [
+        ['code' => 'GENERAL', 'label' => 'General', 'sort_order' => 10],
+        ['code' => 'SELLER', 'label' => 'Vendedor', 'sort_order' => 20],
+        ['code' => 'CASHIER', 'label' => 'Cajero', 'sort_order' => 30],
+    ];
 
     public function __construct(private GetMasterDataOptionsUseCase $getMasterDataOptionsUseCase)
     {
@@ -48,6 +52,28 @@ class MasterDataController extends Controller
             ->where('company_id', $companyId)
             ->orderBy('name')
             ->get();
+
+        $stations = $this->tableExists('appcfg', 'pos_stations')
+            ? DB::table('appcfg.pos_stations as ps')
+                ->join('sales.cash_registers as cr', 'cr.id', '=', 'ps.cash_register_id')
+                ->select([
+                    'ps.id',
+                    'ps.company_id',
+                    'ps.cash_register_id',
+                    'ps.code',
+                    'ps.name',
+                    'ps.device_id',
+                    'ps.device_name',
+                    'ps.status',
+                    'cr.branch_id',
+                    'cr.warehouse_id',
+                    'cr.code as cash_register_code',
+                    'cr.name as cash_register_name',
+                ])
+                ->where('ps.company_id', $companyId)
+                ->orderBy('ps.name')
+                ->get()
+            : collect();
 
         $paymentMethods = DB::table('master.payment_types')
             ->select([
@@ -164,6 +190,7 @@ class MasterDataController extends Controller
             'options' => $options,
             'warehouses' => $warehouses,
             'cash_registers' => $cashRegisters,
+            'pos_stations' => $stations,
             'payment_methods' => $paymentMethods,
             'series' => $series,
             'price_tiers' => $priceTiers,
@@ -174,6 +201,7 @@ class MasterDataController extends Controller
             'stats' => [
                 'warehouses_total' => $warehouses->count(),
                 'cash_registers_total' => $cashRegisters->count(),
+                'pos_stations_total' => $stations->count(),
                 'payment_methods_total' => $paymentMethods->count(),
                 'series_total' => $series->count(),
                 'price_tiers_total' => $priceTiers->count(),
@@ -187,6 +215,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
         $this->ensureCompanyRoleProfilesTable();
+        $functionalProfiles = $this->functionalProfilesCollection($companyId);
 
         $roleProfiles = DB::table('appcfg.company_role_profiles')
             ->where('company_id', $companyId)
@@ -259,12 +288,14 @@ class MasterDataController extends Controller
                 'u.email',
                 'u.phone',
                 'u.status',
+                'u.preferred_warehouse_id',
+                'u.preferred_cash_register_id',
                 DB::raw('MIN(r.id) as role_id'),
                 DB::raw('MIN(r.code) as role_code'),
             ])
             ->where('u.company_id', $companyId)
             ->whereNull('u.deleted_at')
-            ->groupBy('u.id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.phone', 'u.status')
+            ->groupBy('u.id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.phone', 'u.status', 'u.preferred_warehouse_id', 'u.preferred_cash_register_id')
             ->orderBy('u.username')
             ->get()
             ->map(function ($row) {
@@ -277,6 +308,8 @@ class MasterDataController extends Controller
                     'email' => $row->email,
                     'phone' => $row->phone,
                     'status' => (int) $row->status,
+                    'preferred_warehouse_id' => $row->preferred_warehouse_id !== null ? (int) $row->preferred_warehouse_id : null,
+                    'preferred_cash_register_id' => $row->preferred_cash_register_id !== null ? (int) $row->preferred_cash_register_id : null,
                     'role_id' => $row->role_id !== null ? (int) $row->role_id : null,
                     'role_code' => $row->role_code,
                 ];
@@ -287,7 +320,109 @@ class MasterDataController extends Controller
             'modules' => $modules,
             'roles' => $roles,
             'users' => $users,
+            'functional_profiles' => $functionalProfiles,
         ]);
+    }
+
+    public function functionalProfiles(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+        return response()->json([
+            'functional_profiles' => $this->functionalProfilesCollection($companyId),
+        ]);
+    }
+
+    public function createFunctionalProfile(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+        $this->ensureCompanyFunctionalProfilesTable();
+
+        $validator = Validator::make($request->all(), [
+            'code' => 'required|string|max:40',
+            'label' => 'required|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $code = strtoupper(trim((string) $payload['code']));
+        if ($code === '') {
+            return response()->json(['message' => 'Functional profile code is required'], 422);
+        }
+
+        $exists = DB::table('appcfg.company_functional_profiles')
+            ->where('company_id', $companyId)
+            ->where('code', $code)
+            ->exists();
+
+        if ($exists) {
+            return response()->json(['message' => 'Functional profile already exists'], 422);
+        }
+
+        DB::table('appcfg.company_functional_profiles')->insert([
+            'company_id' => $companyId,
+            'code' => $code,
+            'label' => trim((string) $payload['label']),
+            'status' => (int) ($payload['status'] ?? 1),
+            'sort_order' => (int) ($payload['sort_order'] ?? 100),
+            'updated_by' => $authUser->id ?? null,
+            'updated_at' => now(),
+            'created_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Functional profile created'], 201);
+    }
+
+    public function updateFunctionalProfile(Request $request, string $code)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->resolveCompanyId($request);
+        $this->ensureCompanyFunctionalProfilesTable();
+
+        $validator = Validator::make($request->all(), [
+            'label' => 'nullable|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $normalizedCode = strtoupper(trim((string) $code));
+        if ($normalizedCode === '') {
+            return response()->json(['message' => 'Functional profile not found'], 404);
+        }
+
+        $exists = DB::table('appcfg.company_functional_profiles')
+            ->where('company_id', $companyId)
+            ->where('code', $normalizedCode)
+            ->exists();
+
+        if (!$exists) {
+            return response()->json(['message' => 'Functional profile not found'], 404);
+        }
+
+        $payload = $validator->validated();
+        $updates = ['updated_at' => now(), 'updated_by' => $authUser->id ?? null];
+
+        foreach (['label', 'status', 'sort_order'] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $updates[$field] = $payload[$field];
+            }
+        }
+
+        DB::table('appcfg.company_functional_profiles')
+            ->where('company_id', $companyId)
+            ->where('code', $normalizedCode)
+            ->update($updates);
+
+        return response()->json(['message' => 'Functional profile updated']);
     }
 
     public function createRole(Request $request)
@@ -299,7 +434,7 @@ class MasterDataController extends Controller
             'code' => 'required|string|max:40',
             'name' => 'required|string|max:120',
             'status' => 'nullable|integer|in:0,1',
-            'functional_profile' => 'nullable|string|in:SELLER,CASHIER,GENERAL',
+            'functional_profile' => 'nullable|string|max:40',
             'permissions' => 'required|array|min:1',
             'permissions.*.module_code' => 'required|string|max:40',
             'permissions.*.can_view' => 'required|boolean',
@@ -316,6 +451,12 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
         $code = strtoupper(trim($payload['code']));
+        $functionalProfileCodes = $this->functionalProfileCodes($companyId);
+        $normalizedFunctionalProfile = $this->normalizeFunctionalProfile($payload['functional_profile'] ?? null, $functionalProfileCodes);
+
+        if (array_key_exists('functional_profile', $payload) && $payload['functional_profile'] !== null && $normalizedFunctionalProfile === null) {
+            return response()->json(['message' => 'Invalid functional profile'], 422);
+        }
 
         $roleId = DB::table('auth.roles')->insertGetId([
             'company_id' => $companyId,
@@ -325,7 +466,7 @@ class MasterDataController extends Controller
         ]);
 
         $this->syncRolePermissions((int) $roleId, $payload['permissions']);
-        $this->syncRoleFunctionalProfile($companyId, (int) $roleId, $payload['functional_profile'] ?? null, $authUser->id ?? null);
+        $this->syncRoleFunctionalProfile($companyId, (int) $roleId, $normalizedFunctionalProfile, $authUser->id ?? null);
 
         return response()->json(['message' => 'Role created', 'id' => (int) $roleId], 201);
     }
@@ -338,7 +479,7 @@ class MasterDataController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'nullable|string|max:120',
             'status' => 'nullable|integer|in:0,1',
-            'functional_profile' => 'nullable|string|in:SELLER,CASHIER,GENERAL',
+            'functional_profile' => 'nullable|string|max:40',
             'permissions' => 'nullable|array|min:1',
             'permissions.*.module_code' => 'required|string|max:40',
             'permissions.*.can_view' => 'required|boolean',
@@ -381,7 +522,14 @@ class MasterDataController extends Controller
         }
 
         if (array_key_exists('functional_profile', $payload)) {
-            $this->syncRoleFunctionalProfile($companyId, $id, $payload['functional_profile'], $authUser->id ?? null);
+            $functionalProfileCodes = $this->functionalProfileCodes($companyId);
+            $normalizedFunctionalProfile = $this->normalizeFunctionalProfile($payload['functional_profile'], $functionalProfileCodes);
+
+            if ($payload['functional_profile'] !== null && $normalizedFunctionalProfile === null) {
+                return response()->json(['message' => 'Invalid functional profile'], 422);
+            }
+
+            $this->syncRoleFunctionalProfile($companyId, $id, $normalizedFunctionalProfile, $authUser->id ?? null);
         }
 
         return response()->json(['message' => 'Role updated']);
@@ -394,6 +542,8 @@ class MasterDataController extends Controller
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
+            'preferred_warehouse_id' => 'nullable|integer|min:1',
+            'preferred_cash_register_id' => 'nullable|integer|min:1',
             'username' => 'required|string|max:80',
             'password' => 'required|string|min:6|max:120',
             'first_name' => 'required|string|max:80',
@@ -430,9 +580,41 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Invalid role scope'], 422);
         }
 
+        $branchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null ? (int) $payload['branch_id'] : null;
+        $preferredWarehouseId = array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null
+            ? (int) $payload['preferred_warehouse_id']
+            : null;
+        $preferredCashRegisterId = array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null
+            ? (int) $payload['preferred_cash_register_id']
+            : null;
+
+        $operationalScopeError = $this->validateOperationalContextSelection(
+            $companyId,
+            $branchId,
+            $preferredWarehouseId,
+            $preferredCashRegisterId
+        );
+
+        if ($operationalScopeError) {
+            return $operationalScopeError;
+        }
+
+        $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $branchId);
+
+        // If warehouse/caja are sent as null (not selected in form), fall back to the company default.
+        // array_key_exists check alone is insufficient because the frontend always sends the key, even when null.
+        $resolvedNewWarehouseId = (array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null)
+            ? (int) $payload['preferred_warehouse_id']
+            : $defaultOperationalContext['warehouse_id'];
+        $resolvedNewCashRegisterId = (array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null)
+            ? (int) $payload['preferred_cash_register_id']
+            : $defaultOperationalContext['cash_register_id'];
+
         $userId = DB::table('auth.users')->insertGetId([
             'company_id' => $companyId,
             'branch_id' => $payload['branch_id'] ?? null,
+            'preferred_warehouse_id' => $resolvedNewWarehouseId,
+            'preferred_cash_register_id' => $resolvedNewCashRegisterId,
             'username' => trim($payload['username']),
             'password_hash' => Hash::make($payload['password']),
             'first_name' => trim($payload['first_name']),
@@ -458,6 +640,8 @@ class MasterDataController extends Controller
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
+            'preferred_warehouse_id' => 'nullable|integer|min:1',
+            'preferred_cash_register_id' => 'nullable|integer|min:1',
             'password' => 'nullable|string|min:6|max:120',
             'first_name' => 'nullable|string|max:80',
             'last_name' => 'nullable|string|max:80',
@@ -493,12 +677,62 @@ class MasterDataController extends Controller
             }
         }
 
+        $branchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null ? (int) $payload['branch_id'] : null;
+        $preferredWarehouseId = array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null
+            ? (int) $payload['preferred_warehouse_id']
+            : null;
+        $preferredCashRegisterId = array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null
+            ? (int) $payload['preferred_cash_register_id']
+            : null;
+
+        $operationalScopeError = $this->validateOperationalContextSelection(
+            $companyId,
+            $branchId,
+            array_key_exists('preferred_warehouse_id', $payload) ? $preferredWarehouseId : null,
+            array_key_exists('preferred_cash_register_id', $payload) ? $preferredCashRegisterId : null
+        );
+
+        if ($operationalScopeError) {
+            return $operationalScopeError;
+        }
+
         $updates = ['updated_at' => now()];
 
         foreach (['branch_id', 'first_name', 'last_name', 'email', 'phone', 'status'] as $field) {
             if (array_key_exists($field, $payload)) {
                 $updates[$field] = $payload[$field];
             }
+        }
+
+        // For warehouse/caja: if sent as null (not selected), resolve the company default
+        // instead of blindly storing null. The frontend always sends the key even when blank.
+        $effectiveBranchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null
+            ? (int) $payload['branch_id']
+            : null;
+
+        if (array_key_exists('preferred_warehouse_id', $payload) || array_key_exists('preferred_cash_register_id', $payload)) {
+            $needsDefault = (array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] === null)
+                || (array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] === null);
+
+            if ($needsDefault) {
+                $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
+            }
+
+            if (array_key_exists('preferred_warehouse_id', $payload)) {
+                $updates['preferred_warehouse_id'] = $payload['preferred_warehouse_id'] !== null
+                    ? (int) $payload['preferred_warehouse_id']
+                    : ($defaultOperationalContext['warehouse_id'] ?? null);
+            }
+            if (array_key_exists('preferred_cash_register_id', $payload)) {
+                $updates['preferred_cash_register_id'] = $payload['preferred_cash_register_id'] !== null
+                    ? (int) $payload['preferred_cash_register_id']
+                    : ($defaultOperationalContext['cash_register_id'] ?? null);
+            }
+        } elseif (array_key_exists('branch_id', $payload)) {
+            // Branch changed without explicit warehouse/caja → reassign defaults for the new branch
+            $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
+            $updates['preferred_warehouse_id'] = $defaultOperationalContext['warehouse_id'];
+            $updates['preferred_cash_register_id'] = $defaultOperationalContext['cash_register_id'];
         }
 
         if (!empty($payload['password'])) {
@@ -527,6 +761,95 @@ class MasterDataController extends Controller
         }
 
         return response()->json(['message' => 'User updated']);
+    }
+
+    private function validateOperationalContextSelection(
+        int $companyId,
+        ?int $branchId,
+        ?int $preferredWarehouseId,
+        ?int $preferredCashRegisterId
+    ) {
+        if ($preferredWarehouseId !== null) {
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('company_id', $companyId)
+                ->where('id', $preferredWarehouseId)
+                ->when($branchId !== null, function ($query) use ($branchId) {
+                    $query->where(function ($nested) use ($branchId) {
+                        $nested->where('branch_id', $branchId)
+                            ->orWhereNull('branch_id');
+                    });
+                })
+                ->exists();
+
+            if (!$warehouseExists) {
+                return response()->json(['message' => 'Invalid warehouse scope'], 422);
+            }
+        }
+
+        if ($preferredCashRegisterId !== null) {
+            $cashRegisterExists = DB::table('sales.cash_registers')
+                ->where('company_id', $companyId)
+                ->where('id', $preferredCashRegisterId)
+                ->when($branchId !== null, function ($query) use ($branchId) {
+                    $query->where(function ($nested) use ($branchId) {
+                        $nested->where('branch_id', $branchId)
+                            ->orWhereNull('branch_id');
+                    });
+                })
+                ->when($preferredWarehouseId !== null, function ($query) use ($preferredWarehouseId) {
+                    $query->where(function ($nested) use ($preferredWarehouseId) {
+                        $nested->where('warehouse_id', $preferredWarehouseId)
+                            ->orWhereNull('warehouse_id');
+                    });
+                })
+                ->exists();
+
+            if (!$cashRegisterExists) {
+                return response()->json(['message' => 'Invalid cash register scope'], 422);
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveDefaultOperationalContext(int $companyId, ?int $branchId): array
+    {
+        $warehouseId = DB::table('inventory.warehouses')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where(function ($nested) use ($branchId) {
+                    $nested->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                });
+            })
+            ->orderByRaw($branchId !== null ? 'CASE WHEN branch_id = ? THEN 0 ELSE 1 END' : 'CASE WHEN branch_id IS NULL THEN 0 ELSE 1 END', $branchId !== null ? [$branchId] : [])
+            ->orderBy('name')
+            ->value('id');
+
+        $cashRegisterId = DB::table('sales.cash_registers')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->when($branchId !== null, function ($query) use ($branchId) {
+                $query->where(function ($nested) use ($branchId) {
+                    $nested->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                });
+            })
+            ->when($warehouseId !== null, function ($query) use ($warehouseId) {
+                $query->where(function ($nested) use ($warehouseId) {
+                    $nested->where('warehouse_id', (int) $warehouseId)
+                        ->orWhereNull('warehouse_id');
+                });
+            })
+            ->orderByRaw($warehouseId !== null ? 'CASE WHEN warehouse_id = ? THEN 0 ELSE 1 END' : 'CASE WHEN warehouse_id IS NULL THEN 0 ELSE 1 END', $warehouseId !== null ? [(int) $warehouseId] : [])
+            ->orderBy('name')
+            ->value('id');
+
+        return [
+            'warehouse_id' => $warehouseId !== null ? (int) $warehouseId : null,
+            'cash_register_id' => $cashRegisterId !== null ? (int) $cashRegisterId : null,
+        ];
     }
 
     public function units(Request $request)
@@ -674,6 +997,37 @@ class MasterDataController extends Controller
             ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
             ->where('company_id', $companyId)
             ->orderBy('name')
+            ->get();
+
+        return response()->json(['data' => $rows]);
+    }
+
+    public function posStations(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        if (!$this->tableExists('appcfg', 'pos_stations')) {
+            return response()->json(['data' => []]);
+        }
+
+        $rows = DB::table('appcfg.pos_stations as ps')
+            ->join('sales.cash_registers as cr', 'cr.id', '=', 'ps.cash_register_id')
+            ->select([
+                'ps.id',
+                'ps.company_id',
+                'ps.cash_register_id',
+                'ps.code',
+                'ps.name',
+                'ps.device_id',
+                'ps.device_name',
+                'ps.status',
+                'cr.branch_id',
+                'cr.warehouse_id',
+                'cr.code as cash_register_code',
+                'cr.name as cash_register_name',
+            ])
+            ->where('ps.company_id', $companyId)
+            ->orderBy('ps.name')
             ->get();
 
         return response()->json(['data' => $rows]);
@@ -830,6 +1184,172 @@ class MasterDataController extends Controller
         }
 
         return response()->json(['message' => 'Cash register updated']);
+    }
+
+    public function createPosStation(Request $request)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        if (!$this->tableExists('appcfg', 'pos_stations')) {
+            return response()->json(['message' => 'POS stations table not available'], 503);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'cash_register_id' => 'required|integer|min:1',
+            'code' => 'required|string|max:30',
+            'name' => 'required|string|max:120',
+            'device_id' => 'required|string|max:120',
+            'device_name' => 'nullable|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $cashRegisterId = (int) $payload['cash_register_id'];
+        $normalizedCode = strtoupper(trim($payload['code']));
+        $normalizedDeviceId = trim((string) $payload['device_id']);
+
+        $cashRegisterExists = DB::table('sales.cash_registers')
+            ->where('id', $cashRegisterId)
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->exists();
+
+        if (!$cashRegisterExists) {
+            return response()->json(['message' => 'Invalid cash register scope'], 422);
+        }
+
+        $codeExists = DB::table('appcfg.pos_stations')
+            ->where('company_id', $companyId)
+            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+            ->exists();
+
+        if ($codeExists) {
+            return response()->json(['message' => 'Station code already exists for this company'], 422);
+        }
+
+        $deviceExists = DB::table('appcfg.pos_stations')
+            ->where('company_id', $companyId)
+            ->whereRaw('LOWER(device_id) = ?', [strtolower($normalizedDeviceId)])
+            ->exists();
+
+        if ($deviceExists) {
+            return response()->json(['message' => 'Device already assigned to another station'], 422);
+        }
+
+        $id = DB::table('appcfg.pos_stations')->insertGetId([
+            'company_id' => $companyId,
+            'cash_register_id' => $cashRegisterId,
+            'code' => $normalizedCode,
+            'name' => trim($payload['name']),
+            'device_id' => $normalizedDeviceId,
+            'device_name' => !empty($payload['device_name']) ? trim($payload['device_name']) : null,
+            'status' => (int) ($payload['status'] ?? 1),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'POS station created', 'id' => (int) $id], 201);
+    }
+
+    public function updatePosStation(Request $request, int $id)
+    {
+        $companyId = $this->resolveCompanyId($request);
+
+        if (!$this->tableExists('appcfg', 'pos_stations')) {
+            return response()->json(['message' => 'POS stations table not available'], 503);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'cash_register_id' => 'nullable|integer|min:1',
+            'code' => 'nullable|string|max:30',
+            'name' => 'nullable|string|max:120',
+            'device_id' => 'nullable|string|max:120',
+            'device_name' => 'nullable|string|max:120',
+            'status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $exists = DB::table('appcfg.pos_stations')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$exists) {
+            return response()->json(['message' => 'POS station not found'], 404);
+        }
+
+        $payload = $validator->validated();
+        $updates = [];
+
+        if (array_key_exists('cash_register_id', $payload) && $payload['cash_register_id'] !== null) {
+            $cashRegisterExists = DB::table('sales.cash_registers')
+                ->where('id', (int) $payload['cash_register_id'])
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
+
+            if (!$cashRegisterExists) {
+                return response()->json(['message' => 'Invalid cash register scope'], 422);
+            }
+
+            $updates['cash_register_id'] = (int) $payload['cash_register_id'];
+        }
+
+        if (!empty($payload['code'])) {
+            $normalizedCode = strtoupper(trim($payload['code']));
+            $codeExists = DB::table('appcfg.pos_stations')
+                ->where('company_id', $companyId)
+                ->where('id', '<>', $id)
+                ->whereRaw('UPPER(code) = ?', [$normalizedCode])
+                ->exists();
+
+            if ($codeExists) {
+                return response()->json(['message' => 'Station code already exists for this company'], 422);
+            }
+
+            $updates['code'] = $normalizedCode;
+        }
+
+        if (!empty($payload['name'])) {
+            $updates['name'] = trim($payload['name']);
+        }
+
+        if (!empty($payload['device_id'])) {
+            $normalizedDeviceId = trim((string) $payload['device_id']);
+            $deviceExists = DB::table('appcfg.pos_stations')
+                ->where('company_id', $companyId)
+                ->where('id', '<>', $id)
+                ->whereRaw('LOWER(device_id) = ?', [strtolower($normalizedDeviceId)])
+                ->exists();
+
+            if ($deviceExists) {
+                return response()->json(['message' => 'Device already assigned to another station'], 422);
+            }
+
+            $updates['device_id'] = $normalizedDeviceId;
+        }
+
+        if (array_key_exists('device_name', $payload)) {
+            $updates['device_name'] = !empty($payload['device_name']) ? trim($payload['device_name']) : null;
+        }
+
+        if (array_key_exists('status', $payload)) {
+            $updates['status'] = (int) $payload['status'];
+        }
+
+        if (!empty($updates)) {
+            $updates['updated_at'] = now();
+            DB::table('appcfg.pos_stations')->where('id', $id)->update($updates);
+        }
+
+        return response()->json(['message' => 'POS station updated']);
     }
 
     public function paymentMethods()
@@ -1852,6 +2372,76 @@ class MasterDataController extends Controller
         );
     }
 
+    private function ensureCompanyFunctionalProfilesTable(): void
+    {
+        DB::statement(
+            'CREATE TABLE IF NOT EXISTS appcfg.company_functional_profiles (
+                company_id BIGINT NOT NULL,
+                code VARCHAR(40) NOT NULL,
+                label VARCHAR(120) NOT NULL,
+                status SMALLINT NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                updated_by BIGINT NULL,
+                updated_at TIMESTAMP NULL,
+                created_at TIMESTAMP NULL,
+                PRIMARY KEY (company_id, code)
+            )'
+        );
+    }
+
+    private function functionalProfilesCollection(int $companyId)
+    {
+        $this->ensureCompanyFunctionalProfilesTable();
+
+        $hasProfiles = DB::table('appcfg.company_functional_profiles')
+            ->where('company_id', $companyId)
+            ->exists();
+
+        if (!$hasProfiles) {
+            $seedRows = collect(self::ROLE_FUNCTIONAL_PROFILES)->map(function ($item) use ($companyId) {
+                return [
+                    'company_id' => $companyId,
+                    'code' => (string) $item['code'],
+                    'label' => (string) $item['label'],
+                    'status' => 1,
+                    'sort_order' => (int) $item['sort_order'],
+                    'updated_by' => null,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ];
+            })->all();
+
+            DB::table('appcfg.company_functional_profiles')->insert($seedRows);
+        }
+
+        return DB::table('appcfg.company_functional_profiles')
+            ->select('code', 'label', 'status', 'sort_order')
+            ->where('company_id', $companyId)
+            ->orderBy('sort_order')
+            ->orderBy('label')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'code' => (string) $row->code,
+                    'label' => (string) $row->label,
+                    'status' => (int) $row->status,
+                    'sort_order' => (int) ($row->sort_order ?? 100),
+                ];
+            })
+            ->values();
+    }
+
+    private function functionalProfileCodes(int $companyId): array
+    {
+        return $this->functionalProfilesCollection($companyId)
+            ->where('status', 1)
+            ->pluck('code')
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->filter(fn ($code) => $code !== '')
+            ->values()
+            ->all();
+    }
+
     private function syncRoleFunctionalProfile(int $companyId, int $roleId, ?string $functionalProfile, $updatedBy): void
     {
         $this->ensureCompanyRoleProfilesTable();
@@ -1871,7 +2461,7 @@ class MasterDataController extends Controller
         );
     }
 
-    private function normalizeFunctionalProfile($value): ?string
+    private function normalizeFunctionalProfile($value, ?array $allowedCodes = null): ?string
     {
         if ($value === null) {
             return null;
@@ -1882,7 +2472,7 @@ class MasterDataController extends Controller
             return null;
         }
 
-        if (!in_array($normalized, self::ROLE_FUNCTIONAL_PROFILES, true)) {
+        if ($allowedCodes !== null && !in_array($normalized, $allowedCodes, true)) {
             return null;
         }
 
@@ -1930,6 +2520,14 @@ class MasterDataController extends Controller
         }
 
         return $companyId;
+    }
+
+    private function tableExists(string $schema, string $table): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->exists();
     }
 
     private function documentKindFeatureCodes(): array

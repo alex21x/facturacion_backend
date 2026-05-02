@@ -1568,6 +1568,21 @@ class SalesController extends Controller
         $warehouseId = $payload['warehouse_id'] ?? null;
         $cashRegisterId = $payload['cash_register_id'] ?? null;
 
+        // Fallback: if no warehouse_id in payload, try user's preferred warehouse, then first active warehouse for company
+        if ($warehouseId === null) {
+            $warehouseId = $authUser->preferred_warehouse_id ?? null;
+        }
+        if ($warehouseId === null) {
+            $fallbackWarehouse = DB::table('inventory.warehouses')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->orderBy('id')
+                ->value('id');
+            if ($fallbackWarehouse !== null) {
+                $warehouseId = $fallbackWarehouse;
+            }
+        }
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json([
                 'message' => 'Invalid company scope',

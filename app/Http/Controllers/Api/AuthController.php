@@ -88,12 +88,13 @@ class AuthController extends Controller
                 'revoked_at' => now(),
             ]);
 
-        $sessionId = DB::table('auth.refresh_tokens')->insertGetId([
-            'user_id' => $user->id,
-            'token_hash' => $refreshTokenHash,
-            'expires_at' => $refreshExpiresAt,
-            'created_at' => now(),
-        ]);
+        $sessionId = DB::table('auth.refresh_tokens')->insertGetId($this->buildRefreshTokenInsertPayload(
+            (int) $user->id,
+            $refreshTokenHash,
+            $refreshExpiresAt,
+            $deviceId,
+            $request->input('device_name')
+        ));
 
         $accessToken = ApiToken::makeAccessToken([
             'uid' => (int) $user->id,
@@ -205,7 +206,7 @@ class AuthController extends Controller
 
         $newSessionId = null;
 
-        DB::transaction(function () use ($session, $newRefreshHash, $refreshExpiresAt, &$newSessionId) {
+        DB::transaction(function () use ($session, $newRefreshHash, $refreshExpiresAt, $deviceId, &$newSessionId) {
             DB::table('auth.refresh_tokens')
                 ->where('id', $session->session_id)
                 ->whereNull('revoked_at')
@@ -213,12 +214,13 @@ class AuthController extends Controller
                     'revoked_at' => now(),
                 ]);
 
-            $newSessionId = DB::table('auth.refresh_tokens')->insertGetId([
-                'user_id' => $session->user_id,
-                'token_hash' => $newRefreshHash,
-                'expires_at' => $refreshExpiresAt,
-                'created_at' => now(),
-            ]);
+            $newSessionId = DB::table('auth.refresh_tokens')->insertGetId($this->buildRefreshTokenInsertPayload(
+                (int) $session->user_id,
+                $newRefreshHash,
+                $refreshExpiresAt,
+                $deviceId,
+                null
+            ));
         });
 
         $accessToken = ApiToken::makeAccessToken([
@@ -382,6 +384,35 @@ class AuthController extends Controller
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function columnExists(string $schema, string $table, string $column): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->where('column_name', $column)
+            ->exists();
+    }
+
+    private function buildRefreshTokenInsertPayload(int $userId, string $tokenHash, $expiresAt, string $deviceId, ?string $deviceName): array
+    {
+        $payload = [
+            'user_id' => $userId,
+            'token_hash' => $tokenHash,
+            'expires_at' => $expiresAt,
+            'created_at' => now(),
+        ];
+
+        if ($this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+            $payload['device_id'] = $deviceId;
+        }
+
+        if ($this->columnExists('auth', 'refresh_tokens', 'device_name')) {
+            $payload['device_name'] = $deviceName !== null ? trim((string) $deviceName) : null;
+        }
+
+        return $payload;
     }
 
     private function isAdminPortalDevice(string $deviceId): bool

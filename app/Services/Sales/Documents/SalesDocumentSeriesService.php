@@ -28,6 +28,20 @@ class SalesDocumentSeriesService
             $documentKindId
         );
 
+        // Fallback: if the user has no warehouse assigned (warehouseId = null) and no series
+        // was found with warehouse_id IS NULL, try to find the series without warehouse restriction.
+        // This allows users without a warehouse assignment to use series configured for any warehouse
+        // within their branch.
+        if (!$seriesRow && $warehouseId === null) {
+            $seriesRow = $this->documentRepository->getSeriesNumberAnyWarehouse(
+                $companyId,
+                $documentKind,
+                $series,
+                $branchId,
+                $documentKindId
+            );
+        }
+
         if (!$seriesRow) {
             throw new SalesDocumentException(
                 'No hay serie activa para ' . $documentKind . ' en la sucursal/almacen seleccionado. Configurala en Maestros > Series.'

@@ -2000,12 +2000,8 @@ class SalesController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
-        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
-        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
-        $isSellerUser = !str_contains($roleCode, 'ADMIN')
-            && ($roleProfile === 'SELLER'
-                || str_contains($roleCode, 'VENDED')
-                || str_contains($roleCode, 'SELLER'));
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+        $isAdminUser = str_contains($roleCode, 'ADMIN');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -2026,7 +2022,7 @@ class SalesController extends Controller
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
-            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            'seller_user_id' => $isAdminUser ? null : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $page = (int) $request->query('page', 1);
@@ -2046,10 +2042,12 @@ class SalesController extends Controller
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
             ->select([
                 'd.id',
                 'd.company_id',
                 'd.branch_id',
+                'd.created_by',
                 'd.document_kind',
                 'd.document_kind_id',
                                 DB::raw("COALESCE((d.metadata->>'conversion_origin'), '') as conversion_origin"),
@@ -2139,6 +2137,7 @@ class SalesController extends Controller
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
 
@@ -2175,12 +2174,8 @@ class SalesController extends Controller
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $format = strtolower(trim((string) $request->query('format', 'csv')));
-        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
-        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
-        $isSellerUser = !str_contains($roleCode, 'ADMIN')
-            && ($roleProfile === 'SELLER'
-                || str_contains($roleCode, 'VENDED')
-                || str_contains($roleCode, 'SELLER'));
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+        $isAdminUser = str_contains($roleCode, 'ADMIN');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -2201,7 +2196,7 @@ class SalesController extends Controller
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
-            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            'seller_user_id' => $isAdminUser ? null : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $detailMode = strtoupper(trim((string) $request->query('detail', 'SUMMARY')));
@@ -2217,8 +2212,10 @@ class SalesController extends Controller
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
             ->select([
                 'd.id',
+                'd.created_by',
                 'd.document_kind',
                 'd.document_kind_id',
                 DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
@@ -2256,6 +2253,7 @@ class SalesController extends Controller
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
 
@@ -2270,6 +2268,7 @@ class SalesController extends Controller
                 ->leftJoin('core.units as u', 'u.id', '=', 'di.unit_id')
                 ->select([
                     'd.id',
+                    'd.created_by',
                     'd.document_kind',
                     DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
                     'd.series',
@@ -2282,6 +2281,7 @@ class SalesController extends Controller
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                    DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
                     'di.product_id',
                     DB::raw("COALESCE(di.description, p.name, 'SIN DESCRIPCION') as product_description"),
                     DB::raw("COALESCE(u.code, '-') as unit_code"),
@@ -2319,6 +2319,7 @@ class SalesController extends Controller
                     'Documento',
                     'Serie',
                     'Numero',
+                    'Usuario',
                     'Fecha Emision',
                     'Cliente',
                     'Vehiculo',
@@ -2337,6 +2338,7 @@ class SalesController extends Controller
                         (string) ($row->document_kind_label ?? $row->document_kind),
                         (string) $row->series,
                         (string) $row->number,
+                        (string) ($row->created_by_user_name ?? ''),
                         $row->issue_at ? (string) $row->issue_at : '',
                         (string) ($row->customer_name ?? ''),
                         trim(implode(' | ', array_values(array_filter([
@@ -2394,6 +2396,7 @@ class SalesController extends Controller
                 'Serie',
                 'Numero',
                 'Documento Afectado',
+                'Usuario',
                 'Fecha Emision',
                 'Cliente',
                 'Forma de Pago',
@@ -2413,6 +2416,7 @@ class SalesController extends Controller
                     trim((string) (($row->source_document_kind ?? '') !== ''
                         ? (($row->source_document_kind ?? '') . ' ' . ($row->source_document_number ?? ''))
                         : ($row->source_document_number ?? ''))),
+                    (string) ($row->created_by_user_name ?? ''),
                     $row->issue_at ? (string) $row->issue_at : '',
                     (string) ($row->customer_name ?? ''),
                     (string) ($row->payment_method_name ?? 'Sin metodo de pago'),

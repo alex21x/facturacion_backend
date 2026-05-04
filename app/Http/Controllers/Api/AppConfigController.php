@@ -2324,8 +2324,8 @@ class AppConfigController extends Controller
             ])
             ->where('ps.company_id', $companyId)
             ->where('ps.status', 1)
-            ->whereRaw('LOWER(ps.device_id) = ?', [mb_strtolower($deviceId)])
-            ->orderBy('ps.id')
+            ->whereRaw('LOWER(TRIM(ps.device_id)) = ?', [mb_strtolower(trim($deviceId))])
+            ->orderByDesc('ps.id')
             ->first();
 
         if (!$station) {

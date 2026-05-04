@@ -309,6 +309,7 @@ class CashController extends Controller
                 DB::raw('COALESCE(cm.description, cm.notes) as description'),
                 'cm.ref_type',
                 'cm.ref_id',
+                DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
                 DB::raw('COALESCE(cm.user_id, cm.created_by) as user_id'),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
                 'cm.movement_at',
@@ -381,9 +382,14 @@ class CashController extends Controller
                 DB::raw('COALESCE(cm.description, cm.notes) as description'),
                 'cm.ref_type',
                 'cm.ref_id',
+                DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
                 'cm.movement_at',
             ])
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+            })
             ->where('cm.cash_session_id', $id)
             ->where('cm.company_id', $companyId)
             ->orderBy('cm.movement_at')
@@ -397,6 +403,7 @@ class CashController extends Controller
                 'description'   => $m->description,
                 'ref_type'      => $m->ref_type,
                 'ref_id'        => $m->ref_id,
+                'document_number' => $m->document_number,
                 'user_name'     => $m->user_name,
                 'movement_at'   => $m->movement_at,
             ];
@@ -432,7 +439,8 @@ class CashController extends Controller
             ])
             ->where('cd.company_id', $companyId)
             ->where('cd.status', '!=', 'CANCELED')
-            ->orderBy('cd.created_at')
+            ->orderByDesc('cm.movement_at')
+            ->orderByDesc('cd.created_at')
             ->get();
 
         // Para cada documento, obtener sus líneas (items tienen description propia, unidades en core.units)

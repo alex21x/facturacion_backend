@@ -1198,9 +1198,11 @@ class MasterDataController extends Controller
             'cash_register_id' => 'required|integer|min:1',
             'code' => 'required|string|max:30',
             'name' => 'required|string|max:120',
-            'device_id' => 'required|string|max:120',
+            'device_id' => ['required', 'string', 'max:120', 'regex:/^CAJA-\d{3}$/i'],
             'device_name' => 'nullable|string|max:120',
             'status' => 'nullable|integer|in:0,1',
+        ], [
+            'device_id.regex' => 'Device ID debe tener el formato CAJA-001.',
         ]);
 
         if ($validator->fails()) {
@@ -1210,7 +1212,11 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
         $cashRegisterId = (int) $payload['cash_register_id'];
         $normalizedCode = strtoupper(trim($payload['code']));
-        $normalizedDeviceId = trim((string) $payload['device_id']);
+        $normalizedDeviceId = strtoupper(trim((string) $payload['device_id']));
+
+        if ($normalizedDeviceId === '') {
+            return response()->json(['message' => 'Device ID is required'], 422);
+        }
 
         $cashRegisterExists = DB::table('sales.cash_registers')
             ->where('id', $cashRegisterId)
@@ -1231,13 +1237,21 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Station code already exists for this company'], 422);
         }
 
-        $deviceExists = DB::table('appcfg.pos_stations')
+        $deviceConflict = DB::table('appcfg.pos_stations')
+            ->select(['id', 'company_id', 'code'])
             ->where('company_id', $companyId)
-            ->whereRaw('LOWER(device_id) = ?', [strtolower($normalizedDeviceId)])
-            ->exists();
+            ->whereRaw('LOWER(TRIM(device_id)) = ?', [strtolower($normalizedDeviceId)])
+            ->first();
 
-        if ($deviceExists) {
-            return response()->json(['message' => 'Device already assigned to another station'], 422);
+        if ($deviceConflict) {
+            return response()->json([
+                'message' => 'Device already assigned to another station',
+                'conflict' => [
+                    'station_id' => (int) $deviceConflict->id,
+                    'station_code' => (string) $deviceConflict->code,
+                    'company_id' => (int) $deviceConflict->company_id,
+                ],
+            ], 422);
         }
 
         $id = DB::table('appcfg.pos_stations')->insertGetId([
@@ -1267,9 +1281,11 @@ class MasterDataController extends Controller
             'cash_register_id' => 'nullable|integer|min:1',
             'code' => 'nullable|string|max:30',
             'name' => 'nullable|string|max:120',
-            'device_id' => 'nullable|string|max:120',
+            'device_id' => ['nullable', 'string', 'max:120', 'regex:/^CAJA-\d{3}$/i'],
             'device_name' => 'nullable|string|max:120',
             'status' => 'nullable|integer|in:0,1',
+        ], [
+            'device_id.regex' => 'Device ID debe tener el formato CAJA-001.',
         ]);
 
         if ($validator->fails()) {
@@ -1322,15 +1338,27 @@ class MasterDataController extends Controller
         }
 
         if (!empty($payload['device_id'])) {
-            $normalizedDeviceId = trim((string) $payload['device_id']);
-            $deviceExists = DB::table('appcfg.pos_stations')
+            $normalizedDeviceId = strtoupper(trim((string) $payload['device_id']));
+            if ($normalizedDeviceId === '') {
+                return response()->json(['message' => 'Device ID is required'], 422);
+            }
+
+            $deviceConflict = DB::table('appcfg.pos_stations')
+                ->select(['id', 'company_id', 'code'])
                 ->where('company_id', $companyId)
                 ->where('id', '<>', $id)
-                ->whereRaw('LOWER(device_id) = ?', [strtolower($normalizedDeviceId)])
-                ->exists();
+                ->whereRaw('LOWER(TRIM(device_id)) = ?', [strtolower($normalizedDeviceId)])
+                ->first();
 
-            if ($deviceExists) {
-                return response()->json(['message' => 'Device already assigned to another station'], 422);
+            if ($deviceConflict) {
+                return response()->json([
+                    'message' => 'Device already assigned to another station',
+                    'conflict' => [
+                        'station_id' => (int) $deviceConflict->id,
+                        'station_code' => (string) $deviceConflict->code,
+                        'company_id' => (int) $deviceConflict->company_id,
+                    ],
+                ], 422);
             }
 
             $updates['device_id'] = $normalizedDeviceId;

@@ -66,6 +66,22 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ->first();
     }
 
+    public function getSeriesNumberAnyWarehouse(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $documentKindId = null): ?object
+    {
+        $query = SeriesNumber::query()
+            ->forCompany($companyId)
+            ->forDocumentSeries($documentKind, $series, $documentKindId)
+            ->enabled();
+
+        if ($branchId !== null) {
+            $query->where('branch_id', $branchId);
+        } else {
+            $query->whereNull('branch_id');
+        }
+
+        return $query->lockForUpdate()->first();
+    }
+
     public function deleteItemsAndPayments(int $documentId): void
     {
         $itemIds = DB::table('sales.commercial_document_items')

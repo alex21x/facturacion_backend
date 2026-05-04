@@ -26,13 +26,21 @@ class AuthenticateApiToken
             ], 401);
         }
 
-        $session = DB::table('auth.refresh_tokens')
-            ->select('id', 'user_id', 'expires_at', 'revoked_at')
+        $sessionQuery = DB::table('auth.refresh_tokens')
             ->where('id', (int) $claims['sid'])
             ->where('user_id', (int) $claims['uid'])
             ->whereNull('revoked_at')
-            ->where('expires_at', '>', now())
-            ->first();
+            ->where('expires_at', '>', now());
+
+        $sessionColumns = ['id', 'user_id', 'expires_at', 'revoked_at'];
+        if ($this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+            $sessionColumns[] = 'device_id';
+        }
+        if ($this->columnExists('auth', 'refresh_tokens', 'device_name')) {
+            $sessionColumns[] = 'device_name';
+        }
+
+        $session = $sessionQuery->select($sessionColumns)->first();
 
         if (!$session) {
             return response()->json([
@@ -42,7 +50,18 @@ class AuthenticateApiToken
 
         $user = DB::table('auth.users as u')
             ->join('core.companies as c', 'c.id', '=', 'u.company_id')
-            ->select('u.id', 'u.company_id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.status')
+            ->select(
+                'u.id',
+                'u.company_id',
+                'u.branch_id',
+                'u.preferred_warehouse_id',
+                'u.preferred_cash_register_id',
+                'u.username',
+                'u.first_name',
+                'u.last_name',
+                'u.email',
+                'u.status'
+            )
             ->where('u.id', (int) $claims['uid'])
             ->where('u.status', 1)
             ->where('c.status', 1)
@@ -75,6 +94,8 @@ class AuthenticateApiToken
         $request->attributes->set('auth_user', $user);
         $request->attributes->set('auth_session_id', (int) $session->id);
         $request->attributes->set('auth_claims', $claims);
+        $request->attributes->set('auth_device_id', property_exists($session, 'device_id') ? $session->device_id : null);
+        $request->attributes->set('auth_device_name', property_exists($session, 'device_name') ? $session->device_name : null);
 
         return $next($request);
     }
@@ -91,5 +112,14 @@ class AuthenticateApiToken
                 PRIMARY KEY (company_id, role_id)
             )'
         );
+    }
+
+    private function columnExists(string $schema, string $table, string $column): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->where('column_name', $column)
+            ->exists();
     }
 }

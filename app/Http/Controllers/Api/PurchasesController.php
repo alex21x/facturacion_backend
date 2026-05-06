@@ -162,6 +162,7 @@ class PurchasesController
         foreach ($sourceItems as $item) {
             $productId = (int) $item->product_id;
             $requestedQty = (float) ($requestedByProduct[$productId] ?? 0.0);
+            $sourceItemMetadata = $this->decodeMetadata($item->metadata ?? null);
 
             if ($requestedQty <= 0.00000001) {
                 continue;
@@ -179,6 +180,7 @@ class PurchasesController
                 'tax_category_id' => $item->tax_category_id !== null ? (int) $item->tax_category_id : null,
                 'tax_rate' => $item->tax_rate !== null ? (float) $item->tax_rate : 0,
                 'notes' => $item->notes,
+                'metadata' => !empty($sourceItemMetadata) ? $sourceItemMetadata : null,
             ];
 
             $requestedByProduct[$productId] = max($requestedQty - $lineQty, 0.0);
@@ -388,6 +390,7 @@ class PurchasesController
 
         $hasItemTaxCategoryColumn = in_array('tax_category_id', $stockEntryItemColumns, true);
         $hasItemTaxRateColumn = in_array('tax_rate', $stockEntryItemColumns, true);
+        $hasItemMetadataColumn = in_array('metadata', $stockEntryItemColumns, true);
         $hasLedgerTaxRateColumn = in_array('tax_rate', $inventoryLedgerColumns, true);
         $hasPaymentMethodColumn = in_array('payment_method_id', $stockEntryColumns, true);
         $hasMetadataColumn = in_array('metadata', $stockEntryColumns, true);
@@ -407,6 +410,7 @@ class PurchasesController
                 $products,
                 $hasItemTaxCategoryColumn,
                 $hasItemTaxRateColumn,
+                $hasItemMetadataColumn,
                 $hasLedgerTaxRateColumn,
                 $hasPaymentMethodColumn,
                 $hasMetadataColumn
@@ -502,6 +506,11 @@ class PurchasesController
 
                     if ($hasItemTaxRateColumn) {
                         $entryItemInsert['tax_rate'] = $taxRate;
+                    }
+
+                    if ($hasItemMetadataColumn) {
+                        $itemMetadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : null;
+                        $entryItemInsert['metadata'] = $itemMetadata ? json_encode($itemMetadata) : null;
                     }
 
                     DB::table('inventory.stock_entry_items')->insert($entryItemInsert);

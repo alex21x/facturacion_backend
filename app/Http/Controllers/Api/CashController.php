@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Validator;
 
 class CashController extends Controller
 {
+    private const DOCUMENT_MOVEMENT_REF_TYPES = ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'];
+    private const EXCLUDED_DOCUMENT_STATUSES = ['CANCELED', 'VOID', 'VOIDED'];
+
     // ─────────────────────────────────────────────────────────
     // Sesiones
     // ─────────────────────────────────────────────────────────
@@ -206,16 +209,40 @@ class CashController extends Controller
 
         $payload = $validator->validated();
 
-        // Recalcular saldo esperado desde los movimientos de la sesion
-        $totalIn  = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $id)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
-            ->sum('amount');
+        $this->ensureSessionCommercialDocumentMovements((int) $companyId, (int) $session->id);
 
-        $totalOut = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $id)
-            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
-            ->sum('amount');
+        // Recalcular saldo esperado desde los movimientos de la sesion
+        $totalIn  = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $id)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['IN', 'INCOME'])
+            ->sum('cm.amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $id)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['OUT', 'EXPENSE'])
+            ->sum('cm.amount');
 
         $expectedBalance = round((float) $session->opening_balance + $totalIn - $totalOut, 4);
 
@@ -233,8 +260,8 @@ class CashController extends Controller
             ])
             ->where('cm.cash_session_id', $id)
             ->where('cm.company_id', $companyId)
-            ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
-            ->where('cd.status', '!=', 'CANCELED')
+            ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES)
                 ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
                 ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"))
             ->get();
@@ -297,7 +324,7 @@ class CashController extends Controller
             ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cm.user_id, cm.created_by)'))
                 ->leftJoin('sales.commercial_documents as cd', function ($join) {
                     $join->on('cd.id', '=', 'cm.ref_id')
-                         ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
                 })
                 ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->select([
@@ -309,24 +336,110 @@ class CashController extends Controller
                 DB::raw('COALESCE(cm.description, cm.notes) as description'),
                 'cm.ref_type',
                 'cm.ref_id',
+                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = cd.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(cd.document_kind) LIMIT 1), cd.document_kind) as document_kind_label"),
                 DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
+                                DB::raw("NULLIF(COALESCE((cd.metadata->>'source_document_id'), ''), '') as source_document_id"),
+                                DB::raw("(
+                                        SELECT CONCAT(dsrc.series, '-', dsrc.number)
+                                        FROM sales.commercial_documents dsrc
+                                        WHERE dsrc.company_id = cd.company_id
+                                            AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                                        LIMIT 1
+                                ) as source_document_number"),
+                                DB::raw("(
+                                        SELECT COALESCE(
+                                                (SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = dsrc.document_kind_id LIMIT 1),
+                                                (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(dsrc.document_kind) LIMIT 1),
+                                                dsrc.document_kind
+                                        )
+                                        FROM sales.commercial_documents dsrc
+                                        WHERE dsrc.company_id = cd.company_id
+                                            AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                                        LIMIT 1
+                                ) as source_document_kind_label"),
                 DB::raw('COALESCE(cm.user_id, cm.created_by) as user_id'),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
+                DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
+                DB::raw("COALESCE(
+                    NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
+                    (
+                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                        FROM sales.commercial_documents dsrc
+                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                        WHERE dsrc.company_id = cd.company_id
+                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_name"),
                 'cm.movement_at',
-                    DB::raw("pm.name as payment_method_name"),
+                DB::raw("pm.name as payment_method_name"),
             ])
             ->where('cm.company_id', $companyId)
+            ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
             ->orderByDesc('cm.movement_at')
             ->limit($limit);
 
         if ($sessionId !== null && $sessionId !== '') {
+            $this->ensureSessionCommercialDocumentMovements($companyId, (int) $sessionId);
             $query->where('cm.cash_session_id', (int) $sessionId);
         }
         if ($cashRegId !== null && $cashRegId !== '') {
             $query->where('cm.cash_register_id', (int) $cashRegId);
         }
 
-        return response()->json(['data' => $query->get()]);
+        $rows = $query->get()->map(function ($m) {
+            $issuer = trim((string) ($m->issuer_user_name ?? ''));
+            $seller = trim((string) ($m->origin_seller_user_name ?? ''));
+            $fallbackUser = trim((string) ($m->user_name ?? ''));
+
+            $actorLabel = $fallbackUser;
+            if ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer)) {
+                $actorLabel = 'Solicita: ' . $seller . ' | Emite: ' . $issuer;
+            } elseif ($issuer !== '') {
+                $actorLabel = $issuer;
+            } elseif ($seller !== '') {
+                $actorLabel = $seller;
+            }
+
+            $referenceLabel = null;
+            if ($m->document_number) {
+                $kindLabel = trim((string) ($m->document_kind_label ?? 'Comprobante'));
+                $referenceLabel = $kindLabel . ' ' . $m->document_number;
+
+                $sourceNumber = trim((string) ($m->source_document_number ?? ''));
+                $sourceKindLabel = trim((string) ($m->source_document_kind_label ?? ''));
+                if ($sourceNumber !== '' && $sourceKindLabel !== '') {
+                    $referenceLabel = $sourceKindLabel . ' ' . $sourceNumber . ' -> ' . $referenceLabel;
+                }
+            }
+
+            return [
+                'id' => (int) $m->id,
+                'cash_register_id' => (int) $m->cash_register_id,
+                'cash_session_id' => $m->cash_session_id !== null ? (int) $m->cash_session_id : null,
+                'movement_type' => (string) $m->movement_type,
+                'amount' => $m->amount,
+                'description' => $m->description,
+                'ref_type' => $m->ref_type,
+                'ref_id' => $m->ref_id,
+                'document_number' => $m->document_number,
+                'document_kind_label' => $m->document_kind_label,
+                'reference_label' => $referenceLabel,
+                'user_id' => $m->user_id,
+                'user_name' => $actorLabel,
+                'movement_at' => $m->movement_at,
+                'payment_method_name' => $m->payment_method_name,
+            ];
+        })->values();
+
+        return response()->json(['data' => $rows]);
     }
 
     public function sessionDetail(Request $request, $id)
@@ -361,16 +474,40 @@ class CashController extends Controller
             return response()->json(['message' => 'Sesion no encontrada'], 404);
         }
 
-        // Calcular totales IN/OUT
-        $totalIn  = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $id)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
-            ->sum('amount');
+        $this->ensureSessionCommercialDocumentMovements($companyId, (int) $id);
 
-        $totalOut = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $id)
-            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
-            ->sum('amount');
+        // Calcular totales IN/OUT
+        $totalIn  = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $id)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['IN', 'INCOME'])
+            ->sum('cm.amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $id)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['OUT', 'EXPENSE'])
+            ->sum('cm.amount');
 
         // Obtener movimientos de la sesión
         $rawMovements = DB::table('sales.cash_movements as cm')
@@ -384,18 +521,51 @@ class CashController extends Controller
                 'cm.ref_id',
                 DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
+                DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
+                DB::raw("COALESCE(
+                    NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
+                    (
+                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                        FROM sales.commercial_documents dsrc
+                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                        WHERE dsrc.company_id = cd.company_id
+                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_name"),
                 'cm.movement_at',
             ])
             ->leftJoin('sales.commercial_documents as cd', function ($join) {
                 $join->on('cd.id', '=', 'cm.ref_id')
-                    ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
             })
+            ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
             ->where('cm.cash_session_id', $id)
             ->where('cm.company_id', $companyId)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
             ->orderBy('cm.movement_at')
             ->get();
 
         $movements = array_map(function ($m) {
+            $issuer = trim((string) ($m->issuer_user_name ?? ''));
+            $seller = trim((string) ($m->origin_seller_user_name ?? ''));
+            $fallbackUser = trim((string) ($m->user_name ?? ''));
+
+            $actorLabel = $fallbackUser;
+            if ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer)) {
+                $actorLabel = 'Solicita: ' . $seller . ' | Emite: ' . $issuer;
+            } elseif ($issuer !== '') {
+                $actorLabel = $issuer;
+            } elseif ($seller !== '') {
+                $actorLabel = $seller;
+            }
+
             return [
                 'id'            => (int) $m->id,
                 'movement_type' => $m->movement_type,
@@ -404,7 +574,7 @@ class CashController extends Controller
                 'ref_type'      => $m->ref_type,
                 'ref_id'        => $m->ref_id,
                 'document_number' => $m->document_number,
-                'user_name'     => $m->user_name,
+                'user_name'     => $actorLabel,
                 'movement_at'   => $m->movement_at,
             ];
         }, $rawMovements->toArray());
@@ -414,7 +584,7 @@ class CashController extends Controller
             ->join('sales.cash_movements as cm', function ($join) use ($id) {
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->where('cm.cash_session_id', $id)
-                    ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT']);
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
             })
             ->leftJoin('sales.customers as cust', 'cust.id', '=', 'cd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
@@ -436,9 +606,34 @@ class CashController extends Controller
                 'cd.status',
                 'cd.created_at',
                 DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as user_name"),
+                DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
+                DB::raw("COALESCE(
+                    NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
+                    (
+                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                        FROM sales.commercial_documents dsrc
+                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                        WHERE dsrc.company_id = cd.company_id
+                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_name"),
+                DB::raw("COALESCE(
+                    CASE
+                        WHEN COALESCE((cd.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (cd.metadata->>'origin_seller_user_id')::BIGINT
+                        ELSE NULL
+                    END,
+                    (
+                        SELECT dsrc.created_by
+                        FROM sales.commercial_documents dsrc
+                        WHERE dsrc.company_id = cd.company_id
+                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_id"),
             ])
             ->where('cd.company_id', $companyId)
-            ->where('cd.status', '!=', 'CANCELED')
+            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES)
             ->orderByDesc('cm.movement_at')
             ->orderByDesc('cd.created_at')
             ->get();
@@ -524,8 +719,8 @@ class CashController extends Controller
             ])
             ->where('cm.cash_session_id', $id)
             ->where('cm.company_id', $companyId)
-            ->whereIn('cm.ref_type', ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT'])
-            ->where('cd.status', '!=', 'CANCELED')
+            ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES)
                 ->groupBy(DB::raw('COALESCE(pm.id, 0)'), DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"), DB::raw("COALESCE(pm.name, 'Sin método de pago')"))
                 ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"))
             ->get();
@@ -657,6 +852,111 @@ class CashController extends Controller
     // Helpers
     // ─────────────────────────────────────────────────────────
 
+    private function ensureSessionCommercialDocumentMovements(int $companyId, int $sessionId): void
+    {
+        $session = DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->where('company_id', $companyId)
+            ->first(['id', 'company_id', 'branch_id', 'cash_register_id', 'opened_at', 'closed_at']);
+
+        if (!$session || !$session->cash_register_id) {
+            return;
+        }
+
+        $docsQuery = DB::table('sales.commercial_documents as cd')
+            ->where('cd.company_id', $companyId)
+            ->where('cd.status', 'ISSUED')
+            ->whereIn('cd.document_kind', ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'DEBIT_NOTE', 'CREDIT_NOTE'])
+            ->whereRaw("COALESCE((cd.metadata->>'cash_register_id')::BIGINT, 0) = ?", [(int) $session->cash_register_id])
+            ->where('cd.created_at', '>=', $session->opened_at)
+            ->orderBy('cd.created_at')
+            ->select([
+                'cd.id',
+                'cd.branch_id',
+                'cd.payment_method_id',
+                'cd.total',
+                'cd.paid_total',
+                'cd.document_kind',
+                'cd.series',
+                'cd.number',
+                'cd.created_by',
+                'cd.created_at',
+            ]);
+
+        if ($session->closed_at) {
+            $docsQuery->where('cd.created_at', '<=', $session->closed_at);
+        }
+
+        $docs = $docsQuery->get();
+        if ($docs->isEmpty()) {
+            return;
+        }
+
+        foreach ($docs as $doc) {
+            $existingMovement = DB::table('sales.cash_movements')
+                ->where('company_id', $companyId)
+                ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+                ->where('ref_id', (int) $doc->id)
+                ->orderBy('id')
+                ->first(['id', 'cash_register_id', 'cash_session_id']);
+
+            if ($existingMovement) {
+                $needsReassign = (int) ($existingMovement->cash_register_id ?? 0) !== (int) $session->cash_register_id
+                    || (int) ($existingMovement->cash_session_id ?? 0) !== (int) $session->id;
+
+                if ($needsReassign) {
+                    DB::table('sales.cash_movements')
+                        ->where('id', (int) $existingMovement->id)
+                        ->update([
+                            'cash_register_id' => (int) $session->cash_register_id,
+                            'cash_session_id' => (int) $session->id,
+                            'branch_id' => $doc->branch_id ?? $session->branch_id,
+                        ]);
+                }
+
+                continue;
+            }
+
+            $amount = (float) ($doc->paid_total ?? 0);
+            if ($amount <= 0) {
+                $amount = (float) ($doc->total ?? 0);
+            }
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $label = [
+                'INVOICE' => 'Factura',
+                'RECEIPT' => 'Boleta',
+                'CREDIT_NOTE' => 'Nota Credito',
+                'DEBIT_NOTE' => 'Nota Debito',
+                'SALES_ORDER' => 'Pedido',
+            ][$doc->document_kind] ?? (string) $doc->document_kind;
+
+            $desc = 'Cobro doc ' . $label . ' ' . $doc->series . '-' . $doc->number;
+
+            DB::table('sales.cash_movements')->insert([
+                'company_id' => $companyId,
+                'branch_id' => $doc->branch_id ?? $session->branch_id,
+                'cash_register_id' => (int) $session->cash_register_id,
+                'cash_session_id' => (int) $session->id,
+                'movement_type' => 'INCOME',
+                'payment_method_id' => $doc->payment_method_id,
+                'amount' => round($amount, 4),
+                'description' => $desc,
+                'notes' => $desc,
+                'ref_type' => 'COMMERCIAL_DOCUMENT',
+                'ref_id' => (int) $doc->id,
+                'created_by' => $doc->created_by,
+                'user_id' => $doc->created_by,
+                'movement_at' => $doc->created_at ?? now(),
+                'created_at' => now(),
+            ]);
+        }
+
+        $this->recalcExpectedBalance((int) $session->id);
+    }
+
     private function resolveItemCostAndMargin(
         float $qty,
         float $lineTotal,
@@ -718,15 +1018,37 @@ class CashController extends Controller
             return;
         }
 
-        $totalIn  = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $sessionId)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
-            ->sum('amount');
+        $totalIn  = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $sessionId)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['IN', 'INCOME'])
+            ->sum('cm.amount');
 
-        $totalOut = (float) DB::table('sales.cash_movements')
-            ->where('cash_session_id', $sessionId)
-            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
-            ->sum('amount');
+        $totalOut = (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $sessionId)
+            ->where(function ($query) {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            })
+            ->whereIn('cm.movement_type', ['OUT', 'EXPENSE'])
+            ->sum('cm.amount');
 
         DB::table('sales.cash_sessions')->where('id', $sessionId)->update([
             'expected_balance' => round((float) $sess->opening_balance + $totalIn - $totalOut, 4),

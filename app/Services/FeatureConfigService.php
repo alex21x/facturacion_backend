@@ -134,6 +134,9 @@ class FeatureConfigService
             return [];
         }
 
+        // Superadmin-only codes are never resolved from vertical templates/overrides.
+        $superadminOnly = array_map('strtoupper', config('features.superadmin_only_feature_codes', []));
+
         // BATCH QUERY: Get ALL vertical feature overrides for this company+vertical in ONE query
         $overrides = DB::table('appcfg.company_vertical_feature_overrides')
             ->where('company_id', $companyId)
@@ -143,6 +146,10 @@ class FeatureConfigService
         // Build result map in memory
         foreach ($overrides as $override) {
             $code = strtoupper(trim($override->feature_code));
+            // Skip codes that are exclusively managed by the Admin Portal.
+            if (in_array($code, $superadminOnly, true)) {
+                continue;
+            }
             $result[$code] = [
                 'resolved' => true,
                 'is_enabled' => $override->is_enabled !== null ? (bool)$override->is_enabled : null,

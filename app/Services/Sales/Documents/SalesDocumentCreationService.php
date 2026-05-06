@@ -89,6 +89,10 @@ class SalesDocumentCreationService
                         throw new SalesDocumentException('En este modo, caja no genera pedidos. Use Reporte para convertir pedidos pendientes.');
                     }
 
+                    if (!$isPreDocument && $this->isCashierActor($roleProfile, $roleCode) && !$isConversionFlow) {
+                        throw new SalesDocumentException('En este modo, caja no emite comprobantes directos. Debe convertir una solicitud o nota de pedido pendiente.');
+                    }
+
                     if (!$isPreDocument && $this->isSellerActor($roleProfile, $roleCode)) {
                         throw new SalesDocumentException('En este modo, vendedor no emite comprobantes finales. Debe generar pedido para caja.');
                     }

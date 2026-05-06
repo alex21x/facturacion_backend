@@ -103,8 +103,14 @@ class SalesDocumentVoidService
 
                 $dailySummaryId = null;
                 $isReceiptGoingToRa = false;
-                
+
                 if (strtoupper((string) ($document->document_kind ?? '')) === 'RECEIPT') {
+                    $documentStatus = strtoupper((string) ($document->status ?? ''));
+                    $sunatStatus = strtoupper(trim((string) ($metadata['sunat_status'] ?? '')));
+                    $shouldRouteReceiptToCancellationSummary = in_array($documentStatus, ['VOID', 'VOIDED'], true)
+                        || ($documentStatus === 'ISSUED' && in_array($sunatStatus, ['ACCEPTED', 'SENT_BY_SUMMARY'], true));
+
+                    if ($shouldRouteReceiptToCancellationSummary) {
                     $voidDate = isset($payload['void_at']) && trim((string) $payload['void_at']) !== ''
                         ? date('Y-m-d', strtotime((string) $payload['void_at']))
                         : now()->toDateString();
@@ -137,6 +143,10 @@ class SalesDocumentVoidService
                     $metadata['sunat_void_label'] = 'Pendiente por resumen RA';
                     if ($dailySummaryId !== null) {
                         $metadata['sunat_void_summary_id'] = $dailySummaryId;
+                    }
+                    } else {
+                        // Pre-SUNAT-final receipts are voided internally and should not be forced into RA.
+                        unset($metadata['sunat_void_status'], $metadata['sunat_void_label'], $metadata['sunat_void_summary_id']);
                     }
                 }
 

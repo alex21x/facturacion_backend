@@ -23,10 +23,12 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
     Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
+    // feature-toggles is needed by ALL authenticated users (sellers, cashiers, etc.)
+    // to determine their runtime sales flow mode.  It must NOT be behind APPCFG RBAC.
+    Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
 
     Route::middleware('rbac.module:APPCFG,view')->group(function () {
         Route::get('/appcfg/modules', 'Api\\AppConfigController@modules');
-        Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
         Route::get('/appcfg/home-metrics-summary', 'Api\\AppConfigController@homeMetricsSummary');
         Route::get('/appcfg/operational-limits', 'Api\\AppConfigController@operationalLimits');
         Route::get('/appcfg/commerce-settings', 'Api\\AppConfigController@commerceSettings')->middleware('admin.only');
@@ -68,6 +70,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::put('/appcfg/company-operational-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrixBulk')->middleware('admin.only');
         Route::post('/appcfg/admin-companies', 'Api\\AppConfigController@createAdminCompany')->middleware('admin.only');
         Route::post('/appcfg/admin-companies/{id}/reset-admin-password', 'Api\\AppConfigController@resetAdminCompanyPassword')->middleware('admin.only');
+        Route::get('/appcfg/admin-companies/{id}/reveal-admin-password', 'Api\\AppConfigController@revealAdminCompanyPassword')->middleware('admin.only');
         Route::get('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@companyCommerceAdminMatrix')->middleware('admin.only');
         Route::put('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@updateCompanyCommerceAdminMatrix')->middleware('admin.only');
         Route::get('/appcfg/company-inventory-settings-admin-matrix', 'Api\\AppConfigController@companyInventorySettingsAdminMatrix')->middleware('admin.only');

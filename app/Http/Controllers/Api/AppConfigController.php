@@ -427,10 +427,14 @@ class AppConfigController extends Controller
 
             $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $featureCode);
             if ($verticalPreference['resolved']) {
-                if ($verticalPreference['is_enabled'] !== null) {
+                // Keep explicit company/branch values as source of truth; vertical is fallback only.
+                $hasExplicitToggle = ($branch && $branch->is_enabled !== null) || ($company && $company->is_enabled !== null);
+                $hasExplicitConfig = $branchConfig !== null || $companyConfig !== null;
+
+                if (!$hasExplicitToggle && $verticalPreference['is_enabled'] !== null) {
                     $isEnabled = (bool) $verticalPreference['is_enabled'];
                 }
-                if ($verticalPreference['config'] !== null) {
+                if (!$hasExplicitConfig && $verticalPreference['config'] !== null) {
                     $companyConfig = $verticalPreference['config'];
                     $branchConfig = null;
                 }
@@ -1826,6 +1830,7 @@ class AppConfigController extends Controller
             ->where('id', (int) $adminUser->id)
             ->update([
                 'password_hash' => Hash::make($newPassword),
+                'last_temp_password' => encrypt($newPassword),
                 'updated_at' => now(),
             ]);
 
@@ -1834,6 +1839,45 @@ class AppConfigController extends Controller
             'email' => $adminUser->email,
             'new_password' => $newPassword,
             'message' => 'Contraseña reseteada correctamente.',
+        ]);
+    }
+
+    public function revealAdminCompanyPassword(Request $request, $companyId)
+    {
+        $companyId = $this->normalizeLegacyCompanyId((int) $companyId);
+
+        if ($companyId === self::SYSTEM_COMPANY_ID) {
+            return response()->json(['message' => 'La empresa del sistema no se administra desde este panel.'], 403);
+        }
+
+        $adminUser = DB::table('auth.users as u')
+            ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('u.company_id', $companyId)
+            ->where('u.status', 1)
+            ->whereRaw("UPPER(r.code) = 'ADMIN'")
+            ->orderBy('u.id')
+            ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
+
+        if (!$adminUser) {
+            return response()->json(['message' => 'No se encontró un usuario administrador activo.'], 404);
+        }
+
+        if (empty($adminUser->last_temp_password)) {
+            return response()->json(['available' => false, 'message' => 'No hay contraseña temporal registrada para este usuario.']);
+        }
+
+        try {
+            $plainPassword = decrypt($adminUser->last_temp_password);
+        } catch (\Exception $e) {
+            return response()->json(['available' => false, 'message' => 'No se pudo recuperar la contraseña almacenada.']);
+        }
+
+        return response()->json([
+            'available' => true,
+            'username' => $adminUser->username,
+            'email' => $adminUser->email,
+            'password' => $plainPassword,
         ]);
     }
 
@@ -2041,6 +2085,34 @@ class AppConfigController extends Controller
             }
         }
 
+        // Enforce superadmin-only feature codes: only SUPERADMIN / SUPER_ADMIN may
+        // write these codes.  Regular company admins are blocked at API level even
+        // if they bypass the POS UI.
+        $superadminOnlyCodes = array_map(
+            'strtoupper',
+            config('features.superadmin_only_feature_codes', [])
+        );
+
+        if (!empty($superadminOnlyCodes)) {
+            $callerRoleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+            $isSuperAdmin = in_array($callerRoleCode, ['SUPERADMIN', 'SUPER_ADMIN'], true);
+
+            if (!$isSuperAdmin) {
+                $submittedCodes = array_map(
+                    fn ($f) => strtoupper(trim((string) ($f['feature_code'] ?? ''))),
+                    $payload['features']
+                );
+                $blocked = array_intersect($submittedCodes, $superadminOnlyCodes);
+
+                if (!empty($blocked)) {
+                    return response()->json([
+                        'message' => 'Las siguientes funcionalidades solo pueden ser modificadas desde el Portal Administrador: ' . implode(', ', array_values($blocked)),
+                        'blocked_codes' => array_values($blocked),
+                    ], 403);
+                }
+            }
+        }
+
         // Use optimized service (config merge + cache invalidation)
         $service = new FeatureConfigService();
         $result = $service->updateCommerceSettings($companyId, $branchId, $payload['features'], $authUser->id);
@@ -2115,7 +2187,8 @@ class AppConfigController extends Controller
 
     private function resolveVerticalFeaturePreference(int $companyId, string $featureCode): array
     {
-        $cacheKey = $companyId . ':' . strtoupper(trim($featureCode));
+        $normalizedCode = strtoupper(trim($featureCode));
+        $cacheKey = $companyId . ':' . $normalizedCode;
         if (array_key_exists($cacheKey, $this->verticalFeaturePreferenceCache)) {
             return $this->verticalFeaturePreferenceCache[$cacheKey];
         }
@@ -2126,6 +2199,14 @@ class AppConfigController extends Controller
             'config' => null,
             'source' => null,
         ];
+
+        // Superadmin-only feature codes must never be overridden by vertical templates.
+        // Their value is exclusively managed from the Admin Portal.
+        $superadminOnly = array_map('strtoupper', config('features.superadmin_only_feature_codes', []));
+        if (in_array($normalizedCode, $superadminOnly, true)) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
 
         if (!$this->tableExists('appcfg', 'verticals')
             || !$this->tableExists('appcfg', 'company_verticals')
@@ -3425,6 +3506,7 @@ class AppConfigController extends Controller
                     'enable_graphical_dashboard' => $settings ? (bool) $settings->enable_graphical_dashboard : false,
                     'enable_location_control' => $settings ? (bool) $settings->enable_location_control : false,
                     'allow_negative_stock' => $settings ? (bool) $settings->allow_negative_stock : false,
+                    'low_stock_alert_threshold' => $settings ? (int) ($settings->low_stock_alert_threshold ?? 5) : 5,
                     'enforce_lot_for_tracked' => $settings ? (bool) $settings->enforce_lot_for_tracked : false,
                 ],
             ];
@@ -3438,6 +3520,8 @@ class AppConfigController extends Controller
         if (!$this->tableExists('inventory', 'inventory_settings')) {
             return response()->json(['message' => 'Inventory settings table not found'], 409);
         }
+
+        $hasLowStockAlertThreshold = $this->columnExists('inventory', 'inventory_settings', 'low_stock_alert_threshold');
 
         $authUser = $request->attributes->get('auth_user');
 
@@ -3454,6 +3538,7 @@ class AppConfigController extends Controller
             'enable_location_control' => 'nullable|boolean',
             'allow_negative_stock' => 'nullable|boolean',
             'enforce_lot_for_tracked' => 'nullable|boolean',
+            'low_stock_alert_threshold' => $hasLowStockAlertThreshold ? 'nullable|integer|min:0|max:9999' : 'nullable',
         ]);
 
         if ($validator->fails()) {
@@ -3477,6 +3562,7 @@ class AppConfigController extends Controller
             'allow_negative_stock', 'enforce_lot_for_tracked',
         ];
         $strFields = ['complexity_mode', 'inventory_mode', 'lot_outflow_strategy'];
+        $intFields = $hasLowStockAlertThreshold ? ['low_stock_alert_threshold'] : [];
 
         foreach ($boolFields as $field) {
             if (array_key_exists($field, $payload)) {
@@ -3486,6 +3572,11 @@ class AppConfigController extends Controller
         foreach ($strFields as $field) {
             if (array_key_exists($field, $payload)) {
                 $updates[$field] = $payload[$field];
+            }
+        }
+        foreach ($intFields as $field) {
+            if (array_key_exists($field, $payload)) {
+                $updates[$field] = (int) $payload[$field];
             }
         }
 

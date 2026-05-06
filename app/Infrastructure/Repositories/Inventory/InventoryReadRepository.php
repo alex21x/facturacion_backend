@@ -130,6 +130,8 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
 
     public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array
     {
+        $baseCostExpr = 'COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0)';
+
         $baseQuery = DB::table('inventory.inventory_ledger as il')
             ->leftJoin('inventory.products as p', 'p.id', '=', 'il.product_id')
             ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'il.warehouse_id')
@@ -150,8 +152,8 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
                 DB::raw('pl.lot_code'),
                 'il.movement_type',
                 'il.quantity',
-                DB::raw('COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0) as unit_cost'),
-                DB::raw('(il.quantity * COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0)) as line_total'),
+                DB::raw($baseCostExpr . ' as unit_cost'),
+                DB::raw('(il.quantity * ' . $baseCostExpr . ') as line_total'),
                 DB::raw("SUM(CASE WHEN il.movement_type = 'IN' THEN il.quantity ELSE -il.quantity END)
                     OVER (
                         PARTITION BY il.company_id, il.warehouse_id, il.product_id

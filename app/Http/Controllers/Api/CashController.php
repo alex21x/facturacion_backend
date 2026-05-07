@@ -656,6 +656,7 @@ class CashController extends Controller
                     'cdi.unit_price',
                     'cdi.unit_cost',
                     'p.cost_price as product_cost_price',
+                    'cdi.subtotal as line_subtotal',
                     'cdi.total as line_total',
                 ])
                 ->where('cdi.document_id', $doc->id)
@@ -680,9 +681,12 @@ class CashController extends Controller
                 'items'               => array_map(function ($item) {
                     $qty = round((float) $item->qty, 3);
                     $unitPrice = round((float) $item->unit_price, 2);
+                    $lineSubtotal = round((float) ($item->line_subtotal ?? 0), 2);
                     $lineTotal = round((float) $item->line_total, 2);
+                    $lineRevenueForMargin = $lineSubtotal > 0 ? $lineSubtotal : $lineTotal;
                     $costMeta = $this->resolveItemCostAndMargin(
                         $qty,
+                        $lineRevenueForMargin,
                         $lineTotal,
                         $unitPrice,
                         isset($item->unit_cost) ? (float) $item->unit_cost : null,
@@ -695,12 +699,17 @@ class CashController extends Controller
                         'quantity'    => $qty,
                         'unit_code'   => $item->unit_code,
                         'unit_price'  => $unitPrice,
+                        'line_subtotal' => $lineSubtotal,
                         'line_total'  => $lineTotal,
                         'unit_cost'   => $costMeta['unit_cost'],
                         'cost_total'  => $costMeta['cost_total'],
-                        'margin_total' => $costMeta['margin_total'],
-                        'margin_percent' => $costMeta['margin_percent'],
-                        'margin_source' => $costMeta['margin_source'],
+                        'margin_total'            => $costMeta['margin_total'],
+                        'margin_percent'          => $costMeta['margin_percent'],
+                        'margin_total_net'        => $costMeta['margin_total_net'],
+                        'margin_percent_net'      => $costMeta['margin_percent_net'],
+                        'margin_total_commercial' => $costMeta['margin_total_commercial'],
+                        'margin_percent_commercial' => $costMeta['margin_percent_commercial'],
+                        'margin_source'           => $costMeta['margin_source'],
                     ];
                 }, $items->toArray()),
             ];
@@ -959,13 +968,18 @@ class CashController extends Controller
 
     private function resolveItemCostAndMargin(
         float $qty,
+        float $lineRevenue,
         float $lineTotal,
         float $unitPrice,
         ?float $itemUnitCost,
         ?float $productCostPrice
     ): array {
         $qtySafe = $qty > 0 ? $qty : 0.0;
-        $lineTotalSafe = max(0.0, $lineTotal);
+        $lineRevenueSafe = max(0.0, $lineRevenue);   // net (sin IGV)
+        $lineTotalSafe   = max(0.0, $lineTotal);     // gross (con IGV)
+        $commercialCostFactor = $lineRevenueSafe > 0 && $lineTotalSafe > 0
+            ? max(1.0, $lineTotalSafe / $lineRevenueSafe)
+            : 1.0;
 
         $realUnitCost = null;
         if ($itemUnitCost !== null && $itemUnitCost > 0) {
@@ -976,15 +990,26 @@ class CashController extends Controller
 
         if ($realUnitCost !== null) {
             $costTotal = $qtySafe > 0 ? $realUnitCost * $qtySafe : 0.0;
-            $marginTotal = $lineTotalSafe - $costTotal;
-            $marginPercent = $lineTotalSafe > 0 ? ($marginTotal / $lineTotalSafe) * 100 : 0.0;
+
+            // Margen neto (contable): base = subtotal sin IGV
+            $marginNet        = $lineRevenueSafe - $costTotal;
+            $marginNetPct     = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
+
+            // Margen comercial: compara total cobrado contra costo equivalente con IGV.
+            $commercialCostTotal = $costTotal * $commercialCostFactor;
+            $marginCommercial    = $lineTotalSafe - $commercialCostTotal;
+            $marginCommercialPct = $lineTotalSafe > 0 ? ($marginCommercial / $lineTotalSafe) * 100 : 0.0;
 
             return [
-                'unit_cost' => round($realUnitCost, 4),
-                'cost_total' => round($costTotal, 2),
-                'margin_total' => round($marginTotal, 2),
-                'margin_percent' => round($marginPercent, 2),
-                'margin_source' => 'REAL',
+                'unit_cost'               => round($realUnitCost, 4),
+                'cost_total'              => round($costTotal, 2),
+                'margin_total'            => round($marginNet, 2),
+                'margin_percent'          => round($marginNetPct, 2),
+                'margin_total_net'        => round($marginNet, 2),
+                'margin_percent_net'      => round($marginNetPct, 2),
+                'margin_total_commercial' => round($marginCommercial, 2),
+                'margin_percent_commercial' => round($marginCommercialPct, 2),
+                'margin_source'           => 'REAL',
             ];
         }
 
@@ -993,21 +1018,29 @@ class CashController extends Controller
         $estimatedMarginRate = 0.22;
         $maxEstimatedMarginRate = 0.35;
 
-        $targetMargin = $lineTotalSafe * $estimatedMarginRate;
-        $maxMargin = $lineTotalSafe * $maxEstimatedMarginRate;
-        $marginTotal = min(max(0.0, $targetMargin), max(0.0, $maxMargin));
-        $costTotal = max(0.0, $lineTotalSafe - $marginTotal);
+        $targetMargin = $lineRevenueSafe * $estimatedMarginRate;
+        $maxMargin = $lineRevenueSafe * $maxEstimatedMarginRate;
+        $marginNet = min(max(0.0, $targetMargin), max(0.0, $maxMargin));
+        $costTotal = max(0.0, $lineRevenueSafe - $marginNet);
 
-        $referenceUnitPrice = $qtySafe > 0 ? ($lineTotalSafe / $qtySafe) : max(0.0, $unitPrice);
+        $referenceUnitPrice = $qtySafe > 0 ? ($lineRevenueSafe / $qtySafe) : max(0.0, $unitPrice);
         $estimatedUnitCost = $qtySafe > 0 ? ($costTotal / $qtySafe) : ($referenceUnitPrice * (1 - $estimatedMarginRate));
-        $marginPercent = $lineTotalSafe > 0 ? ($marginTotal / $lineTotalSafe) * 100 : 0.0;
+        $marginNetPct = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
+
+        $commercialCostTotal = $costTotal * $commercialCostFactor;
+        $marginCommercial    = $lineTotalSafe - $commercialCostTotal;
+        $marginCommercialPct = $lineTotalSafe > 0 ? ($marginCommercial / $lineTotalSafe) * 100 : 0.0;
 
         return [
-            'unit_cost' => round(max(0.0, $estimatedUnitCost), 4),
-            'cost_total' => round($costTotal, 2),
-            'margin_total' => round($marginTotal, 2),
-            'margin_percent' => round($marginPercent, 2),
-            'margin_source' => 'ESTIMATED',
+            'unit_cost'               => round(max(0.0, $estimatedUnitCost), 4),
+            'cost_total'              => round($costTotal, 2),
+            'margin_total'            => round($marginNet, 2),
+            'margin_percent'          => round($marginNetPct, 2),
+            'margin_total_net'        => round($marginNet, 2),
+            'margin_percent_net'      => round($marginNetPct, 2),
+            'margin_total_commercial' => round($marginCommercial, 2),
+            'margin_percent_commercial' => round($marginCommercialPct, 2),
+            'margin_source'           => 'ESTIMATED',
         ];
     }
 

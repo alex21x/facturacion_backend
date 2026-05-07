@@ -14,6 +14,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class SalesController extends Controller
@@ -156,6 +157,7 @@ class SalesController extends Controller
             'SALES_ALLOW_VOID_FOR_SELLER' => true,
             'SALES_ALLOW_VOID_FOR_CASHIER' => true,
             'SALES_ALLOW_VOID_FOR_ADMIN' => true,
+            'SALES_VOID_REQUIRE_PASSWORD' => false,
             'SALES_VOID_REVERSE_STOCK' => true,
         ];
         $commerceFeatureCodes = array_keys($commerceFeatureDefaults);
@@ -251,16 +253,7 @@ class SalesController extends Controller
         }
         $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
-        $logoUrl = null;
-        if ($settings && !empty($settings->logo_path)) {
-            try {
-                $logoUrl = \Storage::disk('public')->exists($settings->logo_path)
-                    ? '/storage/' . ltrim((string) $settings->logo_path, '/')
-                    : null;
-            } catch (\Throwable $e) {
-                $logoUrl = null;
-            }
-        }
+        $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
 
         return [
             'tax_id'     => $company->tax_id ?? null,
@@ -1968,6 +1961,7 @@ class SalesController extends Controller
             'notes' => 'nullable|string|max:500',
             'void_at' => 'nullable|date',
             'sunat_void_status' => 'nullable|string|max:40',
+            'void_password' => 'nullable|string|max:120',
         ]);
 
         if ($validator->fails()) {
@@ -1979,6 +1973,44 @@ class SalesController extends Controller
         }
 
         $payload = $validator->validated();
+
+        $documentContext = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->select('branch_id')
+            ->first();
+
+        $featureBranchId = $documentContext && $documentContext->branch_id !== null
+            ? (int) $documentContext->branch_id
+            : null;
+
+        $requireVoidPassword = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $featureBranchId,
+            'SALES_VOID_REQUIRE_PASSWORD',
+            false
+        );
+
+        $voidPassword = trim((string) ($payload['void_password'] ?? ''));
+        unset($payload['void_password']);
+
+        if ($requireVoidPassword) {
+            if ($voidPassword === '') {
+                return response()->json([
+                    'message' => 'Debe ingresar su clave para confirmar la anulacion.',
+                ], 422);
+            }
+
+            $passwordHash = DB::table('auth.users')
+                ->where('id', (int) $authUser->id)
+                ->value('password_hash');
+
+            if (!$passwordHash || !Hash::check($voidPassword, (string) $passwordHash)) {
+                return response()->json([
+                    'message' => 'Clave invalida para anular el documento.',
+                ], 422);
+            }
+        }
 
         try {
             $result = $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $payload);
@@ -2264,6 +2296,8 @@ class SalesController extends Controller
                 'd.number',
                 'd.issue_at',
                 'd.status',
+                DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
                 DB::raw("CASE d.status
                     WHEN 'DRAFT'    THEN 'Borrador'
                     WHEN 'APPROVED' THEN 'Aprobado'
@@ -2340,8 +2374,28 @@ class SalesController extends Controller
                     'd.number',
                     'd.issue_at',
                     'd.status',
+                    DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                    DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
+                    DB::raw("CASE d.status
+                        WHEN 'DRAFT'    THEN 'Borrador'
+                        WHEN 'APPROVED' THEN 'Aprobado'
+                        WHEN 'ISSUED'   THEN 'Emitido'
+                        WHEN 'VOID'     THEN 'Anulado'
+                        WHEN 'CANCELED' THEN 'Cancelado'
+                        ELSE d.status END as status_label"),
                     DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                     DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                    DB::raw("COALESCE(
+                        NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
+                        (
+                            SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                            FROM sales.commercial_documents dsrc
+                            LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                            WHERE dsrc.company_id = d.company_id
+                              AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                            LIMIT 1
+                        )
+                    ) as origin_seller_user_name"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
@@ -2384,12 +2438,16 @@ class SalesController extends Controller
                     'Documento',
                     'Serie',
                     'Numero',
-                    'Usuario',
+                    'Solicita',
+                    'Emite',
+                    'Actor',
                     'Fecha Emision',
                     'Cliente',
                     'Vehiculo',
                     'Forma de Pago',
                     'Estado',
+                    'Estado SUNAT',
+                    'Estado Baja SUNAT',
                     'Producto',
                     'Unidad',
                     'Cantidad',
@@ -2398,12 +2456,20 @@ class SalesController extends Controller
                 ], ';');
 
                 foreach ($detailRows as $row) {
+                    $issuer = trim((string) ($row->created_by_user_name ?? ''));
+                    $seller = trim((string) ($row->origin_seller_user_name ?? ''));
+                    $actor = ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer))
+                        ? ('Solicita: ' . $seller . ' | Emite: ' . $issuer)
+                        : ($issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'));
+
                     fputcsv($out, [
                         (int) $row->id,
                         (string) ($row->document_kind_label ?? $row->document_kind),
                         (string) $row->series,
                         (string) $row->number,
-                        (string) ($row->created_by_user_name ?? ''),
+                        $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
+                        $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
+                        $actor,
                         $row->issue_at ? (string) $row->issue_at : '',
                         (string) ($row->customer_name ?? ''),
                         trim(implode(' | ', array_values(array_filter([
@@ -2414,7 +2480,9 @@ class SalesController extends Controller
                             return trim($part) !== '';
                         })))),
                         (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
-                        (string) ($row->status ?? ''),
+                        (string) ($row->status_label ?? $row->status),
+                        (string) ($row->sunat_status ?? ''),
+                        (string) ($row->sunat_void_status ?? ''),
                         (string) ($row->product_description ?? ''),
                         (string) ($row->unit_code ?? '-'),
                         number_format((float) ($row->qty ?? 0), 3, '.', ''),
@@ -2461,11 +2529,15 @@ class SalesController extends Controller
                 'Serie',
                 'Numero',
                 'Documento Afectado',
-                'Usuario',
+                'Solicita',
+                'Emite',
+                'Actor',
                 'Fecha Emision',
                 'Cliente',
                 'Forma de Pago',
                 'Estado',
+                'Estado SUNAT',
+                'Estado Baja SUNAT',
                 'Descuento Item',
                 'Descuento Global',
                 'Total',
@@ -2473,6 +2545,12 @@ class SalesController extends Controller
             ], ';');
 
             foreach ($rows as $row) {
+                $issuer = trim((string) ($row->created_by_user_name ?? ''));
+                $seller = trim((string) ($row->origin_seller_user_name ?? ''));
+                $actor = ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer))
+                    ? ('Solicita: ' . $seller . ' | Emite: ' . $issuer)
+                    : ($issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'));
+
                 fputcsv($out, [
                     (int) $row->id,
                     (string) ($row->document_kind_label ?? $row->document_kind),
@@ -2481,11 +2559,15 @@ class SalesController extends Controller
                     trim((string) (($row->source_document_kind ?? '') !== ''
                         ? (($row->source_document_kind ?? '') . ' ' . ($row->source_document_number ?? ''))
                         : ($row->source_document_number ?? ''))),
-                    (string) ($row->created_by_user_name ?? ''),
+                    $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
+                    $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
+                    $actor,
                     $row->issue_at ? (string) $row->issue_at : '',
                     (string) ($row->customer_name ?? ''),
                     (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
                     (string) ($row->status_label ?? $row->status),
+                    (string) ($row->sunat_status ?? ''),
+                    (string) ($row->sunat_void_status ?? ''),
                     number_format((float) ($row->item_discount_total ?? 0), 2, '.', ''),
                     number_format((float) ($row->global_discount_total ?? 0), 2, '.', ''),
                     number_format((float) ($row->total ?? 0), 2, '.', ''),
@@ -5137,6 +5219,43 @@ class SalesController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Error al descargar CDR: ' . $e->getMessage()], 500);
         }
+    }
+
+    private function resolveCompanyLogoUrl($logoPath): ?string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (preg_match('/^https?:\/\//i', $raw) === 1) {
+            return $raw;
+        }
+
+        $normalized = str_replace('\\', '/', $raw);
+        if (preg_match('/^https?:\/\//i', $normalized) === 1) {
+            $pathFromUrl = parse_url($normalized, PHP_URL_PATH);
+            $normalized = $pathFromUrl !== null ? (string) $pathFromUrl : $normalized;
+        }
+
+        $normalized = ltrim($normalized, '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            if (\Storage::disk('public')->exists($normalized)) {
+                return '/storage/' . $normalized;
+            }
+        } catch (\Throwable $e) {
+            // Ignorar para evitar ocultar logo por una validacion temporal del storage.
+        }
+
+        return '/storage/' . $normalized;
     }
 }
 

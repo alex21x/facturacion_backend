@@ -395,6 +395,27 @@ class PurchasesController
         $hasPaymentMethodColumn = in_array('payment_method_id', $stockEntryColumns, true);
         $hasMetadataColumn = in_array('metadata', $stockEntryColumns, true);
 
+        $nextReferenceNo = array_key_exists('reference_no', $payload)
+            ? (trim((string) ($payload['reference_no'] ?? '')) !== '' ? trim((string) $payload['reference_no']) : null)
+            : $entry->reference_no;
+        $nextSupplierReference = array_key_exists('supplier_reference', $payload)
+            ? (trim((string) ($payload['supplier_reference'] ?? '')) !== '' ? trim((string) $payload['supplier_reference']) : null)
+            : $entry->supplier_reference;
+
+        if (
+            $entryType === 'PURCHASE'
+            && $this->hasDuplicatePurchaseByReference(
+                $companyId,
+                $nextReferenceNo,
+                $nextSupplierReference,
+                (int) $entry->id
+            )
+        ) {
+            return response()->json([
+                'message' => 'Compra duplicada: ya existe una compra registrada con el mismo proveedor y numero de comprobante.',
+            ], 422);
+        }
+
         try {
             DB::transaction(function () use (
                 $entry,
@@ -564,12 +585,8 @@ class PurchasesController
                 $nextMetadata['last_edited_at'] = now()->toIso8601String();
 
                 $entryUpdate = [
-                    'reference_no' => array_key_exists('reference_no', $payload)
-                        ? (trim((string) ($payload['reference_no'] ?? '')) !== '' ? trim((string) $payload['reference_no']) : null)
-                        : $entry->reference_no,
-                    'supplier_reference' => array_key_exists('supplier_reference', $payload)
-                        ? (trim((string) ($payload['supplier_reference'] ?? '')) !== '' ? trim((string) $payload['supplier_reference']) : null)
-                        : $entry->supplier_reference,
+                    'reference_no' => $nextReferenceNo,
+                    'supplier_reference' => $nextSupplierReference,
                     'issue_at' => $resolvedIssueAt,
                     'notes' => array_key_exists('notes', $payload)
                         ? (trim((string) ($payload['notes'] ?? '')) !== '' ? trim((string) $payload['notes']) : null)
@@ -1063,6 +1080,44 @@ class PurchasesController
         }
 
         return ['public', $qualifiedTable];
+    }
+
+    private function hasDuplicatePurchaseByReference(
+        int $companyId,
+        $referenceNo,
+        $supplierReference,
+        ?int $excludeEntryId = null
+    ): bool {
+        $normalizedReferenceNo = $this->normalizePurchaseKeyText($referenceNo);
+        $normalizedSupplierReference = $this->normalizePurchaseKeyText($supplierReference);
+
+        if ($normalizedReferenceNo === '' || $normalizedSupplierReference === '') {
+            return false;
+        }
+
+        $query = DB::table('inventory.stock_entries')
+            ->where('company_id', $companyId)
+            ->where('entry_type', 'PURCHASE')
+            ->whereRaw("UPPER(COALESCE(status, '')) NOT IN ('VOID', 'CANCELED')")
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(reference_no, '')), '\\s+', ' ', 'g')) = ?", [$normalizedReferenceNo])
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(supplier_reference, '')), '\\s+', ' ', 'g')) = ?", [$normalizedSupplierReference]);
+
+        if ($excludeEntryId !== null && $excludeEntryId > 0) {
+            $query->where('id', '<>', $excludeEntryId);
+        }
+
+        return $query->exists();
+    }
+
+    private function normalizePurchaseKeyText($value): string
+    {
+        $text = trim((string) ($value ?? ''));
+        if ($text === '') {
+            return '';
+        }
+
+        $text = preg_replace('/\s+/', ' ', $text) ?? $text;
+        return strtoupper($text);
     }
 
     private function resolveIssueAtForStorage($issueAt): string

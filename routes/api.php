@@ -22,6 +22,10 @@ Route::middleware('throttle:2000,1')->group(function () {
 Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
+    Route::get('/appcfg/system-backups/database-export', 'Api\\AppConfigController@exportSystemDatabaseBackup')->middleware('admin.only');
+    Route::get('/appcfg/system-backups/database-files', 'Api\\AppConfigController@listSystemDatabaseBackups')->middleware('admin.only');
+    Route::get('/appcfg/system-backups/database-files/{fileName}', 'Api\\AppConfigController@downloadSystemDatabaseBackupFile')->middleware('admin.only');
+    Route::post('/appcfg/system-backups/database-restore', 'Api\\AppConfigController@restoreSystemDatabaseBackup')->middleware('admin.only');
     Route::get('/appcfg/operational-context', 'Api\\AppConfigController@operationalContext');
     // feature-toggles is needed by ALL authenticated users (sellers, cashiers, etc.)
     // to determine their runtime sales flow mode.  It must NOT be behind APPCFG RBAC.

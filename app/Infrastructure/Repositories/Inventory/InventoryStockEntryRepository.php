@@ -96,6 +96,12 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             $rawEntryMetadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
             $purchaseTaxMetadata = null;
             if ($entryType === 'PURCHASE') {
+                $this->assertPurchaseIsNotDuplicated(
+                    $companyId,
+                    $payload['reference_no'] ?? null,
+                    $payload['supplier_reference'] ?? null
+                );
+
                 $purchaseTaxMetadata = $this->normalizePurchaseTributaryMetadata(
                     $rawEntryMetadata,
                     $companyId,
@@ -348,6 +354,39 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                 'metadata' => $purchaseTaxMetadata,
             ];
         });
+    }
+
+    private function assertPurchaseIsNotDuplicated(int $companyId, $referenceNo, $supplierReference): void
+    {
+        $normalizedReferenceNo = $this->normalizePurchaseKeyText($referenceNo);
+        $normalizedSupplierReference = $this->normalizePurchaseKeyText($supplierReference);
+
+        if ($normalizedReferenceNo === '' || $normalizedSupplierReference === '') {
+            return;
+        }
+
+        $duplicateExists = DB::table('inventory.stock_entries')
+            ->where('company_id', $companyId)
+            ->where('entry_type', 'PURCHASE')
+            ->whereRaw("UPPER(COALESCE(status, '')) NOT IN ('VOID', 'CANCELED')")
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(reference_no, '')), '\\s+', ' ', 'g')) = ?", [$normalizedReferenceNo])
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(supplier_reference, '')), '\\s+', ' ', 'g')) = ?", [$normalizedSupplierReference])
+            ->exists();
+
+        if ($duplicateExists) {
+            throw new \RuntimeException('Compra duplicada: ya existe una compra registrada con el mismo proveedor y numero de comprobante.');
+        }
+    }
+
+    private function normalizePurchaseKeyText($value): string
+    {
+        $text = trim((string) ($value ?? ''));
+        if ($text === '') {
+            return '';
+        }
+
+        $text = preg_replace('/\s+/', ' ', $text) ?? $text;
+        return strtoupper($text);
     }
 
     private function resolveIssueAtForStorage($issueAt): string

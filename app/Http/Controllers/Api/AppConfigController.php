@@ -671,6 +671,27 @@ class AppConfigController extends Controller
             }
         }
 
+        $missingAdminCompanyIds = array_values(array_diff(
+            $companies->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            $adminUsersByCompany->keys()->map(fn ($id) => (int) $id)->all()
+        ));
+
+        if (!empty($missingAdminCompanyIds)) {
+            $fallbackUsers = DB::table('auth.users as u')
+                ->where('u.status', 1)
+                ->whereIn('u.company_id', $missingAdminCompanyIds)
+                ->orderBy('u.company_id')
+                ->orderBy('u.id')
+                ->get(['u.id', 'u.company_id', 'u.username', 'u.email']);
+
+            foreach ($fallbackUsers as $fu) {
+                $cid = (int) $fu->company_id;
+                if (!$adminUsersByCompany->has($cid)) {
+                    $adminUsersByCompany->put($cid, $fu);
+                }
+            }
+        }
+
         $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany) {
             $companyId = (int) $company->id;
             $companyAssignments = $byCompany[$companyId] ?? [];
@@ -1820,6 +1841,19 @@ class AppConfigController extends Controller
             ->first(['u.id', 'u.username', 'u.email']);
 
         if (!$adminUser) {
+            $this->repairCompanyAdminRoleAfterRestore($companyId);
+
+            $adminUser = DB::table('auth.users as u')
+                ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+                ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+                ->where('u.company_id', $companyId)
+                ->where('u.status', 1)
+                ->whereRaw("UPPER(r.code) = 'ADMIN'")
+                ->orderBy('u.id')
+                ->first(['u.id', 'u.username', 'u.email']);
+        }
+
+        if (!$adminUser) {
             return response()->json([
                 'message' => 'No se encontró un usuario administrador activo para esta empresa.',
             ], 404);
@@ -1861,6 +1895,19 @@ class AppConfigController extends Controller
             ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
 
         if (!$adminUser) {
+            $this->repairCompanyAdminRoleAfterRestore($companyId);
+
+            $adminUser = DB::table('auth.users as u')
+                ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+                ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+                ->where('u.company_id', $companyId)
+                ->where('u.status', 1)
+                ->whereRaw("UPPER(r.code) = 'ADMIN'")
+                ->orderBy('u.id')
+                ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
+        }
+
+        if (!$adminUser) {
             return response()->json(['message' => 'No se encontró un usuario administrador activo.'], 404);
         }
 
@@ -1882,6 +1929,238 @@ class AppConfigController extends Controller
         ]);
     }
 
+    public function exportSystemDatabaseBackup(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser || !$this->canExportSystemDatabaseBackup($authUser)) {
+            return response()->json([
+                'message' => 'Solo un superadmin del sistema puede exportar respaldos globales.',
+            ], 403);
+        }
+
+        $company = $this->resolveBackupCompanyFromRequest($request);
+        if ($company === null) {
+            return response()->json([
+                'message' => 'Empresa invalida para respaldo.',
+            ], 422);
+        }
+
+        $timestamp = Carbon::now('America/Lima')->format('Ymd_His');
+        $fileName = "company_{$company->id}_{$timestamp}.sql";
+        $backupDir = $this->backupDirectoryForCompany((int) $company->id);
+
+        if (!is_dir($backupDir) && !@mkdir($backupDir, 0775, true) && !is_dir($backupDir)) {
+            return response()->json([
+                'message' => 'No se pudo crear la carpeta temporal de backups.',
+            ], 500);
+        }
+
+        $outputPath = $backupDir . DIRECTORY_SEPARATOR . $fileName;
+
+        $ok = $this->writeCompanyBackupSql((int) $company->id, $outputPath);
+        if (!$ok || !is_file($outputPath) || filesize($outputPath) === 0) {
+            if (is_file($outputPath)) {
+                @unlink($outputPath);
+            }
+
+            return response()->json([
+                'message' => 'Fallo al generar respaldo por empresa.',
+            ], 500);
+        }
+
+        return response()->download($outputPath, $fileName, [
+            'Content-Type' => 'application/sql; charset=UTF-8',
+        ]);
+    }
+
+    public function listSystemDatabaseBackups(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser || !$this->canExportSystemDatabaseBackup($authUser)) {
+            return response()->json([
+                'message' => 'Solo un superadmin del sistema puede ver respaldos globales.',
+            ], 403);
+        }
+
+        $company = $this->resolveBackupCompanyFromRequest($request);
+        if ($company === null) {
+            return response()->json([
+                'message' => 'Empresa invalida para historial de respaldos.',
+            ], 422);
+        }
+
+        $page = (int) $request->query('page', 1);
+        $perPage = (int) $request->query('per_page', 10);
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+
+        $backupDir = $this->backupDirectoryForCompany((int) $company->id);
+        if (!is_dir($backupDir)) {
+            $pagination = [
+                'page' => 1,
+                'per_page' => $perPage,
+                'total' => 0,
+                'last_page' => 1,
+            ];
+
+            return response()->json([
+                'backups' => [],
+                'pagination' => $pagination,
+            ]);
+        }
+
+        $files = glob($backupDir . DIRECTORY_SEPARATOR . "company_{$company->id}_*.sql") ?: [];
+        $rows = [];
+
+        foreach ($files as $path) {
+            if (!is_file($path)) {
+                continue;
+            }
+
+            $fileName = basename($path);
+            if (!$this->isAllowedBackupFileName($fileName, (int) $company->id)) {
+                continue;
+            }
+
+            $mtime = filemtime($path) ?: time();
+            $rows[] = [
+                'file_name' => $fileName,
+                'size_bytes' => filesize($path) ?: 0,
+                'size_label' => $this->formatBytes((int) (filesize($path) ?: 0)),
+                'generated_at' => Carbon::createFromTimestamp($mtime, 'America/Lima')->toIso8601String(),
+            ];
+        }
+
+        usort($rows, function (array $a, array $b): int {
+            return strcmp((string) $b['generated_at'], (string) $a['generated_at']);
+        });
+
+        $total = count($rows);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $lastPage);
+        $offset = ($page - 1) * $perPage;
+        $pagedRows = array_slice($rows, $offset, $perPage);
+
+        return response()->json([
+            'backups' => $pagedRows,
+            'pagination' => [
+                'page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'last_page' => $lastPage,
+            ],
+        ]);
+    }
+
+    public function downloadSystemDatabaseBackupFile(Request $request, $fileName)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser || !$this->canExportSystemDatabaseBackup($authUser)) {
+            return response()->json([
+                'message' => 'Solo un superadmin del sistema puede descargar respaldos globales.',
+            ], 403);
+        }
+
+        $company = $this->resolveBackupCompanyFromRequest($request);
+        if ($company === null) {
+            return response()->json([
+                'message' => 'Empresa invalida para descarga de respaldos.',
+            ], 422);
+        }
+
+        $resolvedName = trim((string) $fileName);
+        if (!$this->isAllowedBackupFileName($resolvedName, (int) $company->id)) {
+            return response()->json([
+                'message' => 'Nombre de respaldo invalido.',
+            ], 422);
+        }
+
+        $backupDir = $this->backupDirectoryForCompany((int) $company->id);
+        $fullPath = $backupDir . DIRECTORY_SEPARATOR . $resolvedName;
+
+        if (!is_file($fullPath)) {
+            return response()->json([
+                'message' => 'No se encontro el respaldo solicitado.',
+            ], 404);
+        }
+
+        return response()->download($fullPath, $resolvedName, [
+            'Content-Type' => 'application/sql; charset=UTF-8',
+        ]);
+    }
+
+    public function restoreSystemDatabaseBackup(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser || !$this->canExportSystemDatabaseBackup($authUser)) {
+            return response()->json([
+                'message' => 'Solo un superadmin del sistema puede restaurar respaldos globales.',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+            'backup_file' => 'required|file|max:51200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $company = $this->resolveBackupCompanyFromRequest($request);
+        if ($company === null) {
+            return response()->json([
+                'message' => 'Empresa invalida para restauracion.',
+            ], 422);
+        }
+
+        $file = $request->file('backup_file');
+        if (!$file || !$file->isValid()) {
+            return response()->json([
+                'message' => 'Archivo de respaldo invalido.',
+            ], 422);
+        }
+
+        $sql = @file_get_contents($file->getRealPath());
+        if (!is_string($sql) || trim($sql) === '') {
+            return response()->json([
+                'message' => 'No se pudo leer el archivo de respaldo.',
+            ], 422);
+        }
+
+        $expectedMarker = '-- company_id: ' . (int) $company->id;
+        if (strpos($sql, $expectedMarker) === false) {
+            return response()->json([
+                'message' => 'El respaldo no corresponde a la empresa seleccionada.',
+            ], 422);
+        }
+
+        $sql = $this->normalizeBackupSqlForRestore($sql, (int) $company->id);
+
+        try {
+            DB::beginTransaction();
+            DB::unprepared($sql);
+            $this->repairCompanyAdminRoleAfterRestore((int) $company->id);
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Fallo al restaurar respaldo: ' . $e->getMessage(),
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Respaldo restaurado correctamente para la empresa seleccionada.',
+        ]);
+    }
+
     private function generateSecurePassword(int $length = 12): string
     {
         $chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
@@ -1890,6 +2169,798 @@ class AppConfigController extends Controller
             $password .= $chars[random_int(0, strlen($chars) - 1)];
         }
         return $password;
+    }
+
+    private function canExportSystemDatabaseBackup(object $authUser): bool
+    {
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+        if (in_array($roleCode, ['SUPERADMIN', 'SUPER_ADMIN'], true)) {
+            return true;
+        }
+
+        return (int) ($authUser->company_id ?? 0) === self::SYSTEM_COMPANY_ID;
+    }
+
+    private function isAllowedBackupFileName(string $fileName, int $companyId): bool
+    {
+        return (bool) preg_match('/^company_' . preg_quote((string) $companyId, '/') . '_[0-9]{8}_[0-9]{6}\.sql$/', $fileName);
+    }
+
+    private function backupDirectoryForCompany(int $companyId): string
+    {
+        return storage_path('app/backups/company_' . $companyId);
+    }
+
+    private function resolveBackupCompanyFromRequest(Request $request): ?object
+    {
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return null;
+        }
+
+        $companyId = $this->normalizeLegacyCompanyId((int) ($validator->validated()['company_id'] ?? 0));
+        if ($companyId <= 0 || $companyId === self::SYSTEM_COMPANY_ID) {
+            return null;
+        }
+
+        return DB::table('core.companies')
+            ->where('id', $companyId)
+            ->first(['id', 'tax_id', 'legal_name']);
+    }
+
+    private function writeCompanyBackupSql(int $companyId, string $outputPath): bool
+    {
+        $handle = @fopen($outputPath, 'wb');
+        if ($handle === false) {
+            return false;
+        }
+
+        try {
+            fwrite($handle, "-- Company-scoped backup\n");
+            fwrite($handle, '-- company_id: ' . $companyId . "\n");
+            fwrite($handle, '-- generated_at: ' . Carbon::now('America/Lima')->toIso8601String() . "\n\n");
+            fwrite($handle, "BEGIN;\n");
+            fwrite($handle, "SET CONSTRAINTS ALL IMMEDIATE;\n");
+
+            $tables = $this->fetchCompanyScopedTables();
+            $deleteOrder = $this->resolveCompanyScopedDeleteOrder($tables);
+            $insertOrder = array_reverse($deleteOrder);
+            $dependentScopes = $this->buildDependentTableScopes($tables, $companyId);
+            $dependentDeletes = $this->buildDeleteStatementsFromDependentScopes($dependentScopes);
+
+            $pdo = DB::connection()->getPdo();
+
+            if (!empty($dependentDeletes)) {
+                fwrite($handle, "\n-- Dependent delete phase (tables without company_id)\n");
+                foreach ($dependentDeletes as $statement) {
+                    fwrite($handle, $statement . "\n");
+                }
+            }
+
+            fwrite($handle, "\n-- Delete phase (children -> parents)\n");
+            foreach ($deleteOrder as $key) {
+                if (!isset($tables[$key])) {
+                    continue;
+                }
+
+                $schema = $tables[$key]['schema'];
+                $table = $tables[$key]['table'];
+
+                $qualified = $this->quoteIdentifier($schema) . '.' . $this->quoteIdentifier($table);
+                fwrite($handle, "-- {$schema}.{$table}\n");
+                fwrite($handle, "DELETE FROM {$qualified} WHERE company_id = {$companyId};\n");
+            }
+
+            fwrite($handle, "\n-- Insert phase (parents -> children)\n");
+            foreach ($insertOrder as $key) {
+                if (!isset($tables[$key])) {
+                    continue;
+                }
+
+                $schema = $tables[$key]['schema'];
+                $table = $tables[$key]['table'];
+
+                $qualified = $this->quoteIdentifier($schema) . '.' . $this->quoteIdentifier($table);
+                fwrite($handle, "\n-- {$schema}.{$table}\n");
+
+                foreach (DB::table("{$schema}.{$table}")->where('company_id', $companyId)->cursor() as $row) {
+                    $assoc = (array) $row;
+                    if (empty($assoc)) {
+                        continue;
+                    }
+
+                    $columns = [];
+                    $values = [];
+
+                    foreach ($assoc as $column => $value) {
+                        $columns[] = $this->quoteIdentifier((string) $column);
+                        $values[] = $this->toSqlLiteral($value, $pdo);
+                    }
+
+                    fwrite(
+                        $handle,
+                        sprintf(
+                            "INSERT INTO %s (%s) VALUES (%s);\n",
+                            $qualified,
+                            implode(', ', $columns),
+                            implode(', ', $values)
+                        )
+                    );
+                }
+            }
+
+            if (!empty($dependentScopes)) {
+                fwrite($handle, "\n-- Dependent insert phase (related tables without company_id)\n");
+                $dependentInsertScopes = array_reverse($dependentScopes);
+
+                foreach ($dependentInsertScopes as $scope) {
+                    $schema = (string) $scope['child_schema'];
+                    $table = (string) $scope['child_table'];
+                    $whereSql = (string) $scope['where_sql'];
+                    $qualified = $this->quoteIdentifier($schema) . '.' . $this->quoteIdentifier($table);
+
+                    fwrite($handle, "\n-- {$schema}.{$table}\n");
+
+                    $selectSql = sprintf('SELECT * FROM %s AS c WHERE %s', $qualified, $whereSql);
+                    foreach (DB::cursor($selectSql) as $row) {
+                        $assoc = (array) $row;
+                        if (empty($assoc)) {
+                            continue;
+                        }
+
+                        $columns = [];
+                        $values = [];
+
+                        foreach ($assoc as $column => $value) {
+                            $columns[] = $this->quoteIdentifier((string) $column);
+                            $values[] = $this->toSqlLiteral($value, $pdo);
+                        }
+
+                        fwrite(
+                            $handle,
+                            sprintf(
+                                "INSERT INTO %s (%s) VALUES (%s);\n",
+                                $qualified,
+                                implode(', ', $columns),
+                                implode(', ', $values)
+                            )
+                        );
+                    }
+                }
+            }
+
+            fwrite($handle, "\nCOMMIT;\n");
+        } catch (\Throwable $e) {
+            fclose($handle);
+            return false;
+        }
+
+        fclose($handle);
+        return true;
+    }
+
+    private function fetchCompanyScopedTables(): array
+    {
+        $rows = DB::select(
+                        "select c.table_schema, c.table_name
+                         from information_schema.columns c
+                         inner join information_schema.tables t
+                             on t.table_schema = c.table_schema
+                            and t.table_name = c.table_name
+                         where c.column_name = 'company_id'
+                             and c.table_schema not in ('pg_catalog', 'information_schema')
+                             and t.table_type = 'BASE TABLE'
+                         group by c.table_schema, c.table_name
+             order by table_schema, table_name"
+        );
+
+        $tables = [];
+        foreach ($rows as $row) {
+            $schema = (string) $row->table_schema;
+            $table = (string) $row->table_name;
+            $key = $schema . '.' . $table;
+            $tables[$key] = [
+                'schema' => $schema,
+                'table' => $table,
+            ];
+        }
+
+        return $tables;
+    }
+
+    private function buildDirectDependentDeleteStatements(array $tables, int $companyId): array
+    {
+        $scopes = $this->buildDependentTableScopes($tables, $companyId);
+        return $this->buildDeleteStatementsFromDependentScopes($scopes);
+    }
+
+    private function buildDeleteStatementsFromDependentScopes(array $scopes): array
+    {
+        if (empty($scopes)) {
+            return [];
+        }
+
+        $statements = [];
+        foreach ($scopes as $scope) {
+            $childKey = (string) $scope['table_key'];
+            $childQualified = $this->quoteIdentifier((string) $scope['child_schema']) . '.' . $this->quoteIdentifier((string) $scope['child_table']);
+            $whereSql = (string) $scope['where_sql'];
+
+            $statements[] = sprintf('-- %s', $childKey);
+            $statements[] = sprintf('DELETE FROM %s AS c WHERE %s;', $childQualified, $whereSql);
+        }
+
+        return $statements;
+    }
+
+    private function buildDependentTableScopes(array $tables, int $companyId): array
+    {
+        $companyScopedSet = array_fill_keys(array_keys($tables), true);
+        if (empty($companyScopedSet)) {
+            return [];
+        }
+
+        $fkRows = DB::select(
+            "select
+                n_child.nspname as child_schema,
+                c_child.relname as child_table,
+                a_child.attname as child_column,
+                n_parent.nspname as parent_schema,
+                c_parent.relname as parent_table,
+                a_parent.attname as parent_column
+             from pg_constraint con
+             inner join pg_class c_child on c_child.oid = con.conrelid
+             inner join pg_namespace n_child on n_child.oid = c_child.relnamespace
+             inner join pg_class c_parent on c_parent.oid = con.confrelid
+             inner join pg_namespace n_parent on n_parent.oid = c_parent.relnamespace
+             inner join pg_attribute a_child on a_child.attrelid = con.conrelid and a_child.attnum = con.conkey[1]
+             inner join pg_attribute a_parent on a_parent.attrelid = con.confrelid and a_parent.attnum = con.confkey[1]
+             where con.contype = 'f'
+               and c_child.relkind = 'r'
+               and c_parent.relkind = 'r'
+               and array_length(con.conkey, 1) = 1
+               and array_length(con.confkey, 1) = 1"
+        );
+
+        $conditionsByChild = [];
+
+        foreach ($fkRows as $fkRow) {
+            $childSchema = (string) $fkRow->child_schema;
+            $childTable = (string) $fkRow->child_table;
+            $childColumn = (string) $fkRow->child_column;
+            $parentSchema = (string) $fkRow->parent_schema;
+            $parentTable = (string) $fkRow->parent_table;
+            $parentColumn = (string) $fkRow->parent_column;
+
+            $childKey = $childSchema . '.' . $childTable;
+            $parentKey = $parentSchema . '.' . $parentTable;
+
+            if (isset($companyScopedSet[$childKey])) {
+                continue;
+            }
+
+            if (!isset($companyScopedSet[$parentKey])) {
+                continue;
+            }
+
+            if (!isset($conditionsByChild[$childKey])) {
+                $conditionsByChild[$childKey] = [
+                    'child_schema' => $childSchema,
+                    'child_table' => $childTable,
+                    'conditions' => [],
+                ];
+            }
+
+            $conditionsByChild[$childKey]['conditions'][] = [
+                'child_column' => $childColumn,
+                'parent_schema' => $parentSchema,
+                'parent_table' => $parentTable,
+                'parent_column' => $parentColumn,
+            ];
+        }
+
+        if (empty($conditionsByChild)) {
+            return [];
+        }
+
+        $childNodes = array_keys($conditionsByChild);
+        $childSet = array_fill_keys($childNodes, true);
+        $edges = [];
+
+        foreach ($conditionsByChild as $childKey => $definition) {
+            foreach ($definition['conditions'] as $condition) {
+                $parentKey = (string) $condition['parent_schema'] . '.' . (string) $condition['parent_table'];
+                if (isset($childSet[$parentKey])) {
+                    $edges[] = [$childKey, $parentKey];
+                }
+            }
+        }
+
+        $orderedChildren = $this->topologicalOrder($childNodes, $edges);
+
+        $scopes = [];
+        foreach ($orderedChildren as $childKey) {
+            if (!isset($conditionsByChild[$childKey])) {
+                continue;
+            }
+
+            $definition = $conditionsByChild[$childKey];
+
+            $predicates = [];
+            foreach ($definition['conditions'] as $condition) {
+                $parentQualified = $this->quoteIdentifier((string) $condition['parent_schema']) . '.' . $this->quoteIdentifier((string) $condition['parent_table']);
+                $parentColumn = $this->quoteIdentifier((string) $condition['parent_column']);
+                $childColumn = $this->quoteIdentifier((string) $condition['child_column']);
+
+                $predicates[] = sprintf(
+                    'EXISTS (SELECT 1 FROM %s AS p WHERE p.%s = c.%s AND p.company_id = %d)',
+                    $parentQualified,
+                    $parentColumn,
+                    $childColumn,
+                    $companyId
+                );
+            }
+
+            $scopes[] = [
+                'table_key' => $childKey,
+                'child_schema' => (string) $definition['child_schema'],
+                'child_table' => (string) $definition['child_table'],
+                'where_sql' => implode(' OR ', $predicates),
+            ];
+        }
+
+        return $scopes;
+    }
+
+    private function injectDependentDeletePhaseToBackupSql(string $sql, int $companyId): string
+    {
+        $tables = $this->fetchCompanyScopedTables();
+        $dependentDeletes = $this->buildDirectDependentDeleteStatements($tables, $companyId);
+        if (empty($dependentDeletes)) {
+            return $sql;
+        }
+
+        $eol = strpos($sql, "\r\n") !== false ? "\r\n" : "\n";
+
+        $block = $eol . '-- Dependent delete phase (tables without company_id)' . $eol
+            . implode($eol, $dependentDeletes)
+            . $eol;
+
+        $withDeletePhase = preg_replace(
+            '/(\r?\n)-- Delete phase \(children -> parents\)(\r?\n)/',
+            $block . '$1-- Delete phase (children -> parents)$2',
+            $sql,
+            1
+        );
+        if (is_string($withDeletePhase) && $withDeletePhase !== $sql) {
+            return $withDeletePhase;
+        }
+
+        $withSetConstraints = preg_replace(
+            '/SET CONSTRAINTS ALL IMMEDIATE;(\r?\n)/',
+            'SET CONSTRAINTS ALL IMMEDIATE;$1' . $block,
+            $sql,
+            1
+        );
+        if (is_string($withSetConstraints) && $withSetConstraints !== $sql) {
+            return $withSetConstraints;
+        }
+
+        $withBegin = preg_replace(
+            '/BEGIN;(\r?\n)/',
+            'BEGIN;$1' . $block,
+            $sql,
+            1
+        );
+        if (is_string($withBegin) && $withBegin !== $sql) {
+            return $withBegin;
+        }
+
+        return $sql;
+    }
+
+    private function normalizeBackupSqlForRestore(string $sql, int $companyId): string
+    {
+        $insertMarker = '-- Insert phase (parents -> children)';
+        $insertPos = strpos($sql, $insertMarker);
+
+        if ($insertPos === false) {
+            return $sql;
+        }
+
+        $insertSql = substr($sql, $insertPos);
+        if (!is_string($insertSql) || trim($insertSql) === '') {
+            return $sql;
+        }
+
+        $tables = $this->fetchCompanyScopedTables();
+        $insertSql = $this->reorderInsertPhaseSql($insertSql);
+
+        // Remove transaction control statements from uploaded file; restore controller manages transaction.
+        $insertSql = preg_replace('/^\s*(BEGIN;|COMMIT;|SET CONSTRAINTS ALL IMMEDIATE;)\s*$/mi', '', $insertSql) ?: $insertSql;
+
+        $cleanupSql = $this->buildCompanyCleanupSql($companyId, $tables);
+        if ($cleanupSql === '') {
+            return $sql;
+        }
+
+        return "SET CONSTRAINTS ALL IMMEDIATE;\n"
+            . $cleanupSql
+            . "\n"
+            . trim($insertSql)
+            . "\n";
+    }
+
+    private function reorderInsertPhaseSql(string $insertSql): string
+    {
+        $matches = [];
+        preg_match_all('/INSERT\s+INTO\s+"([^"]+)"\."([^"]+)"\s*\(.*?\);/is', $insertSql, $matches, PREG_SET_ORDER);
+
+        if (empty($matches)) {
+            return $insertSql;
+        }
+
+        $statementsByTable = [];
+        foreach ($matches as $match) {
+            $schema = (string) ($match[1] ?? '');
+            $table = (string) ($match[2] ?? '');
+            $statement = trim((string) ($match[0] ?? ''));
+
+            if ($schema === '' || $table === '' || $statement === '') {
+                continue;
+            }
+
+            $key = $schema . '.' . $table;
+            if (!isset($statementsByTable[$key])) {
+                $statementsByTable[$key] = [];
+            }
+            $statementsByTable[$key][] = $statement;
+        }
+
+        if (empty($statementsByTable)) {
+            return $insertSql;
+        }
+
+        $orderedKeys = $this->resolveInsertOrderForTables(array_keys($statementsByTable));
+        $lines = ['-- Insert phase (parents -> children)'];
+
+        foreach ($orderedKeys as $key) {
+            if (!isset($statementsByTable[$key])) {
+                continue;
+            }
+
+            $lines[] = '-- ' . $key;
+            foreach ($statementsByTable[$key] as $statement) {
+                $lines[] = $statement;
+            }
+            unset($statementsByTable[$key]);
+        }
+
+        if (!empty($statementsByTable)) {
+            ksort($statementsByTable);
+            foreach ($statementsByTable as $key => $statements) {
+                $lines[] = '-- ' . $key;
+                foreach ($statements as $statement) {
+                    $lines[] = $statement;
+                }
+            }
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    private function buildCompanyCleanupSql(int $companyId, array $tables): string
+    {
+        $deleteOrder = $this->resolveCompanyScopedDeleteOrder($tables);
+        $dependentDeletes = $this->buildDirectDependentDeleteStatements($tables, $companyId);
+
+        $lines = [];
+
+        if (!empty($dependentDeletes)) {
+            $lines[] = '-- Dependent delete phase (tables without company_id)';
+            foreach ($dependentDeletes as $statement) {
+                $lines[] = $statement;
+            }
+        }
+
+        $lines[] = '-- Delete phase (children -> parents)';
+        foreach ($deleteOrder as $key) {
+            if (!isset($tables[$key])) {
+                continue;
+            }
+
+            $schema = $tables[$key]['schema'];
+            $table = $tables[$key]['table'];
+            $qualified = $this->quoteIdentifier($schema) . '.' . $this->quoteIdentifier($table);
+
+            $lines[] = '-- ' . $schema . '.' . $table;
+            $lines[] = 'DELETE FROM ' . $qualified . ' WHERE company_id = ' . $companyId . ';';
+        }
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    private function resolveInsertOrderForTables(array $tableKeys): array
+    {
+        if (empty($tableKeys)) {
+            return [];
+        }
+
+        $nodeSet = array_fill_keys($tableKeys, true);
+
+        $fkRows = DB::select(
+            "select
+                n_child.nspname as child_schema,
+                c_child.relname as child_table,
+                n_parent.nspname as parent_schema,
+                c_parent.relname as parent_table
+             from pg_constraint con
+             inner join pg_class c_child on c_child.oid = con.conrelid
+             inner join pg_namespace n_child on n_child.oid = c_child.relnamespace
+             inner join pg_class c_parent on c_parent.oid = con.confrelid
+             inner join pg_namespace n_parent on n_parent.oid = c_parent.relnamespace
+             where con.contype = 'f'"
+        );
+
+        $edges = [];
+        foreach ($fkRows as $fkRow) {
+            $childKey = (string) $fkRow->child_schema . '.' . (string) $fkRow->child_table;
+            $parentKey = (string) $fkRow->parent_schema . '.' . (string) $fkRow->parent_table;
+
+            if (!isset($nodeSet[$childKey]) || !isset($nodeSet[$parentKey])) {
+                continue;
+            }
+
+            $edges[] = [$childKey, $parentKey];
+        }
+
+        return array_reverse($this->topologicalOrder($tableKeys, $edges));
+    }
+
+    private function repairCompanyAdminRoleAfterRestore(int $companyId): void
+    {
+        $activeUserIds = DB::table('auth.users')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->orderByRaw("CASE WHEN LOWER(username) IN ('admin', 'administrador') THEN 0 ELSE 1 END")
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (empty($activeUserIds)) {
+            return;
+        }
+
+        $candidateUserId = (int) $activeUserIds[0];
+
+        $adminRole = DB::table('auth.roles')
+            ->where('company_id', $companyId)
+            ->whereRaw("UPPER(code) = 'ADMIN'")
+            ->orderBy('id')
+            ->first(['id']);
+
+        $adminRoleId = $adminRole ? (int) $adminRole->id : 0;
+        if ($adminRoleId <= 0) {
+            $adminRoleId = (int) DB::table('auth.roles')->insertGetId([
+                'company_id' => $companyId,
+                'code' => 'ADMIN',
+                'name' => 'Administrador',
+                'status' => 1,
+            ]);
+        }
+
+        if ($adminRoleId <= 0) {
+            return;
+        }
+
+        DB::table('auth.user_roles')->updateOrInsert(
+            [
+                'user_id' => $candidateUserId,
+                'role_id' => $adminRoleId,
+            ],
+            []
+        );
+
+        $permissionIds = DB::table('auth.permissions')->pluck('id')->map(fn ($id) => (int) $id)->all();
+        foreach ($permissionIds as $permissionId) {
+            DB::table('auth.role_permissions')->updateOrInsert(
+                [
+                    'role_id' => $adminRoleId,
+                    'permission_id' => $permissionId,
+                ],
+                []
+            );
+        }
+
+        $moduleIds = DB::table('appcfg.modules')->where('status', 1)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        foreach ($moduleIds as $moduleId) {
+            DB::table('auth.role_module_access')->updateOrInsert(
+                [
+                    'role_id' => $adminRoleId,
+                    'module_id' => $moduleId,
+                ],
+                [
+                    'can_view' => true,
+                    'can_create' => true,
+                    'can_update' => true,
+                    'can_delete' => true,
+                    'can_export' => true,
+                    'can_approve' => true,
+                    'updated_at' => now(),
+                ]
+            );
+        }
+
+        $fieldIds = DB::table('appcfg.ui_fields')->where('status', 1)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        foreach ($fieldIds as $fieldId) {
+            DB::table('auth.role_ui_field_access')->updateOrInsert(
+                [
+                    'role_id' => $adminRoleId,
+                    'field_id' => $fieldId,
+                ],
+                [
+                    'can_view' => true,
+                    'can_edit' => true,
+                    'can_filter' => true,
+                ]
+            );
+        }
+
+        $hasAdmin = DB::table('auth.users as u')
+            ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('u.company_id', $companyId)
+            ->where('u.status', 1)
+            ->whereRaw("UPPER(r.code) = 'ADMIN'")
+            ->exists();
+
+        if ($hasAdmin) {
+            return;
+        }
+    }
+
+    private function resolveCompanyScopedDeleteOrder(array $tables): array
+    {
+        $nodes = array_keys($tables);
+        if (empty($nodes)) {
+            return [];
+        }
+
+        $nodeSet = array_fill_keys($nodes, true);
+        $fkRows = DB::select(
+            "select
+                n_child.nspname as child_schema,
+                c_child.relname as child_table,
+                n_parent.nspname as parent_schema,
+                c_parent.relname as parent_table
+             from pg_constraint con
+             inner join pg_class c_child on c_child.oid = con.conrelid
+             inner join pg_namespace n_child on n_child.oid = c_child.relnamespace
+             inner join pg_class c_parent on c_parent.oid = con.confrelid
+             inner join pg_namespace n_parent on n_parent.oid = c_parent.relnamespace
+             where con.contype = 'f'"
+        );
+
+        $edges = [];
+        foreach ($fkRows as $fkRow) {
+            $childKey = (string) $fkRow->child_schema . '.' . (string) $fkRow->child_table;
+            $parentKey = (string) $fkRow->parent_schema . '.' . (string) $fkRow->parent_table;
+
+            if (!isset($nodeSet[$childKey]) || !isset($nodeSet[$parentKey])) {
+                continue;
+            }
+
+            $edges[] = [$childKey, $parentKey];
+        }
+
+        return $this->topologicalOrder($nodes, $edges);
+    }
+
+    private function topologicalOrder(array $nodes, array $edges): array
+    {
+        $adjacency = [];
+        $inDegree = [];
+
+        foreach ($nodes as $node) {
+            $adjacency[$node] = [];
+            $inDegree[$node] = 0;
+        }
+
+        foreach ($edges as $edge) {
+            $from = $edge[0];
+            $to = $edge[1];
+
+            if ($from === $to) {
+                // Ignore self-referential FKs; they create artificial cycles that break global ordering.
+                continue;
+            }
+
+            if (!isset($adjacency[$from]) || !isset($inDegree[$to])) {
+                continue;
+            }
+
+            if (in_array($to, $adjacency[$from], true)) {
+                continue;
+            }
+
+            $adjacency[$from][] = $to;
+            $inDegree[$to]++;
+        }
+
+        $queue = [];
+        foreach ($inDegree as $node => $degree) {
+            if ($degree === 0) {
+                $queue[] = $node;
+            }
+        }
+        sort($queue);
+
+        $ordered = [];
+        while (!empty($queue)) {
+            $current = array_shift($queue);
+            $ordered[] = $current;
+
+            foreach ($adjacency[$current] as $next) {
+                $inDegree[$next]--;
+                if ($inDegree[$next] === 0) {
+                    $queue[] = $next;
+                }
+            }
+
+            sort($queue);
+        }
+
+        if (count($ordered) < count($nodes)) {
+            $remaining = array_values(array_diff($nodes, $ordered));
+            sort($remaining);
+            $ordered = array_merge($ordered, $remaining);
+        }
+
+        return $ordered;
+    }
+
+    private function quoteIdentifier(string $identifier): string
+    {
+        return '"' . str_replace('"', '""', $identifier) . '"';
+    }
+
+    private function toSqlLiteral($value, \PDO $pdo): string
+    {
+        if ($value === null) {
+            return 'NULL';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'TRUE' : 'FALSE';
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        return $pdo->quote((string) $value);
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes < 1024) {
+            return $bytes . ' B';
+        }
+
+        $units = ['KB', 'MB', 'GB', 'TB'];
+        $size = $bytes / 1024;
+        $unitIndex = 0;
+
+        while ($size >= 1024 && $unitIndex < count($units) - 1) {
+            $size /= 1024;
+            $unitIndex++;
+        }
+
+        return number_format($size, 2) . ' ' . $units[$unitIndex];
     }
 
     public function operationalLimits(Request $request)

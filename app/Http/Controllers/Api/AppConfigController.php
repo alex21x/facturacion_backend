@@ -67,6 +67,7 @@ class AppConfigController extends Controller
         'SALES_GLOBAL_DISCOUNT_ENABLED',
         'SALES_ITEM_DISCOUNT_ENABLED',
         'SALES_FREE_ITEMS_ENABLED',
+        'SALES_VOID_REQUIRE_PASSWORD',
         'SALES_DETRACCION_ENABLED',
         'SALES_RETENCION_ENABLED',
         'SALES_PERCEPCION_ENABLED',
@@ -427,10 +428,14 @@ class AppConfigController extends Controller
 
             $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $featureCode);
             if ($verticalPreference['resolved']) {
-                if ($verticalPreference['is_enabled'] !== null) {
+                // Keep explicit company/branch values as source of truth; vertical is fallback only.
+                $hasExplicitToggle = ($branch && $branch->is_enabled !== null) || ($company && $company->is_enabled !== null);
+                $hasExplicitConfig = $branchConfig !== null || $companyConfig !== null;
+
+                if (!$hasExplicitToggle && $verticalPreference['is_enabled'] !== null) {
                     $isEnabled = (bool) $verticalPreference['is_enabled'];
                 }
-                if ($verticalPreference['config'] !== null) {
+                if (!$hasExplicitConfig && $verticalPreference['config'] !== null) {
                     $companyConfig = $verticalPreference['config'];
                     $branchConfig = null;
                 }
@@ -1826,6 +1831,7 @@ class AppConfigController extends Controller
             ->where('id', (int) $adminUser->id)
             ->update([
                 'password_hash' => Hash::make($newPassword),
+                'last_temp_password' => encrypt($newPassword),
                 'updated_at' => now(),
             ]);
 
@@ -1834,6 +1840,45 @@ class AppConfigController extends Controller
             'email' => $adminUser->email,
             'new_password' => $newPassword,
             'message' => 'Contraseña reseteada correctamente.',
+        ]);
+    }
+
+    public function revealAdminCompanyPassword(Request $request, $companyId)
+    {
+        $companyId = $this->normalizeLegacyCompanyId((int) $companyId);
+
+        if ($companyId === self::SYSTEM_COMPANY_ID) {
+            return response()->json(['message' => 'La empresa del sistema no se administra desde este panel.'], 403);
+        }
+
+        $adminUser = DB::table('auth.users as u')
+            ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
+            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
+            ->where('u.company_id', $companyId)
+            ->where('u.status', 1)
+            ->whereRaw("UPPER(r.code) = 'ADMIN'")
+            ->orderBy('u.id')
+            ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
+
+        if (!$adminUser) {
+            return response()->json(['message' => 'No se encontró un usuario administrador activo.'], 404);
+        }
+
+        if (empty($adminUser->last_temp_password)) {
+            return response()->json(['available' => false, 'message' => 'No hay contraseña temporal registrada para este usuario.']);
+        }
+
+        try {
+            $plainPassword = decrypt($adminUser->last_temp_password);
+        } catch (\Exception $e) {
+            return response()->json(['available' => false, 'message' => 'No se pudo recuperar la contraseña almacenada.']);
+        }
+
+        return response()->json([
+            'available' => true,
+            'username' => $adminUser->username,
+            'email' => $adminUser->email,
+            'password' => $plainPassword,
         ]);
     }
 
@@ -2041,6 +2086,34 @@ class AppConfigController extends Controller
             }
         }
 
+        // Enforce superadmin-only feature codes: only SUPERADMIN / SUPER_ADMIN may
+        // write these codes.  Regular company admins are blocked at API level even
+        // if they bypass the POS UI.
+        $superadminOnlyCodes = array_map(
+            'strtoupper',
+            config('features.superadmin_only_feature_codes', [])
+        );
+
+        if (!empty($superadminOnlyCodes)) {
+            $callerRoleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+            $isSuperAdmin = in_array($callerRoleCode, ['SUPERADMIN', 'SUPER_ADMIN'], true);
+
+            if (!$isSuperAdmin) {
+                $submittedCodes = array_map(
+                    fn ($f) => strtoupper(trim((string) ($f['feature_code'] ?? ''))),
+                    $payload['features']
+                );
+                $blocked = array_intersect($submittedCodes, $superadminOnlyCodes);
+
+                if (!empty($blocked)) {
+                    return response()->json([
+                        'message' => 'Las siguientes funcionalidades solo pueden ser modificadas desde el Portal Administrador: ' . implode(', ', array_values($blocked)),
+                        'blocked_codes' => array_values($blocked),
+                    ], 403);
+                }
+            }
+        }
+
         // Use optimized service (config merge + cache invalidation)
         $service = new FeatureConfigService();
         $result = $service->updateCommerceSettings($companyId, $branchId, $payload['features'], $authUser->id);
@@ -2115,7 +2188,8 @@ class AppConfigController extends Controller
 
     private function resolveVerticalFeaturePreference(int $companyId, string $featureCode): array
     {
-        $cacheKey = $companyId . ':' . strtoupper(trim($featureCode));
+        $normalizedCode = strtoupper(trim($featureCode));
+        $cacheKey = $companyId . ':' . $normalizedCode;
         if (array_key_exists($cacheKey, $this->verticalFeaturePreferenceCache)) {
             return $this->verticalFeaturePreferenceCache[$cacheKey];
         }
@@ -2126,6 +2200,14 @@ class AppConfigController extends Controller
             'config' => null,
             'source' => null,
         ];
+
+        // Superadmin-only feature codes must never be overridden by vertical templates.
+        // Their value is exclusively managed from the Admin Portal.
+        $superadminOnly = array_map('strtoupper', config('features.superadmin_only_feature_codes', []));
+        if (in_array($normalizedCode, $superadminOnly, true)) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
 
         if (!$this->tableExists('appcfg', 'verticals')
             || !$this->tableExists('appcfg', 'company_verticals')
@@ -2324,8 +2406,8 @@ class AppConfigController extends Controller
             ])
             ->where('ps.company_id', $companyId)
             ->where('ps.status', 1)
-            ->whereRaw('LOWER(ps.device_id) = ?', [mb_strtolower($deviceId)])
-            ->orderBy('ps.id')
+            ->whereRaw('LOWER(TRIM(ps.device_id)) = ?', [mb_strtolower(trim($deviceId))])
+            ->orderByDesc('ps.id')
             ->first();
 
         if (!$station) {
@@ -2477,6 +2559,8 @@ class AppConfigController extends Controller
             return [];
         }
 
+        $this->ensureFeatureLabelsPersisted($codes->all());
+
         $labels = [];
 
         if ($this->tableExists('appcfg', 'feature_labels')) {
@@ -2611,7 +2695,10 @@ class AppConfigController extends Controller
             $currentLabel = trim((string) ($current->label_es ?? ''));
             $categoryKey = $this->deriveFeatureCategoryKey((string) $code);
             $categoryLabel = $this->humanizeCategoryKey($categoryKey);
-            $shouldReplace = $current === null || $currentLabel === '' || strcasecmp($currentLabel, $code) === 0;
+            $shouldReplace = $current === null
+                || $currentLabel === ''
+                || strcasecmp($currentLabel, $code) === 0
+                || $this->isAutogeneratedEnglishFeatureLabel($currentLabel, (string) $code);
             $currentCategoryKey = strtolower(trim((string) ($current->category_key ?? '')));
             $currentCategoryLabel = trim((string) ($current->category_label ?? ''));
             $shouldUpdateCategory = $current === null || $currentCategoryKey === '' || $currentCategoryLabel === '';
@@ -2652,10 +2739,34 @@ class AppConfigController extends Controller
             return '';
         }
 
+        $configured = config('features.feature_labels_es.' . $normalized);
+        if (is_string($configured) && trim($configured) !== '') {
+            return trim($configured);
+        }
+
         $humanized = str_replace('_', ' ', $normalized);
         $humanized = preg_replace('/\s+/', ' ', $humanized ?? '') ?? $normalized;
 
         return Str::title(Str::lower(trim($humanized)));
+    }
+
+    private function isAutogeneratedEnglishFeatureLabel(string $label, string $code): bool
+    {
+        $normalizedLabel = trim($label);
+        if ($normalizedLabel === '') {
+            return false;
+        }
+
+        $normalizedCode = strtoupper(trim($code));
+        if ($normalizedCode === '') {
+            return false;
+        }
+
+        $humanized = str_replace('_', ' ', $normalizedCode);
+        $humanized = preg_replace('/\s+/', ' ', $humanized ?? '') ?? $normalizedCode;
+        $englishAuto = Str::title(Str::lower(trim($humanized)));
+
+        return strcasecmp($normalizedLabel, $englishAuto) === 0;
     }
 
     private function deriveFeatureCategoryKey(string $featureCode): string
@@ -2868,12 +2979,7 @@ class AppConfigController extends Controller
                 ->first();
         }
 
-        $logoUrl = null;
-        if ($settings && $settings->logo_path) {
-            $logoUrl = Storage::disk('public')->exists($settings->logo_path)
-                ? '/storage/' . ltrim((string) $settings->logo_path, '/')
-                : null;
-        }
+        $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
 
         // Extract location fields from extra_data
         $extraData = $settings
@@ -3425,6 +3531,7 @@ class AppConfigController extends Controller
                     'enable_graphical_dashboard' => $settings ? (bool) $settings->enable_graphical_dashboard : false,
                     'enable_location_control' => $settings ? (bool) $settings->enable_location_control : false,
                     'allow_negative_stock' => $settings ? (bool) $settings->allow_negative_stock : false,
+                    'low_stock_alert_threshold' => $settings ? (int) ($settings->low_stock_alert_threshold ?? 5) : 5,
                     'enforce_lot_for_tracked' => $settings ? (bool) $settings->enforce_lot_for_tracked : false,
                 ],
             ];
@@ -3438,6 +3545,8 @@ class AppConfigController extends Controller
         if (!$this->tableExists('inventory', 'inventory_settings')) {
             return response()->json(['message' => 'Inventory settings table not found'], 409);
         }
+
+        $hasLowStockAlertThreshold = $this->columnExists('inventory', 'inventory_settings', 'low_stock_alert_threshold');
 
         $authUser = $request->attributes->get('auth_user');
 
@@ -3454,6 +3563,7 @@ class AppConfigController extends Controller
             'enable_location_control' => 'nullable|boolean',
             'allow_negative_stock' => 'nullable|boolean',
             'enforce_lot_for_tracked' => 'nullable|boolean',
+            'low_stock_alert_threshold' => $hasLowStockAlertThreshold ? 'nullable|integer|min:0|max:9999' : 'nullable',
         ]);
 
         if ($validator->fails()) {
@@ -3477,6 +3587,7 @@ class AppConfigController extends Controller
             'allow_negative_stock', 'enforce_lot_for_tracked',
         ];
         $strFields = ['complexity_mode', 'inventory_mode', 'lot_outflow_strategy'];
+        $intFields = $hasLowStockAlertThreshold ? ['low_stock_alert_threshold'] : [];
 
         foreach ($boolFields as $field) {
             if (array_key_exists($field, $payload)) {
@@ -3486,6 +3597,11 @@ class AppConfigController extends Controller
         foreach ($strFields as $field) {
             if (array_key_exists($field, $payload)) {
                 $updates[$field] = $payload[$field];
+            }
+        }
+        foreach ($intFields as $field) {
+            if (array_key_exists($field, $payload)) {
+                $updates[$field] = (int) $payload[$field];
             }
         }
 
@@ -3499,5 +3615,42 @@ class AppConfigController extends Controller
         );
 
         return $this->companyInventorySettingsAdminMatrix($request);
+    }
+
+    private function resolveCompanyLogoUrl($logoPath): ?string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (preg_match('/^https?:\/\//i', $raw) === 1) {
+            return $raw;
+        }
+
+        $normalized = str_replace('\\', '/', $raw);
+        if (preg_match('/^https?:\/\//i', $normalized) === 1) {
+            $pathFromUrl = parse_url($normalized, PHP_URL_PATH);
+            $normalized = $pathFromUrl !== null ? (string) $pathFromUrl : $normalized;
+        }
+
+        $normalized = ltrim($normalized, '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            if (Storage::disk('public')->exists($normalized)) {
+                return '/storage/' . $normalized;
+            }
+        } catch (\Throwable $e) {
+            // Si falla la validacion del disco, devolvemos la ruta normalizada para no ocultar el logo.
+        }
+
+        return '/storage/' . $normalized;
     }
 }

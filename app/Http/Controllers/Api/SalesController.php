@@ -14,6 +14,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class SalesController extends Controller
@@ -156,6 +157,7 @@ class SalesController extends Controller
             'SALES_ALLOW_VOID_FOR_SELLER' => true,
             'SALES_ALLOW_VOID_FOR_CASHIER' => true,
             'SALES_ALLOW_VOID_FOR_ADMIN' => true,
+            'SALES_VOID_REQUIRE_PASSWORD' => false,
             'SALES_VOID_REVERSE_STOCK' => true,
         ];
         $commerceFeatureCodes = array_keys($commerceFeatureDefaults);
@@ -251,16 +253,7 @@ class SalesController extends Controller
         }
         $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
-        $logoUrl = null;
-        if ($settings && !empty($settings->logo_path)) {
-            try {
-                $logoUrl = \Storage::disk('public')->exists($settings->logo_path)
-                    ? '/storage/' . ltrim((string) $settings->logo_path, '/')
-                    : null;
-            } catch (\Throwable $e) {
-                $logoUrl = null;
-            }
-        }
+        $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
 
         return [
             'tax_id'     => $company->tax_id ?? null,
@@ -1968,6 +1961,7 @@ class SalesController extends Controller
             'notes' => 'nullable|string|max:500',
             'void_at' => 'nullable|date',
             'sunat_void_status' => 'nullable|string|max:40',
+            'void_password' => 'nullable|string|max:120',
         ]);
 
         if ($validator->fails()) {
@@ -1979,6 +1973,44 @@ class SalesController extends Controller
         }
 
         $payload = $validator->validated();
+
+        $documentContext = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->where('company_id', $companyId)
+            ->select('branch_id')
+            ->first();
+
+        $featureBranchId = $documentContext && $documentContext->branch_id !== null
+            ? (int) $documentContext->branch_id
+            : null;
+
+        $requireVoidPassword = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $featureBranchId,
+            'SALES_VOID_REQUIRE_PASSWORD',
+            false
+        );
+
+        $voidPassword = trim((string) ($payload['void_password'] ?? ''));
+        unset($payload['void_password']);
+
+        if ($requireVoidPassword) {
+            if ($voidPassword === '') {
+                return response()->json([
+                    'message' => 'Debe ingresar su clave para confirmar la anulacion.',
+                ], 422);
+            }
+
+            $passwordHash = DB::table('auth.users')
+                ->where('id', (int) $authUser->id)
+                ->value('password_hash');
+
+            if (!$passwordHash || !Hash::check($voidPassword, (string) $passwordHash)) {
+                return response()->json([
+                    'message' => 'Clave invalida para anular el documento.',
+                ], 422);
+            }
+        }
 
         try {
             $result = $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $payload);
@@ -2000,12 +2032,21 @@ class SalesController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
         $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
-        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
-        $isSellerUser = !str_contains($roleCode, 'ADMIN')
-            && ($roleProfile === 'SELLER'
-                || str_contains($roleCode, 'VENDED')
-                || str_contains($roleCode, 'SELLER'));
+        $isAdminUser = str_contains($roleCode, 'ADMIN');
+        // In SELLER_TO_CASHIER mode a cashier must see pending pre-documents from ALL
+        // sellers in the branch, not only their own.
+        $isCashierUser = $roleProfile === 'CASHIER'
+            || str_contains($roleCode, 'CAJA')
+            || str_contains($roleCode, 'CAJER')
+            || str_contains($roleCode, 'CASHIER');
+        $conversionStateParam = strtoupper(trim((string) ($request->query('conversion_state', ''))));
+        $cashierBranchScope = $isCashierUser && $conversionStateParam === 'PENDING';
+        $sellerToCashierEnabled = $this->resolveFeatureResolutionForContext(
+            $companyId, $resolvedBranchId, 'SALES_SELLER_TO_CASHIER', false
+        )['is_enabled'];
+
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -2026,7 +2067,11 @@ class SalesController extends Controller
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
-            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            // Admin: no filter. Cashier viewing pending orders in separated mode: no filter (sees all sellers).
+            // Everyone else (seller, etc.): restricted to own documents.
+            'seller_user_id' => ($isAdminUser || ($sellerToCashierEnabled && $cashierBranchScope))
+                ? null
+                : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $page = (int) $request->query('page', 1);
@@ -2046,10 +2091,12 @@ class SalesController extends Controller
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
             ->select([
                 'd.id',
                 'd.company_id',
                 'd.branch_id',
+                'd.created_by',
                 'd.document_kind',
                 'd.document_kind_id',
                                 DB::raw("COALESCE((d.metadata->>'conversion_origin'), '') as conversion_origin"),
@@ -2112,6 +2159,30 @@ class SalesController extends Controller
                                             AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
                                         LIMIT 1
                                 ) as source_document_kind"),
+                DB::raw("COALESCE(
+                    CASE
+                        WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT
+                        ELSE NULL
+                    END,
+                    (
+                        SELECT dsrc.created_by
+                        FROM sales.commercial_documents dsrc
+                        WHERE dsrc.company_id = d.company_id
+                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_id"),
+                DB::raw("COALESCE(
+                    NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
+                    (
+                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                        FROM sales.commercial_documents dsrc
+                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                        WHERE dsrc.company_id = d.company_id
+                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_name"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
                                 DB::raw("EXISTS (
                                         SELECT 1
@@ -2139,6 +2210,7 @@ class SalesController extends Controller
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
 
@@ -2175,12 +2247,8 @@ class SalesController extends Controller
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $format = strtolower(trim((string) $request->query('format', 'csv')));
-        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
-        $roleCode    = strtoupper(trim((string) ($authUser->role_code    ?? '')));
-        $isSellerUser = !str_contains($roleCode, 'ADMIN')
-            && ($roleProfile === 'SELLER'
-                || str_contains($roleCode, 'VENDED')
-                || str_contains($roleCode, 'SELLER'));
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+        $isAdminUser = str_contains($roleCode, 'ADMIN');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -2201,7 +2269,7 @@ class SalesController extends Controller
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
-            'seller_user_id' => $isSellerUser ? (int) $authUser->id : null,
+            'seller_user_id' => $isAdminUser ? null : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $detailMode = strtoupper(trim((string) $request->query('detail', 'SUMMARY')));
@@ -2217,8 +2285,10 @@ class SalesController extends Controller
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
+            ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
             ->select([
                 'd.id',
+                'd.created_by',
                 'd.document_kind',
                 'd.document_kind_id',
                 DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
@@ -2226,6 +2296,8 @@ class SalesController extends Controller
                 'd.number',
                 'd.issue_at',
                 'd.status',
+                DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
                 DB::raw("CASE d.status
                     WHEN 'DRAFT'    THEN 'Borrador'
                     WHEN 'APPROVED' THEN 'Aprobado'
@@ -2243,6 +2315,30 @@ class SalesController extends Controller
                                             AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
                                         LIMIT 1
                                 ) as source_document_kind"),
+                DB::raw("COALESCE(
+                    CASE
+                        WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT
+                        ELSE NULL
+                    END,
+                    (
+                        SELECT dsrc.created_by
+                        FROM sales.commercial_documents dsrc
+                        WHERE dsrc.company_id = d.company_id
+                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_id"),
+                DB::raw("COALESCE(
+                    NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
+                    (
+                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                        FROM sales.commercial_documents dsrc
+                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                        WHERE dsrc.company_id = d.company_id
+                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                        LIMIT 1
+                    )
+                ) as origin_seller_user_name"),
                                 DB::raw("(
                                         SELECT CONCAT(dsrc.series, '-', dsrc.number)
                                         FROM sales.commercial_documents dsrc
@@ -2256,6 +2352,7 @@ class SalesController extends Controller
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
 
@@ -2270,18 +2367,40 @@ class SalesController extends Controller
                 ->leftJoin('core.units as u', 'u.id', '=', 'di.unit_id')
                 ->select([
                     'd.id',
+                    'd.created_by',
                     'd.document_kind',
                     DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
                     'd.series',
                     'd.number',
                     'd.issue_at',
                     'd.status',
+                    DB::raw("COALESCE((d.metadata->>'sunat_status'), '') as sunat_status"),
+                    DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
+                    DB::raw("CASE d.status
+                        WHEN 'DRAFT'    THEN 'Borrador'
+                        WHEN 'APPROVED' THEN 'Aprobado'
+                        WHEN 'ISSUED'   THEN 'Emitido'
+                        WHEN 'VOID'     THEN 'Anulado'
+                        WHEN 'CANCELED' THEN 'Cancelado'
+                        ELSE d.status END as status_label"),
                     DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                     DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                    DB::raw("COALESCE(
+                        NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
+                        (
+                            SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
+                            FROM sales.commercial_documents dsrc
+                            LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
+                            WHERE dsrc.company_id = d.company_id
+                              AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
+                            LIMIT 1
+                        )
+                    ) as origin_seller_user_name"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
                     DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                    DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
                     'di.product_id',
                     DB::raw("COALESCE(di.description, p.name, 'SIN DESCRIPCION') as product_description"),
                     DB::raw("COALESCE(u.code, '-') as unit_code"),
@@ -2319,11 +2438,16 @@ class SalesController extends Controller
                     'Documento',
                     'Serie',
                     'Numero',
+                    'Solicita',
+                    'Emite',
+                    'Actor',
                     'Fecha Emision',
                     'Cliente',
                     'Vehiculo',
                     'Forma de Pago',
                     'Estado',
+                    'Estado SUNAT',
+                    'Estado Baja SUNAT',
                     'Producto',
                     'Unidad',
                     'Cantidad',
@@ -2332,11 +2456,20 @@ class SalesController extends Controller
                 ], ';');
 
                 foreach ($detailRows as $row) {
+                    $issuer = trim((string) ($row->created_by_user_name ?? ''));
+                    $seller = trim((string) ($row->origin_seller_user_name ?? ''));
+                    $actor = ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer))
+                        ? ('Solicita: ' . $seller . ' | Emite: ' . $issuer)
+                        : ($issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'));
+
                     fputcsv($out, [
                         (int) $row->id,
                         (string) ($row->document_kind_label ?? $row->document_kind),
                         (string) $row->series,
                         (string) $row->number,
+                        $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
+                        $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
+                        $actor,
                         $row->issue_at ? (string) $row->issue_at : '',
                         (string) ($row->customer_name ?? ''),
                         trim(implode(' | ', array_values(array_filter([
@@ -2347,7 +2480,9 @@ class SalesController extends Controller
                             return trim($part) !== '';
                         })))),
                         (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
-                        (string) ($row->status ?? ''),
+                        (string) ($row->status_label ?? $row->status),
+                        (string) ($row->sunat_status ?? ''),
+                        (string) ($row->sunat_void_status ?? ''),
                         (string) ($row->product_description ?? ''),
                         (string) ($row->unit_code ?? '-'),
                         number_format((float) ($row->qty ?? 0), 3, '.', ''),
@@ -2394,10 +2529,15 @@ class SalesController extends Controller
                 'Serie',
                 'Numero',
                 'Documento Afectado',
+                'Solicita',
+                'Emite',
+                'Actor',
                 'Fecha Emision',
                 'Cliente',
                 'Forma de Pago',
                 'Estado',
+                'Estado SUNAT',
+                'Estado Baja SUNAT',
                 'Descuento Item',
                 'Descuento Global',
                 'Total',
@@ -2405,6 +2545,12 @@ class SalesController extends Controller
             ], ';');
 
             foreach ($rows as $row) {
+                $issuer = trim((string) ($row->created_by_user_name ?? ''));
+                $seller = trim((string) ($row->origin_seller_user_name ?? ''));
+                $actor = ($seller !== '' && $issuer !== '' && strtoupper($seller) !== strtoupper($issuer))
+                    ? ('Solicita: ' . $seller . ' | Emite: ' . $issuer)
+                    : ($issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'));
+
                 fputcsv($out, [
                     (int) $row->id,
                     (string) ($row->document_kind_label ?? $row->document_kind),
@@ -2413,10 +2559,15 @@ class SalesController extends Controller
                     trim((string) (($row->source_document_kind ?? '') !== ''
                         ? (($row->source_document_kind ?? '') . ' ' . ($row->source_document_number ?? ''))
                         : ($row->source_document_number ?? ''))),
+                    $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
+                    $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
+                    $actor,
                     $row->issue_at ? (string) $row->issue_at : '',
                     (string) ($row->customer_name ?? ''),
                     (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
                     (string) ($row->status_label ?? $row->status),
+                    (string) ($row->sunat_status ?? ''),
+                    (string) ($row->sunat_void_status ?? ''),
                     number_format((float) ($row->item_discount_total ?? 0), 2, '.', ''),
                     number_format((float) ($row->global_discount_total ?? 0), 2, '.', ''),
                     number_format((float) ($row->total ?? 0), 2, '.', ''),
@@ -2702,10 +2853,20 @@ class SalesController extends Controller
         }
 
         $sourceBranchId = $source->branch_id !== null ? (int) $source->branch_id : null;
-        if ($this->isCommerceFeatureEnabledForContext($companyId, $sourceBranchId, 'SALES_SELLER_TO_CASHIER') && !$this->isCashierActor($roleProfile, $roleCode)) {
+        $sellerToCashierEnabled = $this->isCommerceFeatureEnabledForContext($companyId, $sourceBranchId, 'SALES_SELLER_TO_CASHIER');
+
+        if ($sellerToCashierEnabled && !$this->isCashierActor($roleProfile, $roleCode)) {
             return response()->json([
                 'message' => 'Solo caja puede convertir pedidos en este modo de venta.',
             ], 403);
+        }
+
+        if ($sellerToCashierEnabled
+            && $this->isCashierActor($roleProfile, $roleCode)
+            && (!isset($payload['cash_register_id']) || (int) $payload['cash_register_id'] <= 0)) {
+            return response()->json([
+                'message' => 'Debes seleccionar la estacion de caja activa antes de convertir en este modo.',
+            ], 422);
         }
 
         if (in_array((string) $source->status, ['VOID', 'CANCELED'], true)) {
@@ -2843,9 +3004,28 @@ class SalesController extends Controller
         }
 
         $sourceNumber = (string) $source->series . '-' . (string) $source->number;
+        $originSellerUserId = 0;
+        if (isset($sourceMetadata['origin_seller_user_id']) && is_numeric($sourceMetadata['origin_seller_user_id'])) {
+            $originSellerUserId = (int) $sourceMetadata['origin_seller_user_id'];
+        }
+        if ($originSellerUserId <= 0) {
+            $originSellerUserId = (int) ($source->created_by ?? 0);
+        }
+
+        $originSellerUserName = trim((string) ($sourceMetadata['origin_seller_user_name'] ?? ''));
+        if ($originSellerUserName === '' && $originSellerUserId > 0) {
+            $originSellerUserName = trim((string) DB::table('auth.users')
+                ->where('id', $originSellerUserId)
+                ->selectRaw("TRIM(COALESCE(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')), '')) as full_name")
+                ->value('full_name'));
+        }
         $resolvedPaymentMethodId = isset($payload['payment_method_id'])
             ? (int) $payload['payment_method_id']
             : ($source->payment_method_id !== null ? (int) $source->payment_method_id : null);
+
+        if ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER' && ($resolvedPaymentMethodId === null || $resolvedPaymentMethodId <= 0)) {
+            $resolvedPaymentMethodId = $this->resolveFallbackPaymentMethodId($companyId);
+        }
 
         if ($this->documentKindRequiresRucCustomer($targetDocumentKind)) {
             $sourceCustomerIdentity = $this->fetchCustomerIdentityForSalesValidation($companyId, (int) $source->customer_id);
@@ -2893,6 +3073,18 @@ class SalesController extends Controller
             ];
         })->values()->all();
 
+        $conversionMetadata = [
+            'source_document_id' => $sourceId,
+            'source_document_kind' => (string) $source->document_kind,
+            'source_document_number' => $sourceNumber,
+            'conversion_origin' => 'SALES_MODULE',
+            'stock_already_discounted' => $sourceHadStockImpact,
+            'defer_sunat_send' => filter_var($payload['defer_sunat_send'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        ];
+
+        $conversionMetadata['origin_seller_user_id'] = $originSellerUserId > 0 ? $originSellerUserId : null;
+        $conversionMetadata['origin_seller_user_name'] = $originSellerUserName !== '' ? $originSellerUserName : null;
+
         $forwardPayload = [
             'company_id' => $companyId,
             'branch_id' => $source->branch_id !== null ? (int) $source->branch_id : null,
@@ -2911,17 +3103,13 @@ class SalesController extends Controller
             'payment_method_id' => $resolvedPaymentMethodId,
             'exchange_rate' => $source->exchange_rate !== null ? (float) $source->exchange_rate : null,
             'notes' => $payload['notes'] ?? $source->notes,
-            'metadata' => array_merge($sourceMetadata, [
-                'source_document_id' => $sourceId,
-                'source_document_kind' => (string) $source->document_kind,
-                'source_document_number' => $sourceNumber,
-                'conversion_origin' => 'SALES_MODULE',
-                'stock_already_discounted' => $sourceHadStockImpact,
-                'defer_sunat_send' => filter_var($payload['defer_sunat_send'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            ]),
+            'metadata' => array_merge($sourceMetadata, $conversionMetadata),
             'status' => $targetStatus,
             'items' => $itemsPayload,
-            'payments' => in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
+            'payments' => (
+                in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
+                || ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER')
+            )
                 && strtoupper($targetStatus) === 'ISSUED'
                 && $resolvedPaymentMethodId !== null
                 ? [[
@@ -3676,10 +3864,14 @@ class SalesController extends Controller
 
         $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, $normalizedFeatureCode);
         if ($verticalPreference['resolved']) {
-            if ($verticalPreference['is_enabled'] !== null) {
+            // Explicit branch/company values must win; vertical acts as fallback.
+            $hasExplicitToggle = $branchEnabled !== null || $companyEnabled !== null;
+            $hasExplicitConfig = !empty($resolvedConfig);
+
+            if (!$hasExplicitToggle && $verticalPreference['is_enabled'] !== null) {
                 $isEnabled = (bool) $verticalPreference['is_enabled'];
             }
-            if ($verticalPreference['config'] !== null) {
+            if (!$hasExplicitConfig && $verticalPreference['config'] !== null) {
                 $resolvedConfig = $this->decodeFeatureConfig($verticalPreference['config']);
             }
         }
@@ -3710,6 +3902,14 @@ class SalesController extends Controller
             'config' => null,
             'source' => null,
         ];
+
+        // Superadmin-only feature codes must never be overridden by vertical templates.
+        // Their value is exclusively managed from the Admin Portal.
+        $superadminOnly = array_map('strtoupper', config('features.superadmin_only_feature_codes', []));
+        if (in_array($normalizedFeatureCode, $superadminOnly, true)) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
 
         if (!$this->tableExists('appcfg.verticals')
             || !$this->tableExists('appcfg.company_verticals')
@@ -4177,6 +4377,46 @@ class SalesController extends Controller
         return $hasValidRucNumber && ($hasRucDocType || $hasRucCustomerType);
     }
 
+    private function resolveFallbackPaymentMethodId(int $companyId): ?int
+    {
+        if (!$this->tableExists('master.payment_types')) {
+            return null;
+        }
+
+        $columns = $this->tableColumns('master.payment_types');
+        $hasCompanyId = in_array('company_id', $columns, true);
+        $hasStatus = in_array('status', $columns, true);
+
+        $query = DB::table('master.payment_types');
+
+        if ($hasStatus) {
+            $query->where('status', 1);
+        }
+
+        if ($hasCompanyId) {
+            $query->where(function ($q) use ($companyId) {
+                $q->where('company_id', $companyId)
+                    ->orWhereNull('company_id');
+            });
+
+            // Prefer company-specific methods first, then shared/global rows.
+            $query->orderByRaw('CASE WHEN company_id = ? THEN 0 WHEN company_id IS NULL THEN 1 ELSE 2 END', [$companyId]);
+        }
+
+        $row = $query
+            ->orderByRaw("CASE
+                WHEN UPPER(COALESCE(name, '')) LIKE '%EFECTIV%' THEN 0
+                WHEN UPPER(COALESCE(name, '')) LIKE '%CONTADO%' THEN 1
+                WHEN UPPER(COALESCE(name, '')) LIKE '%CASH%' THEN 2
+                ELSE 9
+            END")
+            ->orderBy('id')
+            ->select('id')
+            ->first();
+
+        return $row ? (int) $row->id : null;
+    }
+
     private function hasActiveChildConversions(int $companyId, int $sourceDocumentId): bool
     {
         return DB::table('sales.commercial_documents as d')
@@ -4313,6 +4553,7 @@ class SalesController extends Controller
                 'enable_location_control' => false,
                 'allow_negative_stock' => false,
                 'enforce_lot_for_tracked' => false,
+                'low_stock_alert_threshold' => 5,
             ];
         }
 
@@ -4328,6 +4569,7 @@ class SalesController extends Controller
             'enable_location_control' => (bool) ($row->enable_location_control ?? false),
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
             'enforce_lot_for_tracked' => (bool) $row->enforce_lot_for_tracked,
+            'low_stock_alert_threshold' => (int) ($row->low_stock_alert_threshold ?? 5),
         ];
     }
 
@@ -4977,6 +5219,43 @@ class SalesController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Error al descargar CDR: ' . $e->getMessage()], 500);
         }
+    }
+
+    private function resolveCompanyLogoUrl($logoPath): ?string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        if (preg_match('/^https?:\/\//i', $raw) === 1) {
+            return $raw;
+        }
+
+        $normalized = str_replace('\\', '/', $raw);
+        if (preg_match('/^https?:\/\//i', $normalized) === 1) {
+            $pathFromUrl = parse_url($normalized, PHP_URL_PATH);
+            $normalized = $pathFromUrl !== null ? (string) $pathFromUrl : $normalized;
+        }
+
+        $normalized = ltrim($normalized, '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            if (\Storage::disk('public')->exists($normalized)) {
+                return '/storage/' . $normalized;
+            }
+        } catch (\Throwable $e) {
+            // Ignorar para evitar ocultar logo por una validacion temporal del storage.
+        }
+
+        return '/storage/' . $normalized;
     }
 }
 

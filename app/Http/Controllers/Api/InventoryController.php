@@ -1067,6 +1067,7 @@ class InventoryController extends Controller
             'items.*.tax_category_id' => 'nullable|integer|min:1',
             'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
             'items.*.notes' => 'nullable|string|max:200',
+            'items.*.metadata' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {

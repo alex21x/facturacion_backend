@@ -54,7 +54,7 @@ DECLARE
 BEGIN
     FOREACH table_name IN ARRAY tables_to_clean LOOP
         IF to_regclass(table_name) IS NOT NULL THEN
-            EXECUTE format('TRUNCATE TABLE %I.%I CASCADE',
+            EXECUTE format('TRUNCATE TABLE %I.%I RESTART IDENTITY CASCADE',
                 split_part(table_name, '.', 1),
                 split_part(table_name, '.', 2));
         END IF;

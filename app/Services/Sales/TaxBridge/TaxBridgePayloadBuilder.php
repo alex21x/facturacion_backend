@@ -388,13 +388,17 @@ class TaxBridgePayloadBuilder
             return 0.0;
         }
 
-        if ($lineSubtotal > 0.00001 && $lineTax > 0.00001) {
-            return round(($lineTax / $lineSubtotal) * 100, 2);
+        if ($configuredIgvRate > 0.00001) {
+            return round($configuredIgvRate, 2);
         }
 
         $categoryRate = $taxCategory !== null ? (float) ($taxCategory['rate_percent'] ?? 0) : 0.0;
         if ($categoryRate > 0.00001) {
             return round($categoryRate, 2);
+        }
+
+        if ($lineSubtotal > 0.00001 && $lineTax > 0.00001) {
+            return round(($lineTax / $lineSubtotal) * 100, 2);
         }
 
         return round($configuredIgvRate, 2);

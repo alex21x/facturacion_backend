@@ -296,11 +296,15 @@ class TaxBridgeService
             $bridgeMessage = $this->extractBridgeResponseMessage($decoded, $raw);
             $bridgeTicket = $this->extractBridgeTicket($decoded);
             $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
+            $wafBlocked = $this->isBridgeBlockedByWaf($decoded, $raw);
 
             $status = 'SENT';
             $label = 'Comunicacion de baja enviada';
 
-            if (!$response->successful()) {
+            if ($wafBlocked) {
+                $status = 'HTTP_ERROR';
+                $label = 'Bloqueado por seguridad del puente (Imunify360)';
+            } elseif (!$response->successful()) {
                 $status = 'HTTP_ERROR';
                 $label = 'Error HTTP en comunicacion de baja';
             } elseif ($finalBridgeCode !== null) {
@@ -325,11 +329,24 @@ class TaxBridgeService
                 $label = 'Comunicacion de baja aceptada';
             }
 
+            $voidResponsePayload = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 1500)];
+            if ($wafBlocked) {
+                $voidResponsePayload['_waf_blocked'] = true;
+                $voidResponsePayload['_waf_hint'] = 'Solicitar whitelist de IP/automatizacion en Imunify360 del puente.';
+            }
+
+            $errorKind = null;
+            if ($wafBlocked) {
+                $errorKind = 'WAF_BLOCKED';
+            } elseif (!$response->successful()) {
+                $errorKind = 'HTTP_ERROR';
+            }
+
             $this->updateDocumentTaxStatus($companyId, $documentId, [
                 'sunat_void_status' => $status,
                 'sunat_void_label' => $label,
                 'sunat_void_http_code' => $response->status(),
-                'sunat_void_response' => is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 1500)],
+                'sunat_void_response' => $voidResponsePayload,
                 'sunat_void_ticket' => is_array($decoded) ? ($decoded['ticket'] ?? null) : null,
             ]);
 
@@ -370,7 +387,7 @@ class TaxBridgeService
                 ],
                 [
                     'sunat_status' => $status,
-                    'error_kind' => !$response->successful() ? 'HTTP_ERROR' : null,
+                    'error_kind' => $errorKind,
                     'attempt_number' => 1,
                     'is_retry' => false,
                     'is_manual' => true,
@@ -383,6 +400,7 @@ class TaxBridgeService
                 'bridge_http_code' => $response->status(),
                 'response' => is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 1500)],
                 'void_number' => $voidNumber,
+                'waf_blocked' => $wafBlocked,
                 'debug' => [
                     'bridge_mode' => $config['bridge_mode'],
                     'endpoint' => $endpoint,
@@ -1271,6 +1289,24 @@ class TaxBridgeService
         }
 
         return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|CDR NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE/', $value) === 1;
+    }
+
+    private function containsBridgeWafMarkers(string $text): bool
+    {
+        $value = strtoupper(trim($text));
+        if ($value === '') {
+            return false;
+        }
+
+        return preg_match('/IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED|WHITELIST/', $value) === 1;
+    }
+
+    private function isBridgeBlockedByWaf($decoded, string $raw): bool
+    {
+        $message = $this->extractBridgeResponseMessage($decoded, $raw);
+
+        return $this->containsBridgeWafMarkers($message)
+            || $this->containsBridgeWafMarkers($raw);
     }
 
     private function compactBridgeText(string $text): string

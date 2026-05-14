@@ -342,24 +342,44 @@ class TaxBridgeService
                 $errorKind = 'HTTP_ERROR';
             }
 
-            $this->updateDocumentTaxStatus($companyId, $documentId, [
-                'sunat_void_status' => $status,
-                'sunat_void_label' => $label,
-                'sunat_void_http_code' => $response->status(),
-                'sunat_void_response' => $voidResponsePayload,
-                'sunat_void_ticket' => is_array($decoded) ? ($decoded['ticket'] ?? null) : null,
-            ]);
+            // Prepare metadata update
+            $row = DB::table('sales.commercial_documents')
+                ->where('id', $documentId)
+                ->where('company_id', $companyId)
+                ->select('metadata')
+                ->first();
 
-            if ($status === 'ACCEPTED') {
+            if ($row) {
+                $meta = json_decode((string) ($row->metadata ?? '{}'), true);
+                if (!is_array($meta)) {
+                    $meta = [];
+                }
+
+                $meta['sunat_void_status'] = $status;
+                $meta['sunat_void_label'] = $label;
+                $meta['sunat_void_http_code'] = $response->status();
+                $meta['sunat_void_response'] = $voidResponsePayload;
+                $meta['sunat_void_ticket'] = is_array($decoded) ? ($decoded['ticket'] ?? null) : null;
+                $meta['sunat_last_sync_at'] = now()->toDateTimeString();
+
+                // Atomic update: update both metadata and status (if ACCEPTED) in a single operation
+                $docUpdate = [
+                    'metadata' => json_encode($meta),
+                    'updated_at' => now(),
+                ];
+
+                if ($status === 'ACCEPTED') {
+                    $docUpdate['status'] = 'VOID';
+                }
+
                 DB::table('sales.commercial_documents')
                     ->where('id', $documentId)
                     ->where('company_id', $companyId)
-                    ->update([
-                        'status' => 'VOID',
-                        'updated_at' => now(),
-                    ]);
+                    ->update($docUpdate);
 
-                $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
+                if ($status === 'ACCEPTED') {
+                    $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
+                }
             }
 
             $this->auditService->logDispatch(

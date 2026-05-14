@@ -315,6 +315,8 @@ class TaxBridgeService
             $bridgeTicket = $this->extractBridgeTicket($decoded);
             $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
             $wafBlocked = $this->isBridgeBlockedByWaf($decoded, $raw);
+            $bridgeExplicitAccepted = $this->containsBridgeAcceptedMarkers($bridgeMessage)
+                || $this->containsBridgeAcceptedMarkers($raw);
 
             $status = 'SENT';
             $label = 'Comunicacion de baja enviada';
@@ -336,6 +338,9 @@ class TaxBridgeService
             } elseif ($bridgeTicket !== null && ($this->containsBridgeErrorMarkers($bridgeMessage) || $this->containsBridgeErrorMarkers($raw))) {
                 $status = 'SENT';
                 $label = 'Comunicacion de baja enviada; ticket pendiente';
+            } elseif ($bridgeResCode === 1 && $bridgeExplicitAccepted && !$this->containsBridgeErrorMarkers($bridgeMessage)) {
+                $status = 'ACCEPTED';
+                $label = 'Comunicacion de baja aceptada';
             } elseif ($bridgeResCode === 1 && $bridgeTicket === null && !$this->containsBridgeErrorMarkers($bridgeMessage)) {
                 $status = 'ACCEPTED';
                 $label = 'Comunicacion de baja aceptada';
@@ -1314,6 +1319,16 @@ class TaxBridgeService
         }
 
         return preg_match('/IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED|WHITELIST/', $value) === 1;
+    }
+
+    private function containsBridgeAcceptedMarkers(string $text): bool
+    {
+        $value = strtoupper(trim($text));
+        if ($value === '') {
+            return false;
+        }
+
+        return preg_match('/HA SIDO ACEPTAD|COMUNICACION DE BAJA.*ACEPTAD|RESUMEN DIARIO.*ACEPTAD|ESTADO\s*[:=]\s*(ACEPTADO|ACCEPTED)/', $value) === 1;
     }
 
     private function isBridgeBlockedByWaf($decoded, string $raw): bool

@@ -791,7 +791,6 @@ class DailySummaryService
 
         $summaryType = (int) $summary->summary_type;
         $corrNumber  = (string) $summary->correlation_number;
-        $dateHeader  = $this->buildSummaryDateHeader($summary);
 
         $items = DB::table('sales.daily_summary_items as dsi')
             ->join('sales.commercial_documents as cd', 'cd.id', '=', 'dsi.document_id')
@@ -821,10 +820,10 @@ class DailySummaryService
             ->get();
 
         if ($summaryType === self::TYPE_DECLARATION) {
-            return $this->buildRcPayload($empresa, $corrNumber, $items, $dateHeader);
+            return $this->buildRcPayload($empresa, $corrNumber, $items);
         }
 
-        return $this->buildRaPayload($empresa, $corrNumber, $items, $dateHeader);
+        return $this->buildRaPayload($empresa, $corrNumber, $items);
     }
 
     /**
@@ -834,14 +833,10 @@ class DailySummaryService
     private function buildRcPayload(
         array $empresa,
         string $corrNumber,
-        \Illuminate\Support\Collection $items,
-        array $dateHeader
+        \Illuminate\Support\Collection $items
     ): array {
         return [
             'empresa' => $empresa,
-            'cabecera' => $dateHeader,
-            'fecha_generacion' => (string) ($dateHeader['fecha_generacion'] ?? ''),
-            'fecha_resumen' => (string) ($dateHeader['fecha_resumen'] ?? ''),
             'correlativo_resumen' => str_pad($corrNumber, 3, '0', STR_PAD_LEFT),
             'resumenes' => $this->buildSummaryRows($items),
         ];
@@ -854,49 +849,14 @@ class DailySummaryService
     private function buildRaPayload(
         array $empresa,
         string $corrNumber,
-        \Illuminate\Support\Collection $items,
-        array $dateHeader
+        \Illuminate\Support\Collection $items
     ): array {
         return [
             'empresa' => $empresa,
-            'cabecera' => $dateHeader,
-            'fecha_generacion' => (string) ($dateHeader['fecha_generacion'] ?? ''),
-            'fecha_resumen' => (string) ($dateHeader['fecha_resumen'] ?? ''),
             'resumen' => 1,
             'correlativo_resumen' => str_pad($corrNumber, 3, '0', STR_PAD_LEFT),
             'resumenes' => $this->buildSummaryRows($items),
         ];
-    }
-
-    private function buildSummaryDateHeader(object $summary): array
-    {
-        $summaryDate = trim((string) ($summary->summary_date ?? ''));
-        $summaryDateYmd = $this->normalizeYmdDate($summaryDate);
-
-        $fechaGeneracion = $summaryDateYmd !== null
-            ? $summaryDateYmd
-            : now('America/Lima')->subDays(3)->toDateString();
-
-        $fechaResumen = now('America/Lima')->toDateString();
-
-        return [
-            'fecha_generacion' => $fechaGeneracion,
-            'fecha_resumen' => $fechaResumen,
-        ];
-    }
-
-    private function normalizeYmdDate(string $value): ?string
-    {
-        if ($value === '') {
-            return null;
-        }
-
-        try {
-            $dt = new \DateTimeImmutable($value, new \DateTimeZone('America/Lima'));
-            return $dt->format('Y-m-d');
-        } catch (\Throwable $e) {
-            return null;
-        }
     }
 
     private function buildSummaryRows(\Illuminate\Support\Collection $items): array

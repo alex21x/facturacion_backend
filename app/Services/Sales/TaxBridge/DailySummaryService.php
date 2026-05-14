@@ -1045,6 +1045,160 @@ class DailySummaryService
         }
     }
 
+    public function queryTicketStatus(int $companyId, int $summaryId, ?int $userId = null, ?string $username = null): array
+    {
+        $summary = DB::table('sales.daily_summaries')
+            ->where('id', $summaryId)
+            ->where('company_id', $companyId)
+            ->first();
+
+        if (!$summary) {
+            throw new TaxBridgeException('Daily summary not found', 404);
+        }
+
+        $ticket = trim((string) ($summary->sunat_ticket ?? ''));
+        if ($ticket === '') {
+            throw new TaxBridgeException('Daily summary has no SUNAT ticket to consult', 422);
+        }
+
+        $summaryType = (int) ($summary->summary_type ?? self::TYPE_DECLARATION);
+        $bridgeMethod = trim((string) env('TAX_BRIDGE_SUMMARY_STATUS_METHOD', 'send_statusTicketAsyncUniversal'));
+        $branchId = $summary->branch_id !== null ? (int) $summary->branch_id : null;
+        $config = $this->resolveConfig($companyId, $branchId);
+
+        $payload = [
+            'empresa' => $this->buildCompanyStatusAuthBlock($companyId, $config),
+            'cabecera' => [
+                'ticket' => $ticket,
+                'summary_type' => $summaryType,
+                'correlativo_resumen' => (string) ($summary->correlation_number ?? $summary->identifier ?? $summaryId),
+            ],
+        ];
+
+        $result = $this->taxBridgeService->queryAsyncTicketStatus($companyId, $branchId, $bridgeMethod, $payload);
+        $responseData = is_array($result['response'] ?? null) ? $result['response'] : ['raw' => null];
+
+        DB::table('sales.daily_summaries')
+            ->where('id', $summaryId)
+            ->where('company_id', $companyId)
+            ->update([
+                'bridge_http_code' => $result['bridge_http_code'] ?? null,
+                'raw_response' => json_encode($responseData),
+                'sunat_ticket' => $result['sunat_ticket'] ?? $ticket,
+                'sunat_cdr_code' => $result['sunat_cdr_code'] ?? null,
+                'sunat_cdr_desc' => $result['sunat_cdr_desc'] ?? null,
+                'updated_at' => now(),
+            ]);
+
+        if (($result['status'] ?? '') === self::STATUS_ACCEPTED || ($result['status'] ?? '') === self::STATUS_REJECTED) {
+            DB::table('sales.daily_summaries')
+                ->where('id', $summaryId)
+                ->where('company_id', $companyId)
+                ->update([
+                    'status' => $result['status'],
+                    'updated_at' => now(),
+                ]);
+
+            $this->syncDocumentsAfterSummarySend(
+                $companyId,
+                $summaryId,
+                $summaryType,
+                (string) $result['status'],
+                $result['sunat_ticket'] ?? $ticket,
+                $result['sunat_cdr_code'] ?? null,
+                $result['sunat_cdr_desc'] ?? null
+            );
+        }
+
+        $this->auditService->logDispatch(
+            $companyId,
+            $branchId,
+            $summaryType === self::TYPE_DECLARATION ? 'SUMMARY_RC' : 'SUMMARY_RA',
+            null,
+            $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA',
+            (string) ($summary->summary_date ?? ''),
+            (string) ($summary->identifier ?? $summaryId),
+            [
+                'bridge_mode' => $config['bridge_mode'] ?? 'PRODUCTION',
+                'endpoint_url' => $result['debug']['endpoint'] ?? '',
+                'auth_scheme' => $config['auth_scheme'] ?? 'none',
+            ],
+            json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            json_encode($responseData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            (int) ($result['bridge_http_code'] ?? 0),
+            (float) ($result['response_time_ms'] ?? 0),
+            [
+                'code' => $result['sunat_cdr_code'] ?? null,
+                'ticket' => $result['sunat_ticket'] ?? $ticket,
+                'cdr_code' => $result['sunat_cdr_code'] ?? null,
+                'message' => $result['sunat_cdr_desc'] ?? null,
+            ],
+            [
+                'sunat_status' => $result['status'] ?? 'PENDING_CONFIRMATION',
+                'error_kind' => ($result['status'] ?? '') === self::STATUS_ERROR ? 'HTTP_ERROR' : null,
+                'attempt_number' => 1,
+                'is_retry' => true,
+                'is_manual' => true,
+                'user_id' => $userId,
+                'username' => $username,
+            ]
+        );
+
+        return [
+            'status' => $result['status'] ?? self::STATUS_SENT,
+            'label' => $result['label'] ?? 'Ticket en proceso',
+            'bridge_http_code' => $result['bridge_http_code'] ?? null,
+            'sunat_ticket' => $result['sunat_ticket'] ?? $ticket,
+            'sunat_cdr_code' => $result['sunat_cdr_code'] ?? null,
+            'sunat_cdr_desc' => $result['sunat_cdr_desc'] ?? null,
+            'sunat_error_code' => $result['sunat_error_code'] ?? null,
+            'sunat_error_message' => $result['sunat_error_message'] ?? null,
+            'response' => $responseData,
+            'debug' => $result['debug'] ?? null,
+        ];
+    }
+
+    private function buildCompanyStatusAuthBlock(int $companyId, array $config): array
+    {
+        $companyRow = DB::table('core.companies')
+            ->where('id', $companyId)
+            ->select('tax_id', 'legal_name', 'trade_name')
+            ->first();
+
+        $settingsRow = DB::table('core.company_settings')
+            ->where('company_id', $companyId)
+            ->select('extra_data')
+            ->first();
+
+        $extra = [];
+        if ($settingsRow && $settingsRow->extra_data) {
+            $decoded = json_decode((string) $settingsRow->extra_data, true);
+            if (is_array($decoded)) {
+                $extra = $decoded;
+            }
+        }
+
+        $address = trim((string) ($extra['direccion'] ?? ''));
+
+        return [
+            'ruc' => (string) ($companyRow->tax_id ?? ''),
+            'user' => trim((string) ($config['sol_user'] ?? '')),
+            'pass' => trim((string) ($config['sol_pass'] ?? '')),
+            'razon_social' => (string) ($companyRow->legal_name ?? ''),
+            'nombre_comercial' => (string) ($companyRow->trade_name ?? ''),
+            'direccion' => $address,
+            'urbanizacion' => trim((string) ($extra['urbanizacion'] ?? '')),
+            'ubigeo' => trim((string) ($extra['ubigeo'] ?? '')),
+            'departamento' => trim((string) ($extra['departamento'] ?? '')),
+            'provincia' => trim((string) ($extra['provincia'] ?? '')),
+            'distrito' => trim((string) ($extra['distrito'] ?? '')),
+            'codigolocal' => trim((string) ($config['codigolocal'] ?? '')),
+            'telefono_fijo' => trim((string) ($companyRow->phone ?? '')),
+            'correo' => trim((string) ($companyRow->email ?? '')),
+            'envio_pse' => trim((string) ($config['envio_pse'] ?? '')),
+        ];
+    }
+
     private function sanitizeSummaryPayloadForDebug(array $payload): array
     {
         if (isset($payload['empresa']['pass'])) {

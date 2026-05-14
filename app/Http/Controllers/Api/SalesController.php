@@ -2088,10 +2088,51 @@ class SalesController extends Controller
             $limit = 200;
         }
 
+        $itemDiscountTotals = DB::table('sales.commercial_document_items as di')
+            ->select([
+                'di.document_id',
+                DB::raw('SUM(COALESCE(di.discount_total, 0)) as item_discount_total'),
+            ])
+            ->groupBy('di.document_id');
+
+        $conversionFlags = DB::table('sales.commercial_documents as dconv')
+            ->select([
+                'dconv.company_id',
+                DB::raw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0) as source_document_id"),
+                DB::raw("MAX(CASE WHEN dconv.document_kind IN ('INVOICE', 'RECEIPT') AND dconv.status NOT IN ('VOID', 'CANCELED') THEN 1 ELSE 0 END) as has_tributary_conversion"),
+                DB::raw("MAX(CASE WHEN dconv.document_kind = 'SALES_ORDER' AND dconv.status NOT IN ('VOID', 'CANCELED') THEN 1 ELSE 0 END) as has_order_conversion"),
+            ])
+            ->whereRaw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0) > 0")
+            ->groupBy('dconv.company_id', DB::raw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0)"));
+
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
             ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
+            ->leftJoin('sales.document_kinds as dk_id', 'dk_id.id', '=', 'd.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_legacy', function ($join) {
+                $join->on(DB::raw('UPPER(dk_legacy.code)'), '=', DB::raw('UPPER(d.document_kind)'));
+            })
+            ->leftJoin('sales.commercial_documents as dsrc', function ($join) {
+                $join->on('dsrc.company_id', '=', 'd.company_id')
+                    ->on('dsrc.id', '=', DB::raw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)"));
+            })
+            ->leftJoin('auth.users as u_source', 'u_source.id', '=', 'dsrc.created_by')
+            ->leftJoin('sales.daily_summaries as ds_decl', function ($join) {
+                $join->on('ds_decl.company_id', '=', 'd.company_id')
+                    ->on('ds_decl.id', '=', DB::raw("NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT"));
+            })
+            ->leftJoin('sales.daily_summaries as ds_void', function ($join) {
+                $join->on('ds_void.company_id', '=', 'd.company_id')
+                    ->on('ds_void.id', '=', DB::raw("NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT"));
+            })
+            ->leftJoinSub($itemDiscountTotals, 'doc_item_totals', function ($join) {
+                $join->on('doc_item_totals.document_id', '=', 'd.id');
+            })
+            ->leftJoinSub($conversionFlags, 'doc_conversion_flags', function ($join) {
+                $join->on('doc_conversion_flags.company_id', '=', 'd.company_id')
+                    ->on('doc_conversion_flags.source_document_id', '=', 'd.id');
+            })
             ->select([
                 'd.id',
                 'd.company_id',
@@ -2103,19 +2144,25 @@ class SalesController extends Controller
                                 DB::raw("CASE
                                         WHEN UPPER(COALESCE((d.metadata->>'conversion_origin'), '')) LIKE 'RESTAURANT%'
                                             OR NULLIF(TRIM(COALESCE((d.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
-                                            OR EXISTS (
-                                                    SELECT 1
-                                                    FROM sales.commercial_documents dsrc2
-                                                    WHERE dsrc2.company_id = d.company_id
-                                                        AND dsrc2.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
-                                                        AND NULLIF(TRIM(COALESCE((dsrc2.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
-                                            )
+                                            OR NULLIF(TRIM(COALESCE((dsrc.metadata->>'restaurant_table_id'), '')), '') IS NOT NULL
                                         THEN true
                                         ELSE false
                                 END as has_restaurant_origin"),
-                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), d.document_kind) as document_kind_label"),
-                DB::raw("COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) as document_kind_base"),
-                DB::raw("CASE WHEN COALESCE((SELECT CASE WHEN UPPER(dk.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk.code) END FROM sales.document_kinds dk WHERE dk.id = d.document_kind_id LIMIT 1), (SELECT CASE WHEN UPPER(dk2.code) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(dk2.code) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(dk2.code) END FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(d.document_kind) LIMIT 1), CASE WHEN UPPER(d.document_kind) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE' WHEN UPPER(d.document_kind) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE' ELSE UPPER(d.document_kind) END) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE') THEN true ELSE false END as is_tributary_document"),
+                DB::raw("COALESCE(dk_id.label, dk_legacy.label, d.document_kind) as document_kind_label"),
+                DB::raw("CASE
+                    WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                    WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE'
+                    ELSE UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind))
+                END as document_kind_base"),
+                DB::raw("CASE
+                    WHEN (
+                        CASE
+                            WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+                            WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE'
+                            ELSE UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind))
+                        END
+                    ) IN ('INVOICE','RECEIPT','CREDIT_NOTE','DEBIT_NOTE') THEN true ELSE false
+                END as is_tributary_document"),
                 'd.series',
                 'd.number',
                 'd.issue_at',
@@ -2133,78 +2180,29 @@ class SalesController extends Controller
                 DB::raw("COALESCE((d.metadata->>'sunat_void_status'), '') as sunat_void_status"),
                 DB::raw("NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT as sunat_summary_id"),
                 DB::raw("NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT as sunat_void_summary_id"),
-                                DB::raw("(
-                                        SELECT ds.status
-                                        FROM sales.daily_summaries ds
-                                        WHERE ds.company_id = d.company_id
-                                            AND ds.id = NULLIF((d.metadata->>'sunat_summary_id'), '')::BIGINT
-                                        LIMIT 1
-                                ) as declaration_summary_status"),
-                                DB::raw("(
-                                        SELECT ds.status
-                                        FROM sales.daily_summaries ds
-                                        WHERE ds.company_id = d.company_id
-                                            AND ds.id = NULLIF((d.metadata->>'sunat_void_summary_id'), '')::BIGINT
-                                        LIMIT 1
-                                ) as cancellation_summary_status"),
+                DB::raw('ds_decl.status as declaration_summary_status'),
+                DB::raw('ds_void.status as cancellation_summary_status'),
                 'd.total',
                 'd.balance_due',
                 DB::raw('COALESCE(d.discount_total, 0) as global_discount_total'),
-                DB::raw('COALESCE((SELECT SUM(COALESCE(di.discount_total, 0)) FROM sales.commercial_document_items di WHERE di.document_id = d.id), 0) as item_discount_total'),
+                DB::raw('COALESCE(doc_item_totals.item_discount_total, 0) as item_discount_total'),
                                 DB::raw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) as source_document_id"),
-                                DB::raw("(
-                                        SELECT dsrc.document_kind
-                                        FROM sales.commercial_documents dsrc
-                                        WHERE dsrc.company_id = d.company_id
-                                            AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
-                                        LIMIT 1
-                                ) as source_document_kind"),
+                DB::raw('dsrc.document_kind as source_document_kind'),
                 DB::raw("COALESCE(
                     CASE
                         WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT
                         ELSE NULL
                     END,
-                    (
-                        SELECT dsrc.created_by
-                        FROM sales.commercial_documents dsrc
-                        WHERE dsrc.company_id = d.company_id
-                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
-                        LIMIT 1
-                    )
+                    dsrc.created_by
                 ) as origin_seller_user_id"),
                 DB::raw("COALESCE(
                     NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
-                    (
-                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
-                        FROM sales.commercial_documents dsrc
-                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
-                        WHERE dsrc.company_id = d.company_id
-                          AND dsrc.id = COALESCE((d.metadata->>'source_document_id')::BIGINT, 0)
-                        LIMIT 1
-                    )
+                    TRIM(COALESCE(CONCAT(COALESCE(u_source.first_name, ''), ' ', COALESCE(u_source.last_name, '')), ''))
                 ) as origin_seller_user_name"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
-                                DB::raw("EXISTS (
-                                        SELECT 1
-                                        FROM sales.commercial_documents d2
-                                        WHERE d2.company_id = d.company_id
-                                            AND d2.document_kind IN ('INVOICE', 'RECEIPT')
-                                            AND d2.status NOT IN ('VOID', 'CANCELED')
-                                            AND COALESCE((d2.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                                ) as has_tributary_conversion"),
-                                DB::raw("EXISTS (
-                                                        SELECT 1
-                                                        FROM sales.commercial_documents d3
-                                                        WHERE d3.company_id = d.company_id
-                                                            AND d3.document_kind = 'SALES_ORDER'
-                                                            AND d3.status NOT IN ('VOID', 'CANCELED')
-                                                            AND COALESCE((d3.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                                                ) as has_order_conversion"),
-                                DB::raw("EXISTS (
-                                                        SELECT 1
-                                                        FROM sales.commercial_document_items di
-                                                        WHERE di.document_id = d.id
-                                                ) as has_items"),
+                DB::raw('COALESCE(doc_conversion_flags.has_tributary_conversion, 0) > 0 as has_tributary_conversion'),
+                DB::raw('COALESCE(doc_conversion_flags.has_order_conversion, 0) > 0 as has_order_conversion'),
+                DB::raw('doc_item_totals.document_id IS NOT NULL as has_items'),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
                 DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),

@@ -1460,10 +1460,10 @@ class DailySummaryService
             return $normalized . '/' . $methodName;
         }
         if (preg_match('#/index\.php$#i', $normalized) === 1) {
-            return $normalized . '/Sunat/' . $methodName;
+            return $normalized . '/sunat/' . $methodName;
         }
 
-        return $normalized . '/index.php/Sunat/' . $methodName;
+        return $normalized . '/index.php/sunat/' . $methodName;
     }
 
     private function updateDocumentSummaryMetadata(int $companyId, int $documentId, int $summaryType, int $summaryId): void

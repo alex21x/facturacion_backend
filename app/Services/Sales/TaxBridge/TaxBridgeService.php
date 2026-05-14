@@ -1731,7 +1731,7 @@ class TaxBridgeService
         }
 
         if (preg_match('#/index\.php$#i', $normalized) === 1) {
-            return $normalized . '/Sunat/' . $methodName;
+            return $normalized . '/sunat/' . $methodName;
         }
 
         if (preg_match('#/index\.php/Sunat/[^/]+$#i', $normalized) === 1) {
@@ -1742,7 +1742,7 @@ class TaxBridgeService
             return $normalized;
         }
 
-        return $normalized . '/index.php/Sunat/' . $methodName;
+        return $normalized . '/index.php/sunat/' . $methodName;
     }
 
     private function resolveRegisterCertEndpoint(string $bridgeEndpoint): string

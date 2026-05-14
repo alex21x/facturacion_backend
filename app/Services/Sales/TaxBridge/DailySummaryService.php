@@ -611,7 +611,9 @@ class DailySummaryService
                     'updated_at'      => now(),
                 ]);
 
-            $httpReq = Http::timeout((int) $config['timeout_seconds'])->acceptJson();
+            $httpReq = Http::timeout((int) $config['timeout_seconds'])
+                ->acceptJson()
+                ->withHeaders($this->bridgeRequestHeaders());
 
             if ($config['auth_scheme'] === 'bearer' && $config['token'] !== '') {
                 $httpReq = $httpReq->withToken($config['token']);
@@ -638,6 +640,9 @@ class DailySummaryService
             $diagnostic = $this->summarizeSummaryDiagnostic($decoded, (string) ($cdrCode ?? ''), (string) ($cdrDesc ?? ''));
 
             $responseData = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)];
+            if ($this->containsImunifyProtectionMarkers((string) ($diagnostic['message'] ?? '') . ' ' . $raw)) {
+                $responseData['_waf_hint'] = 'El endpoint devolvio bloqueo de bot-protection (Imunify360).';
+            }
 
             DB::table('sales.daily_summaries')
                 ->where('id', $summaryId)
@@ -1033,6 +1038,11 @@ class DailySummaryService
         }
 
         $hasBridgeErrorMarkers = $this->containsBridgeErrorMarkers($message) || $this->containsBridgeErrorMarkers($raw);
+        $hasImunifyProtection = $this->containsImunifyProtectionMarkers($message) || $this->containsImunifyProtectionMarkers($raw);
+
+        if ($hasImunifyProtection && empty($ticket)) {
+            return [self::STATUS_ERROR, 'Bloqueado por seguridad del endpoint (Imunify360)', $ticket, $cdrCode, $cdrDesc];
+        }
 
         if (!empty($ticket)) {
             if ($hasBridgeErrorMarkers) {
@@ -1329,7 +1339,31 @@ class DailySummaryService
             return false;
         }
 
-        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE|BAD REQUEST|HTTP\s*(4\d{2}|5\d{2})|GATEWAY TIME-?OUT|TIME\s*OUT|TIMEOUT/', $value) === 1;
+        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE|BAD REQUEST|HTTP\s*(4\d{2}|5\d{2})|GATEWAY TIME-?OUT|TIME\s*OUT|TIMEOUT|IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED/', $value) === 1;
+    }
+
+    private function containsImunifyProtectionMarkers(string $text): bool
+    {
+        $value = strtoupper(trim($text));
+        if ($value === '') {
+            return false;
+        }
+
+        return preg_match('/IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED/', $value) === 1;
+    }
+
+    private function bridgeRequestHeaders(): array
+    {
+        $userAgent = trim((string) env('TAX_BRIDGE_HTTP_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'));
+
+        return [
+            'User-Agent' => $userAgent,
+            'Accept' => 'application/json, text/plain, */*',
+            'Accept-Language' => 'es-PE,es;q=0.9,en;q=0.8',
+            'X-Requested-With' => 'XMLHttpRequest',
+            'Cache-Control' => 'no-cache',
+            'Pragma' => 'no-cache',
+        ];
     }
 
     private function summarizeSummaryDiagnostic($response, string $cdrCode, string $cdrDesc): array

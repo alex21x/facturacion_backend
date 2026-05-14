@@ -17,6 +17,15 @@ class GreGuideService
     private const STATUS_REJECTED = 'REJECTED';
     private const STATUS_ERROR = 'ERROR';
     private const STATUS_CANCELLED = 'CANCELLED';
+    private const ALLOWED_GUIDE_STATUSES = [
+        self::STATUS_DRAFT,
+        self::STATUS_SENDING,
+        self::STATUS_SENT,
+        self::STATUS_ACCEPTED,
+        self::STATUS_REJECTED,
+        self::STATUS_ERROR,
+        self::STATUS_CANCELLED,
+    ];
     private const AUDIT_DOCUMENT_KIND = 'GRE_GUIDE';
     private const AUDIT_TRIBUTARY_TYPE = 'GRE';
     private const INVENTORY_REF_TYPE_GRE_GUIDE = 'GRE_GUIDE';
@@ -549,16 +558,11 @@ class GreGuideService
             $payloadJson = '{}';
         }
 
-        DB::table('sales.gre_guides')
-            ->where('id', $guideId)
-            ->where('company_id', $companyId)
-            ->update([
-                'status' => self::STATUS_SENDING,
-                'bridge_method' => $bridgeMethod,
-                'bridge_endpoint' => $endpoint,
-                'sent_at' => now(),
-                'updated_at' => now(),
-            ]);
+        $this->updateGuideState($companyId, $guideId, self::STATUS_SENDING, [
+            'bridge_method' => $bridgeMethod,
+            'bridge_endpoint' => $endpoint,
+            'sent_at' => now(),
+        ]);
 
         $requestStartedAt = microtime(true);
         try {
@@ -610,18 +614,13 @@ class GreGuideService
                 }
             }
 
-            DB::table('sales.gre_guides')
-                ->where('id', $guideId)
-                ->where('company_id', $companyId)
-                ->update([
-                    'status' => $status,
-                    'bridge_http_code' => $response->status(),
-                    'sunat_ticket' => $ticket,
-                    'sunat_cdr_code' => $cdrCode,
-                    'sunat_cdr_desc' => $cdrDesc,
-                    'raw_response' => json_encode(is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]),
-                    'updated_at' => now(),
-                ]);
+            $this->updateGuideState($companyId, $guideId, $status, [
+                'bridge_http_code' => $response->status(),
+                'sunat_ticket' => $ticket,
+                'sunat_cdr_code' => $cdrCode,
+                'sunat_cdr_desc' => $cdrDesc,
+                'raw_response' => json_encode(is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]),
+            ]);
 
             if ($row->related_document_id === null && in_array($status, [self::STATUS_SENT, self::STATUS_ACCEPTED], true)) {
                 $this->applyManualGuideInventoryImpact($companyId, $row, $userId);
@@ -677,14 +676,9 @@ class GreGuideService
                 ],
             ];
         } catch (\Throwable $e) {
-            DB::table('sales.gre_guides')
-                ->where('id', $guideId)
-                ->where('company_id', $companyId)
-                ->update([
-                    'status' => self::STATUS_ERROR,
-                    'raw_response' => json_encode(['error' => substr($e->getMessage(), 0, 500)]),
-                    'updated_at' => now(),
-                ]);
+            $this->updateGuideState($companyId, $guideId, self::STATUS_ERROR, [
+                'raw_response' => json_encode(['error' => substr($e->getMessage(), 0, 500)]),
+            ]);
 
             $this->taxBridgeAuditService->logDispatch(
                 $companyId,
@@ -803,19 +797,14 @@ class GreGuideService
             }
         }
 
-        DB::table('sales.gre_guides')
-            ->where('id', $guideId)
-            ->where('company_id', $companyId)
-            ->update([
-                'status' => $status,
-                'bridge_method' => $bridgeMethod,
-                'bridge_endpoint' => $endpoint,
-                'bridge_http_code' => $response->status(),
-                'sunat_cdr_code' => $cdrCode !== '' ? $cdrCode : null,
-                'sunat_cdr_desc' => $cdrDesc !== '' ? $cdrDesc : null,
-                'raw_response' => json_encode(is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]),
-                'updated_at' => now(),
-            ]);
+        $this->updateGuideState($companyId, $guideId, $status, [
+            'bridge_method' => $bridgeMethod,
+            'bridge_endpoint' => $endpoint,
+            'bridge_http_code' => $response->status(),
+            'sunat_cdr_code' => $cdrCode !== '' ? $cdrCode : null,
+            'sunat_cdr_desc' => $cdrDesc !== '' ? $cdrDesc : null,
+            'raw_response' => json_encode(is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]),
+        ]);
 
         $this->taxBridgeAuditService->logDispatch(
             $companyId,
@@ -983,16 +972,11 @@ class GreGuideService
             throw new TaxBridgeException('La guia ya esta anulada', 422);
         }
 
-        DB::table('sales.gre_guides')
-            ->where('id', $guideId)
-            ->where('company_id', $companyId)
-            ->update([
-                'status' => self::STATUS_CANCELLED,
-                'cancelled_at' => now(),
-                'cancelled_reason' => $reason,
-                'updated_by' => $userId,
-                'updated_at' => now(),
-            ]);
+        $this->updateGuideState($companyId, $guideId, self::STATUS_CANCELLED, [
+            'cancelled_at' => now(),
+            'cancelled_reason' => $reason,
+            'updated_by' => $userId,
+        ]);
 
         if ($row->related_document_id === null) {
             $this->reverseManualGuideInventoryImpact($companyId, (int) $guideId, $userId);
@@ -1065,6 +1049,24 @@ class GreGuideService
                 'created_by' => $userId,
             ]);
         }
+    }
+
+    private function updateGuideState(int $companyId, int $guideId, string $status, array $extraUpdates = []): void
+    {
+        $normalizedStatus = strtoupper(trim($status));
+        if (!in_array($normalizedStatus, self::ALLOWED_GUIDE_STATUSES, true)) {
+            throw new TaxBridgeException('Estado GRE invalido: ' . $status, 422);
+        }
+
+        $payload = array_merge($extraUpdates, [
+            'status' => $normalizedStatus,
+            'updated_at' => now(),
+        ]);
+
+        DB::table('sales.gre_guides')
+            ->where('id', $guideId)
+            ->where('company_id', $companyId)
+            ->update($payload);
     }
 
     private function reverseManualGuideInventoryImpact(int $companyId, int $guideId, int $userId): void

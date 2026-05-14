@@ -15,6 +15,7 @@ class SalesDocumentVoidService
         private SalesDocumentSupportService $support,
         private SalesStockProjectionService $stockProjectionService,
         private DailySummaryService $dailySummaryService,
+        private CommercialDocumentStateService $documentStateService,
         private CommercialDocumentRepositoryInterface $documentRepository
     )
     {
@@ -150,14 +151,17 @@ class SalesDocumentVoidService
                     }
                 }
 
-                // Actualizar documento: mantener ISSUED para boletas en RA, VOID para otros
-                $this->documentRepository->update($documentId, $companyId, [
-                    'status' => $isReceiptGoingToRa ? 'ISSUED' : 'VOID',
-                    'notes' => isset($payload['notes']) ? (string) $payload['notes'] : $documentEntity->notes(),
-                    'metadata' => json_encode($metadata),
-                    'updated_by' => $authUser->id,
-                    'updated_at' => now(),
-                ]);
+                // Actualizar documento con transicion centralizada para todos los tipos de comprobante.
+                $this->documentStateService->updateState(
+                    $companyId,
+                    $documentId,
+                    $metadata,
+                    $isReceiptGoingToRa ? 'ISSUED' : 'VOID',
+                    [
+                        'notes' => isset($payload['notes']) ? (string) $payload['notes'] : $documentEntity->notes(),
+                        'updated_by' => $authUser->id,
+                    ]
+                );
 
                 if (!$isReceiptGoingToRa) {
                     $this->releaseRestaurantTableOnVoid(

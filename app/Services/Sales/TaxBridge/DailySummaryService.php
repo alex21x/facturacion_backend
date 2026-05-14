@@ -561,8 +561,9 @@ class DailySummaryService
         }
 
         $summaryStatus = (string) $summary->status;
+        $summaryTicket = $this->normalizeSunatTicketValue($summary->sunat_ticket ?? null);
         $canResendSentWithoutTicket = $summaryStatus === self::STATUS_SENT
-            && trim((string) ($summary->sunat_ticket ?? '')) === '';
+            && $summaryTicket === null;
 
         if (!in_array($summaryStatus, [self::STATUS_DRAFT, self::STATUS_ERROR, self::STATUS_REJECTED], true) && !$canResendSentWithoutTicket) {
             throw new TaxBridgeException(
@@ -997,7 +998,7 @@ class DailySummaryService
         $message = $this->extractBridgeMessage($decoded, $raw);
 
         if (is_array($decoded)) {
-            $ticket  = isset($decoded['ticket'])   ? (string) $decoded['ticket']    : null;
+            $ticket  = $this->normalizeSunatTicketValue($decoded['ticket'] ?? null);
             $cdrCode = isset($decoded['codRespuesta']) ? (string) $decoded['codRespuesta'] : null;
             $cdrDesc = isset($decoded['desRespuesta']) ? (string) $decoded['desRespuesta'] : null;
 
@@ -1110,8 +1111,8 @@ class DailySummaryService
             throw new TaxBridgeException('Daily summary not found', 404);
         }
 
-        $ticket = trim((string) ($summary->sunat_ticket ?? ''));
-        if ($ticket === '') {
+        $ticket = $this->normalizeSunatTicketValue($summary->sunat_ticket ?? null);
+        if ($ticket === null) {
             throw new TaxBridgeException('Daily summary has no SUNAT ticket to consult', 422);
         }
 
@@ -1210,6 +1211,21 @@ class DailySummaryService
             'response' => $responseData,
             'debug' => $result['debug'] ?? null,
         ];
+    }
+
+    private function normalizeSunatTicketValue($value): ?string
+    {
+        $ticket = trim((string) ($value ?? ''));
+        if ($ticket === '') {
+            return null;
+        }
+
+        $normalized = strtoupper($ticket);
+        if (in_array($normalized, ['NULL', 'NONE', 'N/A', 'NA', '-', 'S/T', 'SIN TICKET'], true)) {
+            return null;
+        }
+
+        return $ticket;
     }
 
     private function buildCompanyStatusAuthBlock(int $companyId, array $config): array

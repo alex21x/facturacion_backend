@@ -560,9 +560,13 @@ class DailySummaryService
             throw new TaxBridgeException('Daily summary not found', 404);
         }
 
-        if (!in_array($summary->status, [self::STATUS_DRAFT, self::STATUS_ERROR, self::STATUS_REJECTED], true)) {
+        $summaryStatus = (string) $summary->status;
+        $canResendSentWithoutTicket = $summaryStatus === self::STATUS_SENT
+            && trim((string) ($summary->sunat_ticket ?? '')) === '';
+
+        if (!in_array($summaryStatus, [self::STATUS_DRAFT, self::STATUS_ERROR, self::STATUS_REJECTED], true) && !$canResendSentWithoutTicket) {
             throw new TaxBridgeException(
-                'Summary must be in DRAFT, ERROR or REJECTED status to send. Current: ' . $summary->status,
+                'Summary must be in DRAFT, ERROR or REJECTED status to send (or SENT without SUNAT ticket). Current: ' . $summary->status,
                 422
             );
         }
@@ -1027,8 +1031,10 @@ class DailySummaryService
             $state = strtoupper(trim((string) ($decoded['estado'] ?? $decoded['state'] ?? '')));
         }
 
+        $hasBridgeErrorMarkers = $this->containsBridgeErrorMarkers($message) || $this->containsBridgeErrorMarkers($raw);
+
         if (!empty($ticket)) {
-            if ($this->containsBridgeErrorMarkers($message) || $this->containsBridgeErrorMarkers($raw)) {
+            if ($hasBridgeErrorMarkers) {
                 return [self::STATUS_SENT, 'Resumen recibido con ticket; confirmacion SUNAT pendiente', $ticket, $cdrCode, $cdrDesc];
             }
 
@@ -1039,12 +1045,20 @@ class DailySummaryService
             return [self::STATUS_ACCEPTED, 'Resumen aceptado por SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 
-        if ($resCode === 0 || in_array($state, ['RECHAZADO', 'REJECTED', 'ERROR'], true)) {
+        if (in_array($state, ['RECHAZADO', 'REJECTED'], true)) {
             return [self::STATUS_REJECTED, 'Resumen rechazado por SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 
-        if ($resCode === 1 && !$this->containsBridgeErrorMarkers($message)) {
+        if ($resCode === 0 || $state === 'ERROR') {
+            return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
+        }
+
+        if ($resCode === 1 && !$hasBridgeErrorMarkers) {
             return [self::STATUS_ACCEPTED, 'Resumen aceptado por SUNAT', $ticket, $cdrCode, $cdrDesc];
+        }
+
+        if ($hasBridgeErrorMarkers) {
+            return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 
         return [self::STATUS_SENT, 'Resumen enviado', $ticket, $cdrCode, $cdrDesc];
@@ -1299,7 +1313,7 @@ class DailySummaryService
             return false;
         }
 
-        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE/', $value) === 1;
+        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE|BAD REQUEST|HTTP\s*(4\d{2}|5\d{2})|GATEWAY TIME-?OUT|TIME\s*OUT|TIMEOUT/', $value) === 1;
     }
 
     private function summarizeSummaryDiagnostic($response, string $cdrCode, string $cdrDesc): array

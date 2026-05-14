@@ -1003,13 +1003,20 @@ class DailySummaryService
         $message = $this->extractBridgeMessage($decoded, $raw);
 
         if (is_array($decoded)) {
-            $ticket  = $this->normalizeSunatTicketValue($decoded['ticket'] ?? null);
+            // Check ticket field first; fall back to numero (used by some legacy bridges)
+            $rawTicket = $decoded['ticket'] ?? $decoded['numero'] ?? null;
+            $ticket    = $this->normalizeSunatTicketValue($rawTicket);
             $cdrCode = isset($decoded['codRespuesta']) ? (string) $decoded['codRespuesta'] : null;
             $cdrDesc = isset($decoded['desRespuesta']) ? (string) $decoded['desRespuesta'] : null;
 
             // Normalize common alternatives
             $cdrCode = $cdrCode ?? (isset($decoded['cdr_code']) ? (string) $decoded['cdr_code'] : null);
             $cdrDesc = $cdrDesc ?? (isset($decoded['cdr_desc']) ? (string) $decoded['cdr_desc'] : null);
+        }
+
+        // Last resort: extract ticket embedded in the message text (e.g. "Enviado N° Ticket : 20260514001")
+        if ($ticket === null && preg_match('/[Tt]icket\s*[:#]?\s*(\d{8,20})/', $message, $ticketMatch)) {
+            $ticket = $this->normalizeSunatTicketValue($ticketMatch[1]);
         }
 
         if (!$httpSuccess) {
@@ -1060,7 +1067,26 @@ class DailySummaryService
             return [self::STATUS_REJECTED, 'Resumen rechazado por SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 
-        if ($resCode === 0 || $state === 'ERROR') {
+        if ($state === 'ERROR') {
+            return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
+        }
+
+        // res=0 semantics differ by bridge generation:
+        //  - Legacy bridge (e.g. MundoSoft): res=0 means "enviado/aceptado" (success)
+        //  - New bridges: res=0 means error on the bridge side
+        // Auto-detect legacy success by the presence of positive keywords in the message.
+        if ($resCode === 0) {
+            if ($hasBridgeErrorMarkers || $hasImunifyProtection) {
+                return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
+            }
+            $msgLower = strtolower($message . ' ' . $raw);
+            if (str_contains($msgLower, 'enviado') || str_contains($msgLower, 'ticket')) {
+                // Legacy bridge signalling success
+                if (!empty($ticket)) {
+                    return [self::STATUS_SENT, 'Resumen enviado – ticket pendiente (puente legado)', $ticket, $cdrCode, $cdrDesc];
+                }
+                return [self::STATUS_ACCEPTED, 'Resumen aceptado por SUNAT (puente legado sincrono)', $ticket, $cdrCode, $cdrDesc];
+            }
             return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 

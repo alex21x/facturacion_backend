@@ -1184,39 +1184,23 @@ class DailySummaryService
 
     private function updateDocumentSummaryMetadata(int $companyId, int $documentId, int $summaryType, int $summaryId): void
     {
-        $row = DB::table('sales.commercial_documents')
-            ->where('id', $documentId)
-            ->where('company_id', $companyId)
-            ->select('metadata')
-            ->first();
-
-        if (!$row) {
-            return;
-        }
-
-        $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
-        $metadata = is_array($metadata) ? $metadata : [];
-
+        $updates = [];
         if ($summaryType === self::TYPE_DECLARATION) {
-            $metadata['receipt_send_mode'] = 'SUMMARY';
-            $metadata['sunat_status'] = 'PENDING_SUMMARY';
-            $metadata['sunat_status_label'] = 'Pendiente por resumen RC';
-            $metadata['sunat_summary_id'] = $summaryId;
+            $updates = [
+                'receipt_send_mode' => 'SUMMARY',
+                'sunat_status' => 'PENDING_SUMMARY',
+                'sunat_status_label' => 'Pendiente por resumen RC',
+                'sunat_summary_id' => $summaryId,
+            ];
         } else {
-            $metadata['sunat_void_status'] = 'PENDING_SUMMARY';
-            $metadata['sunat_void_label'] = 'Pendiente por resumen RA';
-            $metadata['sunat_void_summary_id'] = $summaryId;
+            $updates = [
+                'sunat_void_status' => 'PENDING_SUMMARY',
+                'sunat_void_label' => 'Pendiente por resumen RA',
+                'sunat_void_summary_id' => $summaryId,
+            ];
         }
 
-        $metadata['sunat_last_sync_at'] = now()->toDateTimeString();
-
-        DB::table('sales.commercial_documents')
-            ->where('id', $documentId)
-            ->where('company_id', $companyId)
-            ->update([
-                'metadata' => json_encode($metadata),
-                'updated_at' => now(),
-            ]);
+        $this->taxBridgeService->updateCommercialDocumentState($companyId, $documentId, $updates);
     }
 
     private function clearDocumentSummaryMetadata(int $companyId, int $documentId, int $summaryType, int $summaryId): void
@@ -1237,34 +1221,32 @@ class DailySummaryService
         if ($summaryType === self::TYPE_DECLARATION) {
             $currentSummaryId = (int) ($metadata['sunat_summary_id'] ?? 0);
             if ($currentSummaryId === $summaryId) {
-                $metadata['receipt_send_mode'] = 'MANUAL';
-                $metadata['sunat_status'] = 'PENDING_MANUAL';
-                $metadata['sunat_status_label'] = 'Pendiente manual';
-                unset($metadata['sunat_summary_id'], $metadata['sunat_ticket'], $metadata['sunat_cdr_code'], $metadata['sunat_cdr_desc']);
+                $this->taxBridgeService->updateCommercialDocumentState($companyId, $documentId, [
+                    'receipt_send_mode' => 'MANUAL',
+                    'sunat_status' => 'PENDING_MANUAL',
+                    'sunat_status_label' => 'Pendiente manual',
+                    'sunat_summary_id' => null,
+                    'sunat_ticket' => null,
+                    'sunat_cdr_code' => null,
+                    'sunat_cdr_desc' => null,
+                ]);
             }
         } else {
             $currentSummaryId = (int) ($metadata['sunat_void_summary_id'] ?? 0);
             if ($currentSummaryId === $summaryId) {
-                unset($metadata['sunat_void_status'], $metadata['sunat_void_label'], $metadata['sunat_void_summary_id'], $metadata['sunat_void_ticket']);
-
-                if (strtoupper((string) ($row->status ?? '')) === 'VOID') {
-                    DB::table('sales.commercial_documents')
-                        ->where('id', $documentId)
-                        ->where('company_id', $companyId)
-                        ->update(['status' => 'ISSUED']);
-                }
+                $this->taxBridgeService->updateCommercialDocumentState(
+                    $companyId,
+                    $documentId,
+                    [
+                        'sunat_void_status' => null,
+                        'sunat_void_label' => null,
+                        'sunat_void_summary_id' => null,
+                        'sunat_void_ticket' => null,
+                    ],
+                    strtoupper((string) ($row->status ?? '')) === 'VOID' ? 'ISSUED' : null
+                );
             }
         }
-
-        $metadata['sunat_last_sync_at'] = now()->toDateTimeString();
-
-        DB::table('sales.commercial_documents')
-            ->where('id', $documentId)
-            ->where('company_id', $companyId)
-            ->update([
-                'metadata' => json_encode($metadata),
-                'updated_at' => now(),
-            ]);
     }
 
     private function syncDocumentsAfterSummarySend(
@@ -1335,22 +1317,16 @@ class DailySummaryService
                 $metadata['sunat_void_summary_id'] = $summaryId;
             }
 
-            $metadata['sunat_last_sync_at'] = now()->toDateTimeString();
-
-            $docUpdate = [
-                'metadata' => json_encode($metadata),
-                'updated_at' => now(),
-            ];
+            $this->taxBridgeService->updateCommercialDocumentState(
+                $companyId,
+                (int) $docId,
+                $metadata,
+                $summaryType === self::TYPE_CANCELLATION && $summaryStatus === self::STATUS_ACCEPTED ? 'VOID' : null
+            );
 
             if ($summaryType === self::TYPE_CANCELLATION && $summaryStatus === self::STATUS_ACCEPTED) {
-                $docUpdate['status'] = 'VOID';
-                    $this->taxBridgeService->reverseInventoryForVoidedDocumentIfNeeded($companyId, (int) $docId);
+                $this->taxBridgeService->reverseInventoryForVoidedDocumentIfNeeded($companyId, (int) $docId);
             }
-
-            DB::table('sales.commercial_documents')
-                ->where('id', (int) $docId)
-                ->where('company_id', $companyId)
-                ->update($docUpdate);
         }
     }
 }

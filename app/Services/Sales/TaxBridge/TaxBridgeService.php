@@ -2,6 +2,7 @@
 
 namespace App\Services\Sales\TaxBridge;
 
+use App\Services\Sales\Documents\CommercialDocumentStateService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -13,9 +14,26 @@ class TaxBridgeService
 
     public function __construct(
         private TaxBridgePayloadBuilder $payloadBuilder,
-        private TaxBridgeAuditService $auditService
+        private TaxBridgeAuditService $auditService,
+        private CommercialDocumentStateService $documentStateService
     )
     {
+    }
+
+    public function updateCommercialDocumentState(
+        int $companyId,
+        int $documentId,
+        array $metadataUpdates = [],
+        ?string $status = null,
+        array $extraUpdates = []
+    ): bool {
+        return $this->documentStateService->updateState(
+            $companyId,
+            $documentId,
+            $metadataUpdates,
+            $status,
+            $extraUpdates
+        );
     }
 
     public function supportsDocumentKind(string $documentKind, ?int $documentKindId = null): bool
@@ -342,44 +360,21 @@ class TaxBridgeService
                 $errorKind = 'HTTP_ERROR';
             }
 
-            // Prepare metadata update
-            $row = DB::table('sales.commercial_documents')
-                ->where('id', $documentId)
-                ->where('company_id', $companyId)
-                ->select('metadata')
-                ->first();
+            $this->updateCommercialDocumentState(
+                $companyId,
+                $documentId,
+                [
+                    'sunat_void_status' => $status,
+                    'sunat_void_label' => $label,
+                    'sunat_void_http_code' => $response->status(),
+                    'sunat_void_response' => $voidResponsePayload,
+                    'sunat_void_ticket' => is_array($decoded) ? ($decoded['ticket'] ?? null) : null,
+                ],
+                $status === 'ACCEPTED' ? 'VOID' : null
+            );
 
-            if ($row) {
-                $meta = json_decode((string) ($row->metadata ?? '{}'), true);
-                if (!is_array($meta)) {
-                    $meta = [];
-                }
-
-                $meta['sunat_void_status'] = $status;
-                $meta['sunat_void_label'] = $label;
-                $meta['sunat_void_http_code'] = $response->status();
-                $meta['sunat_void_response'] = $voidResponsePayload;
-                $meta['sunat_void_ticket'] = is_array($decoded) ? ($decoded['ticket'] ?? null) : null;
-                $meta['sunat_last_sync_at'] = now()->toDateTimeString();
-
-                // Atomic update: update both metadata and status (if ACCEPTED) in a single operation
-                $docUpdate = [
-                    'metadata' => json_encode($meta),
-                    'updated_at' => now(),
-                ];
-
-                if ($status === 'ACCEPTED') {
-                    $docUpdate['status'] = 'VOID';
-                }
-
-                DB::table('sales.commercial_documents')
-                    ->where('id', $documentId)
-                    ->where('company_id', $companyId)
-                    ->update($docUpdate);
-
-                if ($status === 'ACCEPTED') {
-                    $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
-                }
+            if ($status === 'ACCEPTED') {
+                $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
             }
 
             $this->auditService->logDispatch(
@@ -1910,39 +1905,7 @@ class TaxBridgeService
 
     private function updateDocumentTaxStatus(int $companyId, int $documentId, array $updates): void
     {
-        $row = DB::table('sales.commercial_documents')
-            ->where('id', $documentId)
-            ->where('company_id', $companyId)
-            ->select('metadata')
-            ->first();
-
-        if (!$row) {
-            return;
-        }
-
-        $meta = json_decode((string) ($row->metadata ?? '{}'), true);
-        if (!is_array($meta)) {
-            $meta = [];
-        }
-
-        foreach ($updates as $key => $value) {
-            if ($value === null) {
-                unset($meta[$key]);
-                continue;
-            }
-
-            $meta[$key] = $value;
-        }
-
-        $meta['sunat_last_sync_at'] = now()->toDateTimeString();
-
-        DB::table('sales.commercial_documents')
-            ->where('id', $documentId)
-            ->where('company_id', $companyId)
-            ->update([
-                'metadata' => json_encode($meta),
-                'updated_at' => now(),
-            ]);
+        $this->updateCommercialDocumentState($companyId, $documentId, $updates);
     }
 
     private function sanitizePayloadForDebug(array $payload): array

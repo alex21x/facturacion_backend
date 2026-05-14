@@ -75,7 +75,7 @@ class AuthController extends Controller
         $refreshToken = ApiToken::makeRefreshToken();
         $refreshTokenHash = ApiToken::hashRefreshToken($refreshToken, $deviceId);
         $refreshExpiresAt = now()->addDays((int) env('REFRESH_TOKEN_TTL_DAYS', 30));
-        $accessTtlMinutes = (int) env('ACCESS_TOKEN_TTL_MINUTES', 30);
+        $accessTtlMinutes = $this->resolveAccessTtlMinutes();
 
         // Revoke active refresh tokens for this user+device.
         $deviceHashPrefix = ApiToken::deviceHash($deviceId) . '.%';
@@ -202,7 +202,7 @@ class AuthController extends Controller
         $newRefreshToken = ApiToken::makeRefreshToken();
         $newRefreshHash = ApiToken::hashRefreshToken($newRefreshToken, $deviceId);
         $refreshExpiresAt = now()->addDays((int) env('REFRESH_TOKEN_TTL_DAYS', 30));
-        $accessTtlMinutes = (int) env('ACCESS_TOKEN_TTL_MINUTES', 30);
+        $accessTtlMinutes = $this->resolveAccessTtlMinutes();
 
         $newSessionId = null;
 
@@ -327,6 +327,14 @@ class AuthController extends Controller
         }
 
         return $permissions;
+    }
+
+    private function resolveAccessTtlMinutes(): int
+    {
+        $configured = (int) env('ACCESS_TOKEN_TTL_MINUTES', 60);
+
+        // Guarantee at least 1 hour to avoid overly short sessions.
+        return max(60, $configured);
     }
 
     private function resolvePrimaryRoleContext(int $userId, int $companyId): array

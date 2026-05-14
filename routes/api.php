@@ -196,6 +196,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::delete('/sales/daily-summaries/{id}', 'Api\\DailySummaryController@destroy');
         Route::delete('/sales/daily-summaries/{id}/documents/{documentId}', 'Api\\DailySummaryController@removeDocument');
         Route::put('/sales/daily-summaries/{id}/send', 'Api\\DailySummaryController@send');
+        Route::put('/sales/daily-summaries/{id}/status-ticket', 'Api\\DailySummaryController@statusTicket');
 
         Route::post('/sales/gre-guides', 'Api\\GreGuideController@store');
         Route::put('/sales/gre-guides/{id}', 'Api\\GreGuideController@update');

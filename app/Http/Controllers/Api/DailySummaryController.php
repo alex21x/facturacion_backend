@@ -229,4 +229,35 @@ class DailySummaryController extends Controller
             return response()->json(['message' => $e->getMessage()], $e->httpStatus());
         }
     }
+
+    public function statusTicket(Request $request, int $id)
+    {
+        $authUser  = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        try {
+            $result = $this->dailySummaryService->queryTicketStatus($companyId, $id, (int) $authUser->id, (string) ($authUser->username ?? ''));
+
+            return response()->json([
+                'message' => 'Ticket procesado',
+                'summary_id' => $id,
+                'status' => $result['status'],
+                'label' => $result['label'],
+                'bridge_http_code' => $result['bridge_http_code'],
+                'sunat_ticket' => $result['sunat_ticket'],
+                'sunat_cdr_code' => $result['sunat_cdr_code'],
+                'sunat_cdr_desc' => $result['sunat_cdr_desc'],
+                'sunat_error_code' => $result['sunat_error_code'] ?? null,
+                'sunat_error_message' => $result['sunat_error_message'] ?? null,
+                'response' => $result['response'],
+                'debug' => $result['debug'],
+            ], 200);
+        } catch (TaxBridgeException $e) {
+            return response()->json(['message' => $e->getMessage()], $e->httpStatus());
+        }
+    }
 }

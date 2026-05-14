@@ -658,6 +658,116 @@ class TaxBridgeService
         ];
     }
 
+    public function queryAsyncTicketStatus(int $companyId, ?int $branchId, string $bridgeMethod, array $payload): array
+    {
+        $config = $this->resolveConfig($companyId, $branchId);
+
+        if (!$config['enabled']) {
+            throw new TaxBridgeException('Tax bridge is not enabled in AppCfg', 422);
+        }
+
+        if ($config['raw_base_url'] === '') {
+            throw new TaxBridgeException('Tax bridge endpoint URL is not configured', 422);
+        }
+
+        $endpoint = $this->resolveBridgeEndpoint($config['raw_base_url'], $bridgeMethod);
+        if ($endpoint === '') {
+            throw new TaxBridgeException("Tax bridge endpoint for {$bridgeMethod} could not be resolved", 422);
+        }
+
+        $payloadJson = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($payloadJson)) {
+            $payloadJson = '{}';
+        }
+
+        $request = Http::timeout((int) $config['timeout_seconds'])->acceptJson();
+        if (($config['auth_scheme'] ?? '') === 'bearer' && !empty($config['token'])) {
+            $request = $request->withToken((string) $config['token']);
+        }
+
+        $startedAt = microtime(true);
+        $response = $request->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
+        $raw = (string) $response->body();
+        $decoded = json_decode($raw, true);
+        if (is_string($decoded)) {
+            $nested = json_decode($decoded, true);
+            if (is_array($nested)) {
+                $decoded = $nested;
+            }
+        }
+
+        $bridgeResCode = $this->extractBridgeResponseCode($decoded);
+        $bridgeState = strtoupper(trim($this->extractBridgeResponseState($decoded)));
+        $bridgeMessage = $this->extractBridgeResponseMessage($decoded, $raw);
+        $bridgeTicket = $this->extractBridgeTicket($decoded);
+        $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
+        $scalarBridgeCode = null;
+        if (is_int($decoded) || (is_string($decoded) && preg_match('/^(0|1|3|98|99)$/', trim((string) $decoded)) === 1)) {
+            $scalarBridgeCode = (int) $decoded;
+        } elseif (preg_match('/^(0|1|3|98|99)$/', trim($raw)) === 1) {
+            $scalarBridgeCode = (int) trim($raw);
+        }
+
+        $status = 'PENDING_CONFIRMATION';
+        $label = 'Ticket en proceso';
+
+        if (!$response->successful()) {
+            $status = 'ERROR';
+            $label = 'Error HTTP en consulta de ticket';
+        } elseif ($finalBridgeCode !== null) {
+            if ($finalBridgeCode === 0 || $finalBridgeCode >= 4000) {
+                $status = 'ACCEPTED';
+                $label = 'Ticket aceptado por SUNAT';
+            } elseif ($finalBridgeCode >= 2000 && $finalBridgeCode <= 3999) {
+                $status = 'REJECTED';
+                $label = 'Ticket rechazado por SUNAT';
+            }
+        } elseif ($scalarBridgeCode === 1 && $bridgeTicket === null) {
+            $status = 'ACCEPTED';
+            $label = 'Ticket aceptado por SUNAT';
+        } elseif ($scalarBridgeCode === 0) {
+            $status = 'REJECTED';
+            $label = 'Ticket rechazado por SUNAT';
+        } elseif ($bridgeResCode === 1 && $bridgeTicket === null && !$this->containsBridgeErrorMarkers($bridgeMessage)) {
+            $status = 'ACCEPTED';
+            $label = 'Ticket aceptado por SUNAT';
+        } elseif ($bridgeResCode === 0 || in_array($bridgeState, ['RECHAZADO', 'REJECTED', 'ERROR'], true)) {
+            $status = 'REJECTED';
+            $label = 'Ticket rechazado por SUNAT';
+        } elseif (in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'OK'], true) && $bridgeTicket === null) {
+            $status = 'ACCEPTED';
+            $label = 'Ticket aceptado por SUNAT';
+        } elseif ($bridgeTicket !== null) {
+            $status = 'PENDING_CONFIRMATION';
+            $label = 'Ticket pendiente de confirmacion';
+        }
+
+        $responseData = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)];
+
+        return [
+            'status' => $status,
+            'label' => $label,
+            'bridge_http_code' => $response->status(),
+            'response_time_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+            'response' => $responseData,
+            'debug' => [
+                'bridge_mode' => $config['bridge_mode'],
+                'endpoint' => $endpoint,
+                'method' => 'POST',
+                'content_type' => 'application/x-www-form-urlencoded',
+                'form_key' => 'datosJSON',
+                'payload' => $this->sanitizePayloadForDebug($payload),
+                'payload_length' => strlen($payloadJson),
+                'payload_sha1' => sha1($payloadJson),
+            ],
+            'sunat_ticket' => $bridgeTicket,
+            'sunat_cdr_code' => $finalBridgeCode !== null ? (string) $finalBridgeCode : null,
+            'sunat_cdr_desc' => $this->extractBridgeResponseMessage($decoded, $raw),
+            'sunat_error_code' => $this->summarizeBridgeDiagnostic($responseData)['code'],
+            'sunat_error_message' => $this->summarizeBridgeDiagnostic($responseData)['message'],
+        ];
+    }
+
     private function performDispatch(int $companyId, int $documentId, array $config, bool $isRetry): array
     {
         $document = DB::table('sales.commercial_documents')

@@ -85,7 +85,15 @@ class Cors
             (string) env('FRONTEND_ADMIN_URL', ''),
         ];
 
-        return array_values(array_filter(array_unique($origins)));
+        $normalized = [];
+        foreach ($origins as $origin) {
+            $value = trim((string) $origin);
+            if ($value !== '') {
+                $normalized[] = rtrim($value, '/');
+            }
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     private function isAllowedOrigin(?string $origin, array $allowedOrigins): bool
@@ -94,7 +102,16 @@ class Cors
             return false;
         }
 
+        $origin = rtrim(trim($origin), '/');
+
         if (in_array($origin, $allowedOrigins, true)) {
+            return true;
+        }
+
+        // Railway production guard: when backend runs on Railway, allow
+        // secure Railway app subdomains as browser origins to avoid lockouts
+        // from env typos/whitespace in FRONTEND_* variables.
+        if ($this->isRailwayHost((string) env('APP_URL', '')) && preg_match('#^https://[a-z0-9.-]+\.up\.railway\.app$#i', $origin)) {
             return true;
         }
 
@@ -120,5 +137,11 @@ class Cors
         }
 
         return false;
+    }
+
+    private function isRailwayHost(string $url): bool
+    {
+        $host = (string) parse_url(trim($url), PHP_URL_HOST);
+        return $host !== '' && stripos($host, '.up.railway.app') !== false;
     }
 }

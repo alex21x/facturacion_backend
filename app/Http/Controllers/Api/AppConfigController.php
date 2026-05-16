@@ -1824,6 +1824,7 @@ class AppConfigController extends Controller
     public function resetAdminCompanyPassword(Request $request, $companyId)
     {
         $companyId = $this->normalizeLegacyCompanyId((int) $companyId);
+        $hasLastTempPasswordColumn = $this->columnExists('auth', 'users', 'last_temp_password');
 
         if ($companyId === self::SYSTEM_COMPANY_ID) {
             return response()->json([
@@ -1861,13 +1862,18 @@ class AppConfigController extends Controller
 
         $newPassword = $this->generateSecurePassword();
 
+        $updateValues = [
+            'password_hash' => Hash::make($newPassword),
+            'updated_at' => now(),
+        ];
+
+        if ($hasLastTempPasswordColumn) {
+            $updateValues['last_temp_password'] = encrypt($newPassword);
+        }
+
         DB::table('auth.users')
             ->where('id', (int) $adminUser->id)
-            ->update([
-                'password_hash' => Hash::make($newPassword),
-                'last_temp_password' => encrypt($newPassword),
-                'updated_at' => now(),
-            ]);
+            ->update($updateValues);
 
         return response()->json([
             'username' => $adminUser->username,
@@ -1880,9 +1886,15 @@ class AppConfigController extends Controller
     public function revealAdminCompanyPassword(Request $request, $companyId)
     {
         $companyId = $this->normalizeLegacyCompanyId((int) $companyId);
+        $hasLastTempPasswordColumn = $this->columnExists('auth', 'users', 'last_temp_password');
 
         if ($companyId === self::SYSTEM_COMPANY_ID) {
             return response()->json(['message' => 'La empresa del sistema no se administra desde este panel.'], 403);
+        }
+
+        $selectFields = ['u.id', 'u.username', 'u.email'];
+        if ($hasLastTempPasswordColumn) {
+            $selectFields[] = 'u.last_temp_password';
         }
 
         $adminUser = DB::table('auth.users as u')
@@ -1892,7 +1904,7 @@ class AppConfigController extends Controller
             ->where('u.status', 1)
             ->whereRaw("UPPER(r.code) = 'ADMIN'")
             ->orderBy('u.id')
-            ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
+            ->first($selectFields);
 
         if (!$adminUser) {
             $this->repairCompanyAdminRoleAfterRestore($companyId);
@@ -1904,11 +1916,18 @@ class AppConfigController extends Controller
                 ->where('u.status', 1)
                 ->whereRaw("UPPER(r.code) = 'ADMIN'")
                 ->orderBy('u.id')
-                ->first(['u.id', 'u.username', 'u.email', 'u.last_temp_password']);
+                ->first($selectFields);
         }
 
         if (!$adminUser) {
             return response()->json(['message' => 'No se encontró un usuario administrador activo.'], 404);
+        }
+
+        if (!$hasLastTempPasswordColumn) {
+            return response()->json([
+                'available' => false,
+                'message' => 'La visualización de contraseña temporal no está disponible en esta base local. Puedes usar "Reset pass" para generar una nueva clave.',
+            ]);
         }
 
         if (empty($adminUser->last_temp_password)) {
@@ -3972,6 +3991,16 @@ class AppConfigController extends Controller
 
         if ($base === '' || ($isLocalHost && app()->environment('production'))) {
             $base = 'https://facturacionfrontend-production.up.railway.app';
+        }
+
+        $parsed = parse_url($base);
+        if (is_array($parsed) && ($parsed['host'] ?? '') === '0.0.0.0') {
+            $fallbackHost = request()->getHost() ?: '127.0.0.1';
+            $scheme = $parsed['scheme'] ?? (request()->getScheme() ?: 'http');
+            $port = isset($parsed['port']) ? ':' . (string) $parsed['port'] : '';
+            $path = isset($parsed['path']) ? (string) $parsed['path'] : '';
+
+            return rtrim($scheme . '://' . $fallbackHost . $port . $path, '/');
         }
 
         return rtrim($base, '/');

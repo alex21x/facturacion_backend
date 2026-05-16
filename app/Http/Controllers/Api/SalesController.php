@@ -1077,7 +1077,22 @@ class SalesController extends Controller
             'updated_at' => now(),
         ]);
 
-        return response()->json(['message' => 'Vehicle created', 'id' => (int) $newId], 201);
+        return response()->json([
+            'message' => 'Vehicle created',
+            'id' => (int) $newId,
+            'data' => [
+                'id' => (int) $newId,
+                'customer_id' => (int) $id,
+                'plate' => strtoupper(trim((string) $payload['plate'])),
+                'brand' => $payload['brand'] ?? null,
+                'model' => $payload['model'] ?? null,
+                'year' => $payload['year'] ?? null,
+                'color' => $payload['color'] ?? null,
+                'vin' => $payload['vin'] ?? null,
+                'is_default' => $isDefault,
+                'status' => (int) ($payload['status'] ?? 1),
+            ],
+        ], 201);
     }
 
     public function updateCustomerVehicle(Request $request, int $id, int $vehicleId)

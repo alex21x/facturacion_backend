@@ -156,6 +156,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
         Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
         Route::get('/cash/movements', 'Api\\CashController@movements');
+        Route::post('/cash/movements', 'Api\\CashController@createMovement');
 
         // Restaurant operations (comandas & orders)
         Route::get('/restaurant/bootstrap', 'Api\\RestaurantController@bootstrap');
@@ -183,7 +184,6 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
 
         Route::post('/cash/sessions', 'Api\\CashController@openSession');
         Route::put('/cash/sessions/{id}/close', 'Api\\CashController@closeSession');
-        Route::post('/cash/movements', 'Api\\CashController@createMovement');
         Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');

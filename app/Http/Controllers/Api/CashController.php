@@ -771,6 +771,17 @@ class CashController extends Controller
         ]);
     }
 
+    /**
+     * Registrar movimiento manual de efectivo (entrada/salida).
+     * Requiere: rbac.module:SALES,create
+     * 
+     * Permisos:
+     * - El usuario debe tener can_create=true en el módulo SALES en auth.role_module_access
+     * - El perfil VENDER debe estar configurado con permiso para crear en SALES (movimientos, apertura/cierre de caja)
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function createMovement(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');

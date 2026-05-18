@@ -1038,6 +1038,11 @@ class SalesController extends Controller
         }
 
         $payload = $validator->validated();
+
+        if (array_key_exists('doc_number', $payload)) {
+            $normalizedDoc = trim((string) ($payload['doc_number'] ?? ''));
+            $payload['doc_number'] = $normalizedDoc !== '' ? $normalizedDoc : null;
+        }
         $plateNormalized = $this->normalizeVehiclePlate((string) ($payload['plate'] ?? ''));
         if ($plateNormalized === '') {
             return response()->json(['message' => 'La placa ingresada no es valida'], 422);
@@ -1336,19 +1341,62 @@ class SalesController extends Controller
             return response()->json(['message' => 'Invalid price tier for customer profile'], 422);
         }
 
-        $id = DB::table('sales.customers')->insertGetId([
-            'company_id' => $companyId,
-            'doc_type' => $payload['doc_type'] ?? null,
-            'customer_type_id' => $payload['customer_type_id'] ?? null,
-            'doc_number' => $payload['doc_number'] ?? null,
-            'legal_name' => $payload['legal_name'] ?? null,
-            'trade_name' => $payload['trade_name'] ?? null,
-            'first_name' => $payload['first_name'] ?? null,
-            'last_name' => $payload['last_name'] ?? null,
-            'plate' => $payload['plate'] ?? null,
-            'address' => $payload['address'] ?? null,
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
+        $reactivated = false;
+        $id = null;
+
+        $docNumber = $payload['doc_number'] ?? null;
+        if ($docNumber !== null && trim((string) $docNumber) !== '') {
+            $existing = DB::table('sales.customers')
+                ->select('id', 'status')
+                ->where('company_id', $companyId)
+                ->where('doc_number', (string) $docNumber)
+                ->orderByDesc('id')
+                ->first();
+
+            if ($existing) {
+                if ((int) ($existing->status ?? 0) === 1) {
+                    return response()->json([
+                        'message' => 'Ya existe un cliente activo con ese documento. Puedes editarlo o buscarlo en la lista.',
+                        'id' => (int) $existing->id,
+                    ], 409);
+                }
+
+                DB::table('sales.customers')
+                    ->where('id', (int) $existing->id)
+                    ->where('company_id', $companyId)
+                    ->update([
+                        'doc_type' => $payload['doc_type'] ?? null,
+                        'customer_type_id' => $payload['customer_type_id'] ?? null,
+                        'doc_number' => $payload['doc_number'] ?? null,
+                        'legal_name' => $payload['legal_name'] ?? null,
+                        'trade_name' => $payload['trade_name'] ?? null,
+                        'first_name' => $payload['first_name'] ?? null,
+                        'last_name' => $payload['last_name'] ?? null,
+                        'plate' => $payload['plate'] ?? null,
+                        'address' => $payload['address'] ?? null,
+                        'status' => 1,
+                    ]);
+
+                $id = (int) $existing->id;
+                $reactivated = true;
+            }
+        }
+
+        if ($id === null) {
+            $id = (int) DB::table('sales.customers')->insertGetId([
+                'company_id' => $companyId,
+                'doc_type' => $payload['doc_type'] ?? null,
+                'customer_type_id' => $payload['customer_type_id'] ?? null,
+                'doc_number' => $payload['doc_number'] ?? null,
+                'legal_name' => $payload['legal_name'] ?? null,
+                'trade_name' => $payload['trade_name'] ?? null,
+                'first_name' => $payload['first_name'] ?? null,
+                'last_name' => $payload['last_name'] ?? null,
+                'plate' => $payload['plate'] ?? null,
+                'address' => $payload['address'] ?? null,
+                'status' => (int) ($payload['status'] ?? 1),
+            ]);
+        }
 
         if (
             array_key_exists('default_tier_id', $payload)
@@ -1368,7 +1416,11 @@ class SalesController extends Controller
             );
         }
 
-        return response()->json(['message' => 'Customer created', 'id' => (int) $id], 201);
+        return response()->json([
+            'message' => $reactivated ? 'Cliente reactivado correctamente.' : 'Customer created',
+            'id' => (int) $id,
+            'reactivated' => $reactivated,
+        ], $reactivated ? 200 : 201);
     }
 
     public function updateCustomer(Request $request, int $id)

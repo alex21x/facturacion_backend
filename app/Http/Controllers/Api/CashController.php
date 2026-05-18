@@ -992,28 +992,36 @@ class CashController extends Controller
             ? max(1.0, $lineTotalSafe / $lineRevenueSafe)
             : 1.0;
 
-        $realUnitCost = null;
+        $unitCostNet = null;
+        $unitCostCommercial = null;
+
         if ($itemUnitCost !== null && $itemUnitCost > 0) {
-            $realUnitCost = $itemUnitCost;
+            // Costo trazado por stock/compra: se guarda como neto y se proyecta a comercial con IGV.
+            $unitCostNet = $itemUnitCost;
+            $unitCostCommercial = $unitCostNet * $commercialCostFactor;
         } elseif ($productCostPrice !== null && $productCostPrice > 0) {
-            $realUnitCost = $productCostPrice;
+            // Costo del maestro de producto: se captura como costo comercial con IGV.
+            $unitCostCommercial = $productCostPrice;
+            $unitCostNet = $commercialCostFactor > 0
+                ? $unitCostCommercial / $commercialCostFactor
+                : $unitCostCommercial;
         }
 
-        if ($realUnitCost !== null) {
-            $costTotal = $qtySafe > 0 ? $realUnitCost * $qtySafe : 0.0;
+        if ($unitCostNet !== null && $unitCostCommercial !== null) {
+            $costTotalNet = $qtySafe > 0 ? $unitCostNet * $qtySafe : 0.0;
+            $costTotalCommercial = $qtySafe > 0 ? $unitCostCommercial * $qtySafe : 0.0;
 
-            // Margen neto (contable): base = subtotal sin IGV
-            $marginNet        = $lineRevenueSafe - $costTotal;
-            $marginNetPct     = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
+            // Margen neto (contable): base = subtotal sin IGV.
+            $marginNet    = $lineRevenueSafe - $costTotalNet;
+            $marginNetPct = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
 
-            // Margen comercial: compara total cobrado contra costo equivalente con IGV.
-            $commercialCostTotal = $costTotal * $commercialCostFactor;
-            $marginCommercial    = $lineTotalSafe - $commercialCostTotal;
+            // Margen comercial: compara total cobrado contra costo comercial con IGV.
+            $marginCommercial    = $lineTotalSafe - $costTotalCommercial;
             $marginCommercialPct = $lineTotalSafe > 0 ? ($marginCommercial / $lineTotalSafe) * 100 : 0.0;
 
             return [
-                'unit_cost'               => round($realUnitCost, 4),
-                'cost_total'              => round($costTotal, 2),
+                'unit_cost'               => round($unitCostCommercial, 4),
+                'cost_total'              => round($costTotalCommercial, 2),
                 'margin_total'            => round($marginNet, 2),
                 'margin_percent'          => round($marginNetPct, 2),
                 'margin_total_net'        => round($marginNet, 2),
@@ -1032,19 +1040,19 @@ class CashController extends Controller
         $targetMargin = $lineRevenueSafe * $estimatedMarginRate;
         $maxMargin = $lineRevenueSafe * $maxEstimatedMarginRate;
         $marginNet = min(max(0.0, $targetMargin), max(0.0, $maxMargin));
-        $costTotal = max(0.0, $lineRevenueSafe - $marginNet);
+        $costTotalNet = max(0.0, $lineRevenueSafe - $marginNet);
+        $costTotalCommercial = $costTotalNet * $commercialCostFactor;
 
         $referenceUnitPrice = $qtySafe > 0 ? ($lineRevenueSafe / $qtySafe) : max(0.0, $unitPrice);
-        $estimatedUnitCost = $qtySafe > 0 ? ($costTotal / $qtySafe) : ($referenceUnitPrice * (1 - $estimatedMarginRate));
+        $estimatedUnitCost = $qtySafe > 0 ? ($costTotalCommercial / $qtySafe) : ($referenceUnitPrice * (1 - $estimatedMarginRate));
         $marginNetPct = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
 
-        $commercialCostTotal = $costTotal * $commercialCostFactor;
-        $marginCommercial    = $lineTotalSafe - $commercialCostTotal;
+        $marginCommercial    = $lineTotalSafe - $costTotalCommercial;
         $marginCommercialPct = $lineTotalSafe > 0 ? ($marginCommercial / $lineTotalSafe) * 100 : 0.0;
 
         return [
             'unit_cost'               => round(max(0.0, $estimatedUnitCost), 4),
-            'cost_total'              => round($costTotal, 2),
+            'cost_total'              => round($costTotalCommercial, 2),
             'margin_total'            => round($marginNet, 2),
             'margin_percent'          => round($marginNetPct, 2),
             'margin_total_net'        => round($marginNet, 2),

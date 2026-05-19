@@ -3976,7 +3976,16 @@ class AppConfigController extends Controller
 
     private function resolveFrontendAppUrl(): string
     {
-        $base = (string) env('FRONTEND_APP_URL', 'http://127.0.0.1:5173');
+        $base = trim((string) env('FRONTEND_ACCESS_URL', ''));
+        if ($base === '') {
+            $base = trim((string) env('FRONTEND_URL', ''));
+        }
+        if ($base === '') {
+            $base = trim((string) env('FRONTEND_APP_URL', ''));
+        }
+        if ($base === '') {
+            $base = 'http://127.0.0.1:5173';
+        }
 
         $parsed = parse_url($base);
         if (is_array($parsed) && ($parsed['host'] ?? '') === '0.0.0.0') {

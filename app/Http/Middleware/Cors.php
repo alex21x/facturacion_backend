@@ -83,7 +83,14 @@ class Cors
             (string) env('FRONTEND_URL', ''),
             (string) env('FRONTEND_APP_URL', ''),
             (string) env('FRONTEND_ADMIN_URL', ''),
+            'https://www.fycticonsulting.com',
+            'https://admin.fycticonsulting.com',
         ];
+
+        $extraOrigins = explode(',', (string) env('CORS_ALLOWED_ORIGINS', ''));
+        foreach ($extraOrigins as $extraOrigin) {
+            $origins[] = $extraOrigin;
+        }
 
         $normalized = [];
         foreach ($origins as $origin) {
@@ -105,6 +112,12 @@ class Cors
         $origin = rtrim(trim($origin), '/');
 
         if (in_array($origin, $allowedOrigins, true)) {
+            return true;
+        }
+
+        // Allow canonical production domains even if env variables were not
+        // synchronized yet in Railway.
+        if (preg_match('#^https://(www|admin)\.fycticonsulting\.com$#i', $origin)) {
             return true;
         }
 

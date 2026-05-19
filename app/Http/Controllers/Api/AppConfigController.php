@@ -3987,6 +3987,19 @@ class AppConfigController extends Controller
             $base = 'http://127.0.0.1:5173';
         }
 
+        $request = request();
+        $requestHost = strtolower((string) $request->getHost());
+        $originHost = strtolower((string) parse_url((string) $request->headers->get('Origin', ''), PHP_URL_HOST));
+        $refererHost = strtolower((string) parse_url((string) $request->headers->get('Referer', ''), PHP_URL_HOST));
+
+        if (
+            $this->isFyctiHost($requestHost) ||
+            $this->isFyctiHost($originHost) ||
+            $this->isFyctiHost($refererHost)
+        ) {
+            return 'https://www.fycticonsulting.com';
+        }
+
         $parsed = parse_url($base);
         if (is_array($parsed) && ($parsed['host'] ?? '') === '0.0.0.0') {
             $fallbackHost = request()->getHost() ?: '127.0.0.1';
@@ -3998,6 +4011,19 @@ class AppConfigController extends Controller
         }
 
         return rtrim($base, '/');
+    }
+
+    private function isFyctiHost(string $host): bool
+    {
+        $host = trim(strtolower($host));
+        if ($host === '') {
+            return false;
+        }
+
+        return $host === 'www.fycticonsulting.com'
+            || $host === 'admin.fycticonsulting.com'
+            || $host === 'api.fycticonsulting.com'
+            || str_ends_with($host, '.fycticonsulting.com');
     }
 
     private function buildCompanyAccessUrl(string $slug): string

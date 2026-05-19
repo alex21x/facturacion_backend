@@ -29,7 +29,7 @@ class SalesDocumentItemPreparationService
             ->values();
 
         $productMap = DB::table('inventory.products')
-            ->select('id', 'name', 'unit_id', 'is_stockable', 'lot_tracking', 'status')
+            ->select('id', 'name', 'unit_id', 'is_stockable', 'lot_tracking', 'status', 'cost_price')
             ->where('company_id', $companyId)
             ->whereIn('id', $productIds->all())
             ->whereNull('deleted_at')
@@ -47,7 +47,7 @@ class SalesDocumentItemPreparationService
             ->values();
 
         $lotMap = DB::table('inventory.product_lots')
-            ->select('id', 'company_id', 'warehouse_id', 'product_id', 'status')
+            ->select('id', 'company_id', 'warehouse_id', 'product_id', 'status', 'unit_cost')
             ->where('company_id', $companyId)
             ->whereIn('id', $allLotIds->all())
             ->get()
@@ -115,6 +115,7 @@ class SalesDocumentItemPreparationService
                         'lot_id' => $lotId,
                         'qty' => $lotQty,
                         'qty_base' => $lotBaseQty,
+                        'unit_cost' => isset($lotRow->unit_cost) ? (float) $lotRow->unit_cost : 0.0,
                     ];
 
                     $lotBaseQtyTotal += $lotBaseQty;

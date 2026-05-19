@@ -238,7 +238,6 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     });
 
     Route::middleware('rbac.module:INVENTORY,update')->group(function () {
-        Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
         Route::post('/purchases/orders/{id}/receive', 'Api\\PurchasesController@receivePurchaseOrder');
     });
 
@@ -247,6 +246,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     });
 
     Route::middleware('rbac.module:INVENTORY,create')->group(function () {
+        Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
         Route::post('/inventory/product-masters', 'Api\\InventoryController@createProductMaster');
         Route::put('/inventory/product-masters/{id}', 'Api\\InventoryController@updateProductMaster');
     });

@@ -554,11 +554,12 @@ class PurchasesController
                         );
 
                         if ($entryType === 'PURCHASE' && $unitCost > 0) {
+                            $commercialUnitCost = $unitCost * (1 + max($taxRate, 0) / 100);
                             DB::table('inventory.products')
                                 ->where('id', $productId)
                                 ->where('company_id', $companyId)
                                 ->update([
-                                    'cost_price' => $unitCost,
+                                    'cost_price' => $commercialUnitCost,
                                 ]);
                         }
                     }

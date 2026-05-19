@@ -37,6 +37,47 @@ class SalesDocumentLinePersistenceService
             $itemTax = isset($item['tax_total']) ? (float) $item['tax_total'] : 0.0;
             $itemDiscount = isset($item['discount_total']) ? (float) $item['discount_total'] : 0.0;
             $itemTotal = isset($item['total']) ? (float) $item['total'] : ($itemSubtotal + $itemTax - $itemDiscount);
+            $commercialCostFactor = $itemSubtotal > 0 && $itemTotal > 0
+                ? max(1.0, $itemTotal / $itemSubtotal)
+                : 1.0;
+            $payloadUnitCost = isset($item['unit_cost']) && (float) $item['unit_cost'] > 0
+                ? (float) $item['unit_cost']
+                : null;
+
+            $historicalUnitCost = 0.0;
+            if ($payloadUnitCost !== null) {
+                $historicalUnitCost = $payloadUnitCost;
+            } elseif (!empty($processedItem['lots'])) {
+                $lotCostTotal = 0.0;
+                $lotQtyTotal = 0.0;
+
+                foreach ($processedItem['lots'] as $lot) {
+                    $lotQty = (float) ($lot['qty'] ?? 0);
+                    $lotUnitCost = (float) ($lot['unit_cost'] ?? 0);
+                    if ($lotQty <= 0) {
+                        continue;
+                    }
+
+                    if ($lotUnitCost <= 0 && $processedItem['product'] && isset($processedItem['product']->cost_price)) {
+                        $lotUnitCost = (float) $processedItem['product']->cost_price;
+                        if ($lotUnitCost > 0) {
+                            $lotUnitCost = $lotUnitCost / $commercialCostFactor;
+                        }
+                    }
+
+                    $lotCostTotal += $lotUnitCost * $lotQty;
+                    $lotQtyTotal += $lotQty;
+                }
+
+                if ($lotQtyTotal > 0) {
+                    $historicalUnitCost = $lotCostTotal / $lotQtyTotal;
+                }
+            } elseif ($stockDirection < 0 && $processedItem['product'] && isset($processedItem['product']->cost_price)) {
+                $historicalUnitCost = (float) $processedItem['product']->cost_price;
+                if ($historicalUnitCost > 0) {
+                    $historicalUnitCost = $historicalUnitCost / $commercialCostFactor;
+                }
+            }
 
             $documentItemId = $this->itemRepository->create([
                 'document_id' => $documentId,
@@ -51,7 +92,7 @@ class SalesDocumentLinePersistenceService
                 'conversion_factor' => round((float) $processedItem['conversion_factor'], 8),
                 'base_unit_price' => round((float) $processedItem['base_unit_price'], 8),
                 'unit_price' => $item['unit_price'],
-                'unit_cost' => $item['unit_cost'] ?? 0,
+                'unit_cost' => round(max(0.0, $historicalUnitCost), 8),
                 'wholesale_discount_percent' => $item['wholesale_discount_percent'] ?? 0,
                 'price_source' => $item['price_source'] ?? 'MANUAL',
                 'discount_total' => round($itemDiscount, 2),
@@ -86,9 +127,7 @@ class SalesDocumentLinePersistenceService
                     (bool) $settings['allow_negative_stock']
                 );
 
-                $payloadUnitCost = isset($item['unit_cost']) && (float) $item['unit_cost'] > 0
-                    ? (float) $item['unit_cost']
-                    : null;
+                $payloadUnitCost = $historicalUnitCost > 0 ? $historicalUnitCost : null;
 
                 $docKindLabels = ['INVOICE' => 'Factura', 'RECEIPT' => 'Boleta', 'CREDIT_NOTE' => 'Nota Credito', 'DEBIT_NOTE' => 'Nota Debito', 'QUOTATION' => 'Cotizacion', 'SALES_ORDER' => 'Pedido'];
                 $docNote = 'Doc ' . ($docKindLabels[$payload['document_kind']] ?? $payload['document_kind']) . ' ' . $payload['series'] . '-' . $nextNumber;
@@ -109,9 +148,13 @@ class SalesDocumentLinePersistenceService
                         if ($payloadUnitCost !== null) {
                             $ledgerUnitCost = $payloadUnitCost;
                         } elseif ($stockDirection < 0) {
-                            $ledgerUnitCost = (float) (DB::table('inventory.product_lots')
-                                ->where('id', (int) $lot['lot_id'])
-                                ->value('unit_cost') ?? 0);
+                            $ledgerUnitCost = (float) ($lot['unit_cost'] ?? 0);
+                            if ($ledgerUnitCost <= 0 && $product && isset($product->cost_price)) {
+                                $ledgerUnitCost = (float) $product->cost_price;
+                                if ($ledgerUnitCost > 0) {
+                                    $ledgerUnitCost = $ledgerUnitCost / $commercialCostFactor;
+                                }
+                            }
                         } else {
                             $ledgerUnitCost = 0.0;
                         }
@@ -135,9 +178,10 @@ class SalesDocumentLinePersistenceService
                     if ($payloadUnitCost !== null) {
                         $ledgerUnitCost = $payloadUnitCost;
                     } elseif ($stockDirection < 0) {
-                        $ledgerUnitCost = (float) (DB::table('inventory.products')
-                            ->where('id', (int) $product->id)
-                            ->value('cost_price') ?? 0);
+                        $ledgerUnitCost = (float) ($product->cost_price ?? 0);
+                        if ($ledgerUnitCost > 0) {
+                            $ledgerUnitCost = $ledgerUnitCost / $commercialCostFactor;
+                        }
                     } else {
                         $ledgerUnitCost = 0.0;
                     }

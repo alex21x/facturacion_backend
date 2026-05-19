@@ -82,9 +82,25 @@ class Cors
             'http://localhost:5179',
             (string) env('FRONTEND_URL', ''),
             (string) env('FRONTEND_APP_URL', ''),
+            (string) env('FRONTEND_ADMIN_URL', ''),
+            'https://www.fycticonsulting.com',
+            'https://admin.fycticonsulting.com',
         ];
 
-        return array_values(array_filter(array_unique($origins)));
+        $extraOrigins = explode(',', (string) env('CORS_ALLOWED_ORIGINS', ''));
+        foreach ($extraOrigins as $extraOrigin) {
+            $origins[] = $extraOrigin;
+        }
+
+        $normalized = [];
+        foreach ($origins as $origin) {
+            $value = trim((string) $origin);
+            if ($value !== '') {
+                $normalized[] = rtrim($value, '/');
+            }
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     private function isAllowedOrigin(?string $origin, array $allowedOrigins): bool
@@ -94,6 +110,19 @@ class Cors
         }
 
         if (in_array($origin, $allowedOrigins, true)) {
+            return true;
+        }
+
+        // Allow canonical production domains even if env variables were not
+        // synchronized yet in Railway.
+        if (preg_match('#^https://(www|admin)\.fycticonsulting\.com$#i', $origin)) {
+            return true;
+        }
+
+        // Railway production guard: when backend runs on Railway, allow
+        // secure Railway app subdomains as browser origins to avoid lockouts
+        // from env typos/whitespace in FRONTEND_* variables.
+        if ($this->isRailwayHost((string) env('APP_URL', '')) && preg_match('#^https://[a-z0-9.-]+\.up\.railway\.app$#i', $origin)) {
             return true;
         }
 

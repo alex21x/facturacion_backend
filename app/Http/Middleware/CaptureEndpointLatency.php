@@ -10,14 +10,17 @@ class CaptureEndpointLatency
 {
     private static ?bool $tableAvailable = null;
 
+    private float $start = 0.0;
+
     public function handle(Request $request, Closure $next)
     {
-        $start = microtime(true);
-        $response = $next($request);
+        $this->start = microtime(true);
+        return $next($request);
+    }
 
-        $this->persistSample($request, $response->getStatusCode(), $start);
-
-        return $response;
+    public function terminate(Request $request, $response): void
+    {
+        $this->persistSample($request, $response->getStatusCode(), $this->start);
     }
 
     private function persistSample(Request $request, int $statusCode, float $start): void

@@ -1,0 +1,13 @@
+{
+    frankenphp
+    order php_server before file_server
+}
+
+:{$PORT:8000} {
+    root * /var/www/html/public
+    encode zstd br gzip
+
+    php_server {
+        env APP_ENV production
+    }
+}

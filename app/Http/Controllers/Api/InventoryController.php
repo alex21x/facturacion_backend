@@ -277,21 +277,49 @@ class InventoryController extends Controller
             }
         }
 
+        $normalizedSku = isset($payload['sku']) ? strtoupper(trim((string) $payload['sku'])) : null;
+        if ($normalizedSku === '') {
+            $normalizedSku = null;
+        }
+        $normalizedBarcode = isset($payload['barcode']) ? trim((string) $payload['barcode']) : null;
+        if ($normalizedBarcode === '') {
+            $normalizedBarcode = null;
+        }
+        $normalizedName = trim((string) $payload['name']);
+        $normalizedNature = $this->normalizeProductNature((string) ($payload['product_nature'] ?? 'PRODUCT'));
+        $normalizedUnitId = isset($payload['unit_id']) ? (int) $payload['unit_id'] : null;
+
+        $duplicate = $this->findExistingActiveProduct(
+            $companyId,
+            $normalizedSku,
+            $normalizedBarcode,
+            $normalizedName,
+            $normalizedUnitId,
+            $normalizedNature
+        );
+
+        if ($duplicate) {
+            return response()->json([
+                'message' => 'El producto ya existe y no se puede registrar duplicado.',
+                'duplicate_product_id' => (int) $duplicate->id,
+            ], 422);
+        }
+
         $id = DB::table('inventory.products')->insertGetId([
             'company_id' => $companyId,
             'category_id' => $payload['category_id'] ?? null,
-            'unit_id' => $payload['unit_id'] ?? null,
+            'unit_id' => $normalizedUnitId,
             'line_id' => $payload['line_id'] ?? null,
             'brand_id' => $payload['brand_id'] ?? null,
             'location_id' => $payload['location_id'] ?? null,
             'warranty_id' => $payload['warranty_id'] ?? null,
-            'product_nature' => $payload['product_nature'] ?? 'PRODUCT',
-            'sku' => isset($payload['sku']) ? strtoupper(trim($payload['sku'])) : null,
-            'barcode' => $payload['barcode'] ?? null,
+            'product_nature' => $normalizedNature,
+            'sku' => $normalizedSku,
+            'barcode' => $normalizedBarcode,
             'sunat_code' => $payload['sunat_code'] ?? null,
             'image_url' => $payload['image_url'] ?? null,
             'seller_commission_percent' => $payload['seller_commission_percent'] ?? 0,
-            'name' => trim($payload['name']),
+            'name' => $normalizedName,
             'sale_price' => $payload['sale_price'] ?? 0,
             'cost_price' => $payload['cost_price'] ?? 0,
             'is_stockable' => (bool) ($payload['is_stockable'] ?? true),
@@ -429,6 +457,67 @@ class InventoryController extends Controller
 
         if (empty($changes)) {
             return response()->json(['message' => 'No changes provided'], 422);
+        }
+
+        if (
+            array_key_exists('sku', $changes)
+            || array_key_exists('barcode', $changes)
+            || array_key_exists('name', $changes)
+            || array_key_exists('unit_id', $changes)
+            || array_key_exists('product_nature', $changes)
+        ) {
+            $current = DB::table('inventory.products')
+                ->where('id', $id)
+                ->where('company_id', $companyId)
+                ->select('sku', 'barcode', 'name', 'unit_id', 'product_nature')
+                ->first();
+
+            if (!$current) {
+                return response()->json(['message' => 'Product not found'], 404);
+            }
+
+            $finalSku = array_key_exists('sku', $changes)
+                ? ($changes['sku'] !== null ? trim((string) $changes['sku']) : null)
+                : ($current->sku !== null ? trim((string) $current->sku) : null);
+            if ($finalSku === '') {
+                $finalSku = null;
+            }
+
+            $finalBarcode = array_key_exists('barcode', $changes)
+                ? ($changes['barcode'] !== null ? trim((string) $changes['barcode']) : null)
+                : ($current->barcode !== null ? trim((string) $current->barcode) : null);
+            if ($finalBarcode === '') {
+                $finalBarcode = null;
+            }
+
+            $finalName = array_key_exists('name', $changes)
+                ? trim((string) $changes['name'])
+                : trim((string) $current->name);
+
+            $finalUnitId = array_key_exists('unit_id', $changes)
+                ? ($changes['unit_id'] !== null ? (int) $changes['unit_id'] : null)
+                : ($current->unit_id !== null ? (int) $current->unit_id : null);
+
+            $finalNature = array_key_exists('product_nature', $changes)
+                ? $this->normalizeProductNature((string) $changes['product_nature'])
+                : $this->normalizeProductNature((string) $current->product_nature);
+
+            $duplicate = $this->findExistingActiveProduct(
+                $companyId,
+                $finalSku,
+                $finalBarcode,
+                $finalName,
+                $finalUnitId,
+                $finalNature,
+                $id
+            );
+
+            if ($duplicate) {
+                return response()->json([
+                    'message' => 'El producto ya existe y no se puede registrar duplicado.',
+                    'duplicate_product_id' => (int) $duplicate->id,
+                ], 422);
+            }
         }
 
         DB::table('inventory.products')
@@ -651,84 +740,21 @@ class InventoryController extends Controller
             }
 
             if ($existing) {
-                DB::table('inventory.products')
-                    ->where('id', (int) $existing->id)
-                    ->where('company_id', $companyId)
-                    ->update(array_merge($payload, [
-                        'deleted_at' => null,
-                        'updated_at' => now(),
-                        'updated_by' => $userId,
-                    ]));
-
-                $stockMessage = null;
-                $initialQtyRaw = trim((string) ($row['initial_qty'] ?? ''));
-                $initialQty = $this->normalizeNumeric($row['initial_qty'] ?? null, 0);
-                if ($initialQtyRaw !== '') {
-                    if ($initialQty > 0 && (bool) $payload['is_stockable']) {
-                        $warehouseId = null;
-                        $warehouseCodeUsed = null;
-                        $usedDefaultByInvalidRowWarehouse = false;
-                        $rowWarehouseCode = strtoupper(trim((string) ($row['warehouse_code'] ?? '')));
-                        if ($rowWarehouseCode !== '') {
-                            $warehouseId = $this->resolveWarehouseIdFromCode($companyId, $rowWarehouseCode, $warehouseCache);
-                            if ($warehouseId !== null) {
-                                $warehouseCodeUsed = $rowWarehouseCode;
-                            } elseif ($defaultWarehouse !== null) {
-                                $warehouseId = (int) $defaultWarehouse['id'];
-                                $warehouseCodeUsed = (string) $defaultWarehouse['code'];
-                                $usedDefaultByInvalidRowWarehouse = true;
-                            }
-                        } elseif ($defaultWarehouse !== null) {
-                            $warehouseId = (int) $defaultWarehouse['id'];
-                            $warehouseCodeUsed = (string) $defaultWarehouse['code'];
-                        }
-
-                        if ($warehouseId === null) {
-                            $stockSkipped++;
-                            $stockMessage = $rowWarehouseCode !== ''
-                                ? 'Stock inicial no aplicado: warehouse_code no existe o inactivo.'
-                                : 'Stock inicial no aplicado: no existe almacén activo para usar como principal.';
-                            $errors[] = ['row' => $rowNumber, 'message' => $stockMessage];
-                        } else {
-                            DB::table('inventory.inventory_ledger')->insert([
-                                'company_id' => $companyId,
-                                'warehouse_id' => $warehouseId,
-                                'product_id' => (int) $existing->id,
-                                'lot_id' => null,
-                                'movement_type' => 'IN',
-                                'quantity' => round($initialQty, 3),
-                                'unit_cost' => round($this->normalizeNumeric($row['initial_cost'] ?? $payload['cost_price'] ?? 0, 0), 4),
-                                'ref_type' => 'PRODUCT_IMPORT',
-                                'ref_id' => $batchId,
-                                'notes' => 'Importacion masiva lote #' . $batchId,
-                                'moved_at' => now(),
-                                'created_by' => $userId,
-                            ]);
-                            $stockApplied++;
-                            $stockMessage = $usedDefaultByInvalidRowWarehouse
-                                ? ('Stock inicial aplicado en almacén ' . $warehouseCodeUsed . ' (warehouse_code inválido en fila).')
-                                : ('Stock inicial aplicado en almacén ' . $warehouseCodeUsed . '.');
-                        }
-                    } elseif ($initialQty <= 0) {
-                        $stockSkipped++;
-                        $stockMessage = 'Stock inicial no aplicado: initial_qty debe ser mayor a 0.';
-                        $errors[] = ['row' => $rowNumber, 'message' => $stockMessage];
-                    }
-                }
-
+                $duplicateMessage = 'Producto duplicado: ya existe en el catalogo de la empresa.';
+                $errors[] = ['row' => $rowNumber, 'message' => $duplicateMessage];
                 $itemLogs[] = [
                     'batch_id'      => $batchId,
                     'row_number'    => $rowNumber,
-                    'action_status' => 'UPDATED',
+                    'action_status' => 'SKIPPED',
                     'product_id'    => (int) $existing->id,
                     'sku'           => $sku,
                     'barcode'       => $barcode,
                     'name'          => $name,
-                    'message'       => $stockMessage ? ('Producto actualizado. ' . $stockMessage) : 'Producto actualizado.',
+                    'message'       => $duplicateMessage,
                     'created_at'    => now(),
                 ];
 
-                $updated++;
+                $skipped++;
                 continue;
             }
 
@@ -1629,6 +1655,66 @@ class InventoryController extends Controller
     {
         $trimmed = trim($value);
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function findExistingActiveProduct(
+        int $companyId,
+        ?string $sku,
+        ?string $barcode,
+        string $name,
+        ?int $unitId,
+        string $nature,
+        ?int $excludeProductId = null
+    ): ?object {
+        if ($sku !== null) {
+            $query = DB::table('inventory.products')
+                ->where('company_id', $companyId)
+                ->whereNull('deleted_at')
+                ->whereRaw("UPPER(COALESCE(sku, '')) = ?", [strtoupper(trim($sku))]);
+
+            if ($excludeProductId !== null) {
+                $query->where('id', '<>', $excludeProductId);
+            }
+
+            $row = $query->select('id')->first();
+            if ($row) {
+                return $row;
+            }
+        }
+
+        if ($barcode !== null) {
+            $query = DB::table('inventory.products')
+                ->where('company_id', $companyId)
+                ->whereNull('deleted_at')
+                ->where('barcode', trim($barcode));
+
+            if ($excludeProductId !== null) {
+                $query->where('id', '<>', $excludeProductId);
+            }
+
+            $row = $query->select('id')->first();
+            if ($row) {
+                return $row;
+            }
+        }
+
+        $query = DB::table('inventory.products')
+            ->where('company_id', $companyId)
+            ->whereNull('deleted_at')
+            ->whereRaw("UPPER(TRIM(COALESCE(name, ''))) = ?", [strtoupper(trim($name))])
+            ->where('product_nature', $nature);
+
+        if ($unitId === null) {
+            $query->whereNull('unit_id');
+        } else {
+            $query->where('unit_id', $unitId);
+        }
+
+        if ($excludeProductId !== null) {
+            $query->where('id', '<>', $excludeProductId);
+        }
+
+        return $query->select('id')->first();
     }
 
     private function canManageProductMasters($authUser, int $companyId): bool

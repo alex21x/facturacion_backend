@@ -69,7 +69,7 @@ class InventoryController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $search = trim((string) $request->query('search', ''));
         $status = $request->query('status');
-        $limit = (int) $request->query('limit', 100);
+        $limit = (int) $request->query('limit', 2000);
         $autocomplete = filter_var($request->query('autocomplete', false), FILTER_VALIDATE_BOOLEAN);
 
         $this->ensureProductCatalogSchema();
@@ -77,8 +77,8 @@ class InventoryController extends Controller
         if ($limit < 1) {
             $limit = 1;
         }
-        if ($limit > 500) {
-            $limit = 500;
+        if ($limit > 5000) {
+            $limit = 5000;
         }
 
         $hasRestaurantRecipesTable = $this->restaurantRecipesTableExists();

@@ -4,7 +4,25 @@ node_modules
 vendor
 .env
 .env.backup
+.env.local
+.env.production
 storage/logs
 storage/framework/cache
 storage/framework/sessions
 storage/framework/views
+storage/debugbar
+storage/app/public
+
+# Large database exports/backups and artifacts not needed for image build
+*.sql
+*.sql.gz
+*.zip
+facturacion_v2_*
+
+# Dev/test artifacts
+tests
+docs
+tmp_*.php
+check_*.php
+getCommerceSettings*
+Cxampphtdocsfacturacion_backendstoragelogs

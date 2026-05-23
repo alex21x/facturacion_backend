@@ -282,7 +282,7 @@ class SalesController extends Controller
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $documentKindId = (int) $request->query('document_kind_id', 0);
         $noteKind = strtoupper(trim((string) $request->query('note_kind', '')));
-        $limit = (int) $request->query('limit', 100);
+        $limit = (int) $request->query('limit', 1000);
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json([
@@ -305,8 +305,8 @@ class SalesController extends Controller
         if ($limit < 1) {
             $limit = 1;
         }
-        if ($limit > 300) {
-            $limit = 300;
+        if ($limit > 10000) {
+            $limit = 10000;
         }
 
         $query = DB::table('sales.commercial_documents as d')

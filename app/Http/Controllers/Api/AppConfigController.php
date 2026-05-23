@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Storage;
 class AppConfigController extends Controller
 {
     private const SYSTEM_COMPANY_ID = 1;
+    private const SALES_TAX_BRIDGE_FEATURE_CODE = 'SALES_TAX_BRIDGE';
 
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
@@ -3247,9 +3248,53 @@ class AppConfigController extends Controller
             'auto_send_on_issue' => true,
             'auto_reconcile_enabled' => true,
             'reconcile_batch_size' => 20,
+            'reconcile_retry_base_minutes' => 1,
+            'reconcile_retry_max_minutes' => 120,
+            'reconcile_warn_attempts' => 8,
+            'sunat_exception_notify_enabled' => true,
+            'sunat_exception_notify_hours' => 6,
+            'sunat_alert_repeat_minutes' => 60,
+            'sunat_exception_notify_limit' => 120,
             'sol_user' => 'MODDATOS',
             'sol_pass' => 'Moddatos',
             'envio_pse' => '',
+        ];
+    }
+
+    private function normalizeSunatReconcileAdminConfig(array $config): array
+    {
+        $defaults = [
+            'auto_reconcile_enabled' => true,
+            'reconcile_batch_size' => 20,
+            'reconcile_retry_base_minutes' => 1,
+            'reconcile_retry_max_minutes' => 120,
+            'reconcile_warn_attempts' => 8,
+            'sunat_exception_notify_enabled' => true,
+            'sunat_exception_notify_hours' => 6,
+            'sunat_alert_repeat_minutes' => 60,
+            'sunat_exception_notify_limit' => 120,
+        ];
+
+        $baseMinutes = max(1, min(180, (int) ($config['reconcile_retry_base_minutes'] ?? $defaults['reconcile_retry_base_minutes'])));
+        $maxMinutes = max(5, min(1440, (int) ($config['reconcile_retry_max_minutes'] ?? $defaults['reconcile_retry_max_minutes'])));
+        if ($maxMinutes < $baseMinutes) {
+            $maxMinutes = $baseMinutes;
+        }
+
+        return [
+            'auto_reconcile_enabled' => isset($config['auto_reconcile_enabled'])
+                ? (bool) $config['auto_reconcile_enabled']
+                : $defaults['auto_reconcile_enabled'],
+            'reconcile_batch_size' => max(5, min(200, (int) ($config['reconcile_batch_size'] ?? $defaults['reconcile_batch_size']))),
+            'reconcile_retry_base_minutes' => $baseMinutes,
+            'reconcile_retry_max_minutes' => $maxMinutes,
+            'reconcile_warn_attempts' => max(1, min(50, (int) ($config['reconcile_warn_attempts'] ?? $defaults['reconcile_warn_attempts']))),
+            'sunat_exception_notify_enabled' => isset($config['sunat_exception_notify_enabled'])
+                ? (bool) $config['sunat_exception_notify_enabled']
+                : $defaults['sunat_exception_notify_enabled'],
+            'sunat_exception_notify_hours' => max(1, min(168, (int) ($config['sunat_exception_notify_hours'] ?? $defaults['sunat_exception_notify_hours']))),
+            'sunat_alert_repeat_minutes' => max(10, min(1440, (int) ($config['sunat_alert_repeat_minutes'] ?? $defaults['sunat_alert_repeat_minutes']))),
+            'sunat_exception_notify_limit' => max(1, min(500, (int) ($config['sunat_exception_notify_limit'] ?? $defaults['sunat_exception_notify_limit']))),
         ];
     }
 
@@ -4626,6 +4671,147 @@ class AppConfigController extends Controller
         }
 
         return $this->companyCommerceAdminMatrix($request);
+    }
+
+    // -------------------------------------------------------------------------
+    // Admin-only: per-company SUNAT reconcile matrix
+    // -------------------------------------------------------------------------
+
+    public function companySunatReconcileAdminMatrix(Request $request)
+    {
+        $companies = DB::table('core.companies')
+            ->where('id', '!=', self::SYSTEM_COMPANY_ID)
+            ->orderBy('legal_name')
+            ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
+
+        $rowsByCompany = DB::table('appcfg.company_feature_toggles')
+            ->where('feature_code', self::SALES_TAX_BRIDGE_FEATURE_CODE)
+            ->get(['company_id', 'is_enabled', 'config'])
+            ->keyBy('company_id');
+
+        $defaults = $this->normalizeSunatReconcileAdminConfig($this->defaultSalesTaxBridgeConfig());
+
+        $rows = $companies->map(function ($company) use ($rowsByCompany, $defaults) {
+            $companyId = (int) $company->id;
+            $toggleRow = $rowsByCompany->get($companyId);
+            $rawConfig = $this->decodeJsonConfig($toggleRow->config ?? null);
+            $config = is_array($rawConfig) ? $rawConfig : [];
+            $normalized = $this->normalizeSunatReconcileAdminConfig($config);
+
+            return [
+                'company_id' => $companyId,
+                'tax_id' => $company->tax_id,
+                'legal_name' => $company->legal_name,
+                'trade_name' => $company->trade_name,
+                'company_status' => (int) $company->status,
+                'tax_bridge_enabled' => $toggleRow ? (bool) $toggleRow->is_enabled : true,
+                'sunat_reconcile' => [
+                    'auto_reconcile_enabled' => (bool) ($normalized['auto_reconcile_enabled'] ?? $defaults['auto_reconcile_enabled']),
+                    'reconcile_batch_size' => (int) ($normalized['reconcile_batch_size'] ?? $defaults['reconcile_batch_size']),
+                    'reconcile_retry_base_minutes' => (int) ($normalized['reconcile_retry_base_minutes'] ?? $defaults['reconcile_retry_base_minutes']),
+                    'reconcile_retry_max_minutes' => (int) ($normalized['reconcile_retry_max_minutes'] ?? $defaults['reconcile_retry_max_minutes']),
+                    'reconcile_warn_attempts' => (int) ($normalized['reconcile_warn_attempts'] ?? $defaults['reconcile_warn_attempts']),
+                    'sunat_exception_notify_enabled' => (bool) ($normalized['sunat_exception_notify_enabled'] ?? $defaults['sunat_exception_notify_enabled']),
+                    'sunat_exception_notify_hours' => (int) ($normalized['sunat_exception_notify_hours'] ?? $defaults['sunat_exception_notify_hours']),
+                    'sunat_alert_repeat_minutes' => (int) ($normalized['sunat_alert_repeat_minutes'] ?? $defaults['sunat_alert_repeat_minutes']),
+                    'sunat_exception_notify_limit' => (int) ($normalized['sunat_exception_notify_limit'] ?? $defaults['sunat_exception_notify_limit']),
+                ],
+            ];
+        })->values();
+
+        return response()->json([
+            'defaults' => $defaults,
+            'companies' => $rows,
+        ]);
+    }
+
+    public function updateCompanySunatReconcileAdminMatrix(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        $validator = Validator::make($request->all(), [
+            'company_id' => 'required|integer|min:1',
+            'tax_bridge_enabled' => 'nullable|boolean',
+            'auto_reconcile_enabled' => 'nullable|boolean',
+            'reconcile_batch_size' => 'nullable|integer|min:5|max:200',
+            'reconcile_retry_base_minutes' => 'nullable|integer|min:1|max:180',
+            'reconcile_retry_max_minutes' => 'nullable|integer|min:5|max:1440',
+            'reconcile_warn_attempts' => 'nullable|integer|min:1|max:50',
+            'sunat_exception_notify_enabled' => 'nullable|boolean',
+            'sunat_exception_notify_hours' => 'nullable|integer|min:1|max:168',
+            'sunat_alert_repeat_minutes' => 'nullable|integer|min:10|max:1440',
+            'sunat_exception_notify_limit' => 'nullable|integer|min:1|max:500',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $payload = $validator->validated();
+        $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
+
+        if ($companyId === self::SYSTEM_COMPANY_ID) {
+            return response()->json(['message' => 'La empresa del sistema no se administra desde este panel.'], 403);
+        }
+
+        $companyExists = DB::table('core.companies')->where('id', $companyId)->exists();
+        if (!$companyExists) {
+            return response()->json(['message' => 'Company not found'], 404);
+        }
+
+        $row = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', self::SALES_TAX_BRIDGE_FEATURE_CODE)
+            ->first(['is_enabled', 'config']);
+
+        $currentConfigRaw = $this->decodeJsonConfig($row->config ?? null);
+        $currentConfig = is_array($currentConfigRaw) ? $currentConfigRaw : [];
+
+        $fields = [
+            'auto_reconcile_enabled',
+            'reconcile_batch_size',
+            'reconcile_retry_base_minutes',
+            'reconcile_retry_max_minutes',
+            'reconcile_warn_attempts',
+            'sunat_exception_notify_enabled',
+            'sunat_exception_notify_hours',
+            'sunat_alert_repeat_minutes',
+            'sunat_exception_notify_limit',
+        ];
+
+        $nextConfigCandidate = $currentConfig;
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $payload)) {
+                $nextConfigCandidate[$field] = $payload[$field];
+            }
+        }
+
+        $normalizedConfig = $this->normalizeSunatReconcileAdminConfig($nextConfigCandidate);
+        foreach ($normalizedConfig as $key => $value) {
+            $currentConfig[$key] = $value;
+        }
+
+        $hasCreatedAt = $this->columnExists('appcfg', 'company_feature_toggles', 'created_at');
+        $taxBridgeEnabled = array_key_exists('tax_bridge_enabled', $payload)
+            ? (bool) $payload['tax_bridge_enabled']
+            : ($row ? (bool) $row->is_enabled : true);
+
+        $values = [
+            'is_enabled' => $taxBridgeEnabled,
+            'config' => $this->encodeJsonConfig($currentConfig),
+            'updated_by' => $authUser ? $authUser->id : null,
+            'updated_at' => now(),
+        ];
+        if ($hasCreatedAt) {
+            $values['created_at'] = now();
+        }
+
+        DB::table('appcfg.company_feature_toggles')->updateOrInsert(
+            ['company_id' => $companyId, 'feature_code' => self::SALES_TAX_BRIDGE_FEATURE_CODE],
+            $values
+        );
+
+        return $this->companySunatReconcileAdminMatrix($request);
     }
 
     // -------------------------------------------------------------------------

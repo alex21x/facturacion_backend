@@ -803,7 +803,7 @@ class SalesController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $search = trim((string) $request->query('q', ''));
         $status = $request->query('status');
-        $limit = (int) $request->query('limit', 100);
+        $limit = (int) $request->query('limit', 1000);
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -813,8 +813,8 @@ class SalesController extends Controller
         if ($limit < 1) {
             $limit = 1;
         }
-        if ($limit > 300) {
-            $limit = 300;
+        if ($limit > 10000) {
+            $limit = 10000;
         }
 
         $query = DB::table('sales.customers as c')

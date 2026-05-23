@@ -1412,6 +1412,177 @@ class SalesController extends Controller
         ], $reactivated ? 200 : 201);
     }
 
+    public function bulkImportCustomers(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        $this->ensureCustomerPriceProfilesTable();
+        $this->ensureCustomersPhoneColumn();
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rows' => 'required|array|min:1|max:20000',
+            'rows.*.doc_type' => 'nullable|string|max:20',
+            'rows.*.customer_type_id' => 'nullable|integer',
+            'rows.*.doc_number' => 'required|string|max:40',
+            'rows.*.legal_name' => 'required|string|max:180',
+            'rows.*.trade_name' => 'nullable|string|max:180',
+            'rows.*.first_name' => 'nullable|string|max:120',
+            'rows.*.last_name' => 'nullable|string|max:120',
+            'rows.*.plate' => 'nullable|string|max:20',
+            'rows.*.address' => 'nullable|string|max:250',
+            'rows.*.phone' => 'nullable|string|max:40',
+            'rows.*.status' => 'nullable|integer|in:0,1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $rows = $validator->validated()['rows'];
+        $activeTypesById = DB::table('sales.customer_types')
+            ->where('is_active', true)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->flip()
+            ->all();
+
+        $existingByDoc = DB::table('sales.customers')
+            ->select('id', 'doc_number', 'status')
+            ->where('company_id', $companyId)
+            ->whereNotNull('doc_number')
+            ->orderByDesc('id')
+            ->get()
+            ->reduce(function (array $acc, $row) {
+                $docKey = strtoupper(trim((string) ($row->doc_number ?? '')));
+                if ($docKey !== '' && !isset($acc[$docKey])) {
+                    $acc[$docKey] = [
+                        'id' => (int) $row->id,
+                        'status' => (int) ($row->status ?? 0),
+                    ];
+                }
+                return $acc;
+            }, []);
+
+        $seenInFile = [];
+        $created = 0;
+        $reactivated = 0;
+        $skipped = 0;
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNumber = $index + 2;
+            $docNumber = strtoupper(trim((string) ($row['doc_number'] ?? '')));
+            $legalName = trim((string) ($row['legal_name'] ?? ''));
+
+            if ($docNumber === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Número de documento es obligatorio.'];
+                continue;
+            }
+
+            if ($legalName === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Razón social / nombre es obligatorio.'];
+                continue;
+            }
+
+            if (isset($seenInFile[$docNumber])) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Cliente duplicado dentro del archivo (mismo documento).'];
+                continue;
+            }
+            $seenInFile[$docNumber] = true;
+
+            $resolvedTypeId = null;
+            $requestedTypeId = isset($row['customer_type_id']) ? (int) $row['customer_type_id'] : null;
+            if ($requestedTypeId !== null && isset($activeTypesById[$requestedTypeId])) {
+                $resolvedTypeId = $requestedTypeId;
+            }
+
+            if ($resolvedTypeId === null) {
+                $resolvedSunatCode = $this->normalizeCustomerImportDocTypeToSunatCode(
+                    isset($row['doc_type']) ? (string) $row['doc_type'] : null,
+                    $docNumber
+                );
+
+                if ($resolvedSunatCode !== null) {
+                    $resolvedTypeId = $this->resolveCustomerTypeIdBySunatCode($resolvedSunatCode);
+                }
+            }
+
+            if ($resolvedTypeId === null) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'No se pudo identificar el tipo de cliente (DNI/RUC/CE/PAS).'];
+                continue;
+            }
+
+            $resolvedDocType = DB::table('sales.customer_types')
+                ->where('id', $resolvedTypeId)
+                ->value('sunat_code');
+
+            if ($resolvedDocType === null) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Tipo de cliente inválido para esta empresa.'];
+                continue;
+            }
+
+            $payload = [
+                'doc_type' => (string) ((int) $resolvedDocType),
+                'customer_type_id' => $resolvedTypeId,
+                'doc_number' => $docNumber,
+                'legal_name' => $legalName,
+                'trade_name' => $row['trade_name'] ?? null,
+                'first_name' => $row['first_name'] ?? null,
+                'last_name' => $row['last_name'] ?? null,
+                'plate' => $row['plate'] ?? null,
+                'address' => $row['address'] ?? null,
+                'phone' => $row['phone'] ?? null,
+                'status' => (int) ($row['status'] ?? 1),
+            ];
+
+            $existing = $existingByDoc[$docNumber] ?? null;
+            if ($existing) {
+                if ((int) ($existing['status'] ?? 0) === 1) {
+                    $skipped++;
+                    $errors[] = ['row' => $rowNumber, 'message' => 'Cliente ya existe activo con ese documento.'];
+                    continue;
+                }
+
+                DB::table('sales.customers')
+                    ->where('id', (int) $existing['id'])
+                    ->where('company_id', $companyId)
+                    ->update(array_merge($payload, ['status' => 1]));
+
+                $existingByDoc[$docNumber] = ['id' => (int) $existing['id'], 'status' => 1];
+                $reactivated++;
+                continue;
+            }
+
+            $newId = (int) DB::table('sales.customers')->insertGetId(array_merge($payload, [
+                'company_id' => $companyId,
+            ]));
+            $existingByDoc[$docNumber] = ['id' => $newId, 'status' => 1];
+            $created++;
+        }
+
+        return response()->json([
+            'message' => 'Importación de clientes procesada.',
+            'summary' => [
+                'total' => count($rows),
+                'created' => $created,
+                'reactivated' => $reactivated,
+                'skipped' => $skipped,
+                'errors' => count($errors),
+            ],
+            'errors' => array_slice($errors, 0, 300),
+        ]);
+    }
+
     public function updateCustomer(Request $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -4051,6 +4222,48 @@ class SalesController extends Controller
 
         $this->activeVerticalCache[$companyId] = $resolved;
         return $resolved;
+    }
+
+    private function normalizeCustomerImportDocTypeToSunatCode(?string $docTypeInput, string $docNumber): ?int
+    {
+        $raw = strtoupper(trim((string) ($docTypeInput ?? '')));
+        $docDigits = preg_replace('/\D+/', '', $docNumber);
+        if (!is_string($docDigits)) {
+            $docDigits = '';
+        }
+
+        $aliases = [
+            '1' => 1,
+            'DNI' => 1,
+            'NATURAL' => 1,
+            'PERSONA NATURAL' => 1,
+            '4' => 4,
+            'CE' => 4,
+            'CARNET' => 4,
+            'CARNET DE EXTRANJERIA' => 4,
+            'EXTRANJERIA' => 4,
+            '6' => 6,
+            'RUC' => 6,
+            'JURIDICA' => 6,
+            'PERSONA JURIDICA' => 6,
+            '7' => 7,
+            'PAS' => 7,
+            'PASAPORTE' => 7,
+        ];
+
+        if ($raw !== '' && isset($aliases[$raw])) {
+            return (int) $aliases[$raw];
+        }
+
+        if (strlen($docDigits) === 11) {
+            return 6;
+        }
+
+        if (strlen($docDigits) === 8) {
+            return 1;
+        }
+
+        return null;
     }
 
     private function resolveDetractionServiceCodes(): array

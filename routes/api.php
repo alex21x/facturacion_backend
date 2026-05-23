@@ -186,6 +186,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::put('/cash/sessions/{id}/close', 'Api\\CashController@closeSession');
         Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm');
         Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
+        Route::post('/sales/customers/bulk-import', 'Api\\SalesController@bulkImportCustomers');
         Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
         Route::post('/sales/customers/{id}/vehicles', 'Api\\SalesController@createCustomerVehicle');
         Route::put('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesController@updateCustomerVehicle');

@@ -320,42 +320,34 @@ class SalesController extends Controller
                 'd.total',
                 'd.balance_due',
                 'd.status',
-                DB::raw("COALESCE((
-                    SELECT SUM(COALESCE(nd.total, 0))
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'CREDIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ), 0) as applied_credit_total"),
-                DB::raw("COALESCE((
-                    SELECT SUM(COALESCE(nd.total, 0))
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'DEBIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ), 0) as applied_debit_total"),
-                DB::raw("EXISTS (
-                    SELECT 1
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'CREDIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ) as has_credit_note"),
-                DB::raw("EXISTS (
-                    SELECT 1
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'DEBIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ) as has_debit_note"),
+                DB::raw("COALESCE(notes_agg.applied_credit_total, 0) as applied_credit_total"),
+                DB::raw("COALESCE(notes_agg.applied_debit_total,  0) as applied_debit_total"),
+                DB::raw("COALESCE(notes_agg.has_credit_note, false) as has_credit_note"),
+                DB::raw("COALESCE(notes_agg.has_debit_note,  false) as has_debit_note"),
             ])
             ->where('d.company_id', $companyId)
             ->where('d.customer_id', $customerId)
-            ->whereNotIn('d.status', ['VOID', 'CANCELED']);
+            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            // Single aggregated JOIN replaces 4 correlated subqueries per row
+            ->leftJoinSub(
+                DB::table('sales.commercial_documents as nd')
+                    ->selectRaw("
+                        COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) AS src_id,
+                        SUM(CASE WHEN nd.document_kind = 'CREDIT_NOTE' THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_credit_total,
+                        SUM(CASE WHEN nd.document_kind = 'DEBIT_NOTE'  THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_debit_total,
+                        BOOL_OR(nd.document_kind = 'CREDIT_NOTE') AS has_credit_note,
+                        BOOL_OR(nd.document_kind = 'DEBIT_NOTE')  AS has_debit_note
+                    ")
+                    ->where('nd.company_id', $companyId)
+                    ->whereIn('nd.document_kind', ['CREDIT_NOTE', 'DEBIT_NOTE'])
+                    ->whereNotIn('nd.status', ['VOID', 'CANCELED'])
+                    ->whereRaw("COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) > 0")
+                    ->groupByRaw("COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0)"),
+                'notes_agg',
+                'notes_agg.src_id',
+                '=',
+                'd.id'
+            );
 
         $noteTargetKind = null;
         if ($documentKindId > 0) {
@@ -380,29 +372,11 @@ class SalesController extends Controller
         }
 
         if ($noteKind === 'CREDIT_NOTE') {
-            $query->whereRaw("(
-                COALESCE(d.total, 0) - COALESCE((
-                    SELECT SUM(COALESCE(nd.total, 0))
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'CREDIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ), 0)
-            ) > 0");
+            $query->whereRaw("(COALESCE(d.total, 0) - COALESCE(notes_agg.applied_credit_total, 0)) > 0");
         }
 
         if ($noteKind === 'DEBIT_NOTE') {
-            $query->whereRaw("(
-                COALESCE(d.total, 0) - COALESCE((
-                    SELECT SUM(COALESCE(nd.total, 0))
-                    FROM sales.commercial_documents nd
-                    WHERE nd.company_id = d.company_id
-                      AND nd.document_kind = 'DEBIT_NOTE'
-                      AND nd.status NOT IN ('VOID', 'CANCELED')
-                      AND COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) = d.id
-                ), 0)
-            ) > 0");
+            $query->whereRaw("(COALESCE(d.total, 0) - COALESCE(notes_agg.applied_debit_total, 0)) > 0");
         }
 
         $rows = $query

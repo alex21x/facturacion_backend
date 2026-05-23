@@ -5,9 +5,16 @@ namespace App\Http\Middleware;
 use App\Support\ApiToken;
 use Closure;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AuthenticateApiToken
 {
+    // Static guards: initialized once per PHP process, eliminates DDL and
+    // information_schema queries that were firing on every authenticated request.
+    private static ?bool $roleProfilesEnsured = null;
+    private static ?bool $hasDeviceId         = null;
+    private static ?bool $hasDeviceName       = null;
+
     public function handle($request, Closure $next)
     {
         $bearerToken = $request->bearerToken();
@@ -33,10 +40,10 @@ class AuthenticateApiToken
             ->where('expires_at', '>', now());
 
         $sessionColumns = ['id', 'user_id', 'expires_at', 'revoked_at'];
-        if ($this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+        if ($this->checkHasDeviceId()) {
             $sessionColumns[] = 'device_id';
         }
-        if ($this->columnExists('auth', 'refresh_tokens', 'device_name')) {
+        if ($this->checkHasDeviceName()) {
             $sessionColumns[] = 'device_name';
         }
 
@@ -102,6 +109,9 @@ class AuthenticateApiToken
 
     private function ensureCompanyRoleProfilesTable(): void
     {
+        if (self::$roleProfilesEnsured === true) {
+            return;
+        }
         DB::statement(
             'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
                 company_id BIGINT NOT NULL,
@@ -112,14 +122,22 @@ class AuthenticateApiToken
                 PRIMARY KEY (company_id, role_id)
             )'
         );
+        self::$roleProfilesEnsured = true;
     }
 
-    private function columnExists(string $schema, string $table, string $column): bool
+    private function checkHasDeviceId(): bool
     {
-        return DB::table('information_schema.columns')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->where('column_name', $column)
-            ->exists();
+        if (self::$hasDeviceId === null) {
+            self::$hasDeviceId = Schema::hasColumn('auth.refresh_tokens', 'device_id');
+        }
+        return self::$hasDeviceId;
+    }
+
+    private function checkHasDeviceName(): bool
+    {
+        if (self::$hasDeviceName === null) {
+            self::$hasDeviceName = Schema::hasColumn('auth.refresh_tokens', 'device_name');
+        }
+        return self::$hasDeviceName;
     }
 }

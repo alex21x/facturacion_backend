@@ -431,6 +431,7 @@ class SalesController extends Controller
             && $this->tableExists('sales.customer_vehicles');
 
         $this->ensureCustomerPriceProfilesTable();
+        $this->ensureCustomersPhoneColumn();
 
         if ($limit < 1) {
             $limit = 1;
@@ -462,6 +463,7 @@ class SalesController extends Controller
                 'c.last_name',
                 'c.plate',
                 'c.address',
+                'c.phone',
                 'cpp.default_tier_id',
                 'cpp.discount_percent',
                 'cpp.status as price_profile_status',
@@ -484,6 +486,7 @@ class SalesController extends Controller
                     ->orWhere('c.first_name', 'ilike', $like)
                     ->orWhere('c.last_name', 'ilike', $like)
                     ->orWhere('c.plate', 'ilike', $like)
+                    ->orWhere('c.phone', 'ilike', $like)
                     ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like]);
 
                 if ($normalizedDoc !== '') {
@@ -529,6 +532,7 @@ class SalesController extends Controller
                 'trade_name' => $row->trade_name,
                 'plate' => $row->plate,
                 'address' => $row->address,
+                'phone' => $row->phone,
                 'default_tier_id' => $row->default_tier_id !== null ? (int) $row->default_tier_id : null,
                 'default_tier_code' => $row->default_tier_code,
                 'default_tier_name' => $row->default_tier_name,
@@ -716,6 +720,7 @@ class SalesController extends Controller
                 'c.last_name',
                 'c.plate',
                 'c.address',
+                'c.phone',
                 'cpp.default_tier_id',
                 'cpp.discount_percent',
                 'cpp.status as price_profile_status',
@@ -753,6 +758,7 @@ class SalesController extends Controller
                 'c.last_name',
                 'c.plate',
                 'c.address',
+                'c.phone',
                 'cpp.default_tier_id',
                 'cpp.discount_percent',
                 'cpp.status as price_profile_status',
@@ -782,6 +788,7 @@ class SalesController extends Controller
             'trade_name' => $row->trade_name,
             'plate' => $row->plate,
             'address' => $row->address,
+            'phone' => $row->phone,
             'default_tier_id' => $row->default_tier_id !== null ? (int) $row->default_tier_id : null,
             'default_tier_code' => $row->default_tier_code,
             'default_tier_name' => $row->default_tier_name,
@@ -801,6 +808,7 @@ class SalesController extends Controller
             && $this->tableExists('sales.customer_vehicles');
 
         $this->ensureCustomerPriceProfilesTable();
+        $this->ensureCustomersPhoneColumn();
 
         if ($limit < 1) {
             $limit = 1;
@@ -832,6 +840,7 @@ class SalesController extends Controller
                 'c.last_name',
                 'c.plate',
                 'c.address',
+                'c.phone',
                 'c.status',
                 'cpp.default_tier_id',
                 'cpp.discount_percent',
@@ -854,6 +863,7 @@ class SalesController extends Controller
                     ->orWhere('c.first_name', 'ilike', $like)
                     ->orWhere('c.last_name', 'ilike', $like)
                     ->orWhere('c.plate', 'ilike', $like)
+                    ->orWhere('c.phone', 'ilike', $like)
                     ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like]);
 
                 if ($normalizedDoc !== '') {
@@ -903,6 +913,7 @@ class SalesController extends Controller
                 'trade_name' => $row->trade_name,
                 'plate' => $row->plate,
                 'address' => $row->address,
+                'phone' => $row->phone,
                 'status' => (int) $row->status,
                 'default_tier_id' => $row->default_tier_id !== null ? (int) $row->default_tier_id : null,
                 'default_tier_code' => $row->default_tier_code,
@@ -1260,6 +1271,7 @@ class SalesController extends Controller
         $companyId = (int) $request->input('company_id', $authUser->company_id);
 
         $this->ensureCustomerPriceProfilesTable();
+        $this->ensureCustomersPhoneColumn();
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
@@ -1283,6 +1295,7 @@ class SalesController extends Controller
             'last_name' => 'nullable|string|max:120',
             'plate' => 'nullable|string|max:20',
             'address' => 'nullable|string|max:250',
+            'phone' => 'nullable|string|max:40',
             'status' => 'nullable|integer|in:0,1',
             'default_tier_id' => 'nullable|integer|min:1',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
@@ -1348,6 +1361,7 @@ class SalesController extends Controller
                         'last_name' => $payload['last_name'] ?? null,
                         'plate' => $payload['plate'] ?? null,
                         'address' => $payload['address'] ?? null,
+                        'phone' => $payload['phone'] ?? null,
                         'status' => 1,
                     ]);
 
@@ -1368,6 +1382,7 @@ class SalesController extends Controller
                 'last_name' => $payload['last_name'] ?? null,
                 'plate' => $payload['plate'] ?? null,
                 'address' => $payload['address'] ?? null,
+                'phone' => $payload['phone'] ?? null,
                 'status' => (int) ($payload['status'] ?? 1),
             ]);
         }
@@ -1403,6 +1418,7 @@ class SalesController extends Controller
         $companyId = (int) $request->input('company_id', $authUser->company_id);
 
         $this->ensureCustomerPriceProfilesTable();
+        $this->ensureCustomersPhoneColumn();
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
@@ -1426,6 +1442,7 @@ class SalesController extends Controller
             'last_name' => 'nullable|string|max:120',
             'plate' => 'nullable|string|max:20',
             'address' => 'nullable|string|max:250',
+            'phone' => 'nullable|string|max:40',
             'status' => 'nullable|integer|in:0,1',
             'default_tier_id' => 'nullable|integer|min:1',
             'discount_percent' => 'nullable|numeric|min:0|max:100',
@@ -4154,6 +4171,15 @@ class SalesController extends Controller
     private function ensureCustomerPriceProfilesTable(): void
     {
         // Table is now guaranteed by migration 2026_04_18_000006. No-op.
+    }
+
+    private function ensureCustomersPhoneColumn(): void
+    {
+        if (!$this->tableExists('sales.customers')) {
+            return;
+        }
+
+        DB::statement('ALTER TABLE sales.customers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
     }
 
     private function resolveValidatedTierId(int $companyId, $tierId): ?int

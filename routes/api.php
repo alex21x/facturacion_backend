@@ -77,6 +77,8 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/appcfg/admin-companies/{id}/reveal-admin-password', 'Api\\AppConfigController@revealAdminCompanyPassword')->middleware('admin.only');
         Route::get('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@companyCommerceAdminMatrix')->middleware('admin.only');
         Route::put('/appcfg/company-commerce-admin-matrix', 'Api\\AppConfigController@updateCompanyCommerceAdminMatrix')->middleware('admin.only');
+        Route::get('/appcfg/company-sunat-reconcile-admin-matrix', 'Api\\AppConfigController@companySunatReconcileAdminMatrix')->middleware('admin.only');
+        Route::put('/appcfg/company-sunat-reconcile-admin-matrix', 'Api\\AppConfigController@updateCompanySunatReconcileAdminMatrix')->middleware('admin.only');
         Route::get('/appcfg/company-inventory-settings-admin-matrix', 'Api\\AppConfigController@companyInventorySettingsAdminMatrix')->middleware('admin.only');
         Route::put('/appcfg/company-inventory-settings-admin-matrix', 'Api\\AppConfigController@updateCompanyInventorySettingsAdminMatrix')->middleware('admin.only');
         Route::put('/appcfg/igv-settings', 'Api\\AppConfigController@updateIgvSettings');

@@ -1101,10 +1101,26 @@ class TaxBridgeService
             ->limit($limit)
             ->get(['id', 'company_id']);
 
+        $configCacheByCompany = [];
+        $processedByCompany = [];
+
         foreach ($rows as $row) {
+            $companyId = (int) $row->company_id;
+            if (!array_key_exists($companyId, $configCacheByCompany)) {
+                $configCacheByCompany[$companyId] = $this->resolveConfig($companyId, null);
+                $processedByCompany[$companyId] = 0;
+            }
+
+            $companyConfig = $configCacheByCompany[$companyId];
+            $companyBatchSize = max(1, min(200, (int) ($companyConfig['reconcile_batch_size'] ?? $limit)));
+            if (($processedByCompany[$companyId] ?? 0) >= $companyBatchSize) {
+                continue;
+            }
+
             $processed++;
+            $processedByCompany[$companyId] = ($processedByCompany[$companyId] ?? 0) + 1;
             try {
-                $res = $this->retry((int) $row->company_id, (int) $row->id);
+                $res = $this->retry($companyId, (int) $row->id);
                 $status = strtoupper((string) ($res['status'] ?? ''));
 
                 if ($status === 'ACCEPTED') {
@@ -1117,7 +1133,7 @@ class TaxBridgeService
             } catch (\Throwable $e) {
                 $failed++;
                 Log::warning('SUNAT reconcile pending document failed', [
-                    'company_id' => (int) $row->company_id,
+                    'company_id' => $companyId,
                     'document_id' => (int) $row->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -1163,6 +1179,12 @@ class TaxBridgeService
         return [
             'auto_reconcile_enabled' => $config['auto_reconcile_enabled'],
             'reconcile_batch_size' => $config['reconcile_batch_size'],
+            'reconcile_retry_base_minutes' => $config['reconcile_retry_base_minutes'] ?? 1,
+            'reconcile_retry_max_minutes' => $config['reconcile_retry_max_minutes'] ?? 120,
+            'reconcile_warn_attempts' => $config['reconcile_warn_attempts'] ?? self::RECONCILE_WARN_ATTEMPTS,
+            'sunat_exception_notify_enabled' => $config['sunat_exception_notify_enabled'] ?? true,
+            'sunat_exception_notify_hours' => $config['sunat_exception_notify_hours'] ?? 6,
+            'sunat_alert_repeat_minutes' => $config['sunat_alert_repeat_minutes'] ?? 60,
             'pending_reconcile_count' => (int) $pendingCount,
             'unsent_count' => (int) $unsentCount,
             'next_reconcile_at' => $nextAt,
@@ -1183,6 +1205,7 @@ class TaxBridgeService
 
     private function buildReconcileAttemptMetadata(int $companyId, int $documentId, bool $pendingConfirmation, bool $isRetry, ?string $errorKind): array
     {
+        $config = $this->resolveConfig($companyId, null);
         $meta = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
             ->where('company_id', $companyId)
@@ -1198,9 +1221,13 @@ class TaxBridgeService
 
             // Progressive backoff with ceiling to keep retrying automatically
             // without flooding SUNAT endpoints.
-            $minutes = min(120, (int) pow(2, min(6, $attempts - 1)));
+            $baseMinutes = max(1, min(180, (int) ($config['reconcile_retry_base_minutes'] ?? 1)));
+            $maxMinutes = max($baseMinutes, min(1440, (int) ($config['reconcile_retry_max_minutes'] ?? 120)));
+            $backoffMultiplier = (int) pow(2, min(6, $attempts - 1));
+            $minutes = min($maxMinutes, $baseMinutes * $backoffMultiplier);
             $nextAt = now()->addMinutes($minutes)->toDateTimeString();
-            $needsManual = $attempts >= self::RECONCILE_WARN_ATTEMPTS;
+            $warnAttempts = max(1, min(50, (int) ($config['reconcile_warn_attempts'] ?? self::RECONCILE_WARN_ATTEMPTS)));
+            $needsManual = $attempts >= $warnAttempts;
 
             return [
                 'attempts' => $attempts,
@@ -1635,6 +1662,15 @@ class TaxBridgeService
                 'token' => '',
                 'auto_send_on_issue' => true,
                 'force_async_on_issue' => true,
+                'auto_reconcile_enabled' => true,
+                'reconcile_batch_size' => 20,
+                'reconcile_retry_base_minutes' => 1,
+                'reconcile_retry_max_minutes' => 120,
+                'reconcile_warn_attempts' => self::RECONCILE_WARN_ATTEMPTS,
+                'sunat_exception_notify_enabled' => true,
+                'sunat_exception_notify_hours' => 6,
+                'sunat_alert_repeat_minutes' => 60,
+                'sunat_exception_notify_limit' => 120,
                 'sol_user' => '',
                 'sol_pass' => '',
                 'sunat_secondary_user' => '',
@@ -1671,7 +1707,14 @@ class TaxBridgeService
             'force_async_on_issue' => isset($cfg['force_async_on_issue']) ? (bool) $cfg['force_async_on_issue'] : true,
             'auto_send_on_issue' => (bool) ($cfg['auto_send_on_issue'] ?? true),
             'auto_reconcile_enabled' => isset($cfg['auto_reconcile_enabled']) ? (bool) $cfg['auto_reconcile_enabled'] : true,
-            'reconcile_batch_size' => max(5, min(50, (int) ($cfg['reconcile_batch_size'] ?? 20))),
+            'reconcile_batch_size' => max(5, min(200, (int) ($cfg['reconcile_batch_size'] ?? 20))),
+            'reconcile_retry_base_minutes' => max(1, min(180, (int) ($cfg['reconcile_retry_base_minutes'] ?? 1))),
+            'reconcile_retry_max_minutes' => max(5, min(1440, (int) ($cfg['reconcile_retry_max_minutes'] ?? 120))),
+            'reconcile_warn_attempts' => max(1, min(50, (int) ($cfg['reconcile_warn_attempts'] ?? self::RECONCILE_WARN_ATTEMPTS))),
+            'sunat_exception_notify_enabled' => isset($cfg['sunat_exception_notify_enabled']) ? (bool) $cfg['sunat_exception_notify_enabled'] : true,
+            'sunat_exception_notify_hours' => max(1, min(168, (int) ($cfg['sunat_exception_notify_hours'] ?? 6))),
+            'sunat_alert_repeat_minutes' => max(10, min(1440, (int) ($cfg['sunat_alert_repeat_minutes'] ?? 60))),
+            'sunat_exception_notify_limit' => max(1, min(500, (int) ($cfg['sunat_exception_notify_limit'] ?? 120))),
             'sol_user' => trim((string) ($cfg['sol_user'] ?? '')),
             'sol_pass' => (string) ($cfg['sol_pass'] ?? ''),
             'sunat_secondary_user' => trim((string) (($companySettingsExtra['sunat_secondary_user'] ?? '') ?: ($cfg['sunat_secondary_user'] ?? ''))),
@@ -1846,12 +1889,39 @@ class TaxBridgeService
         $emailSent = 0;
         $whatsappSent = 0;
         $notified = 0;
+        $seenByCompany = [];
+        $configCacheByCompany = [];
 
         foreach ($rows as $row) {
+            $companyId = (int) $row->company_id;
+            if (!array_key_exists($companyId, $configCacheByCompany)) {
+                $configCacheByCompany[$companyId] = $this->resolveConfig(
+                    $companyId,
+                    $row->branch_id !== null ? (int) $row->branch_id : null
+                );
+                $seenByCompany[$companyId] = 0;
+            }
+
+            $config = $configCacheByCompany[$companyId];
+            if (!(bool) ($config['sunat_exception_notify_enabled'] ?? true)) {
+                continue;
+            }
+
+            $companyLimit = max(1, min(500, (int) ($config['sunat_exception_notify_limit'] ?? $maxRows)));
+            if (($seenByCompany[$companyId] ?? 0) >= $companyLimit) {
+                continue;
+            }
+
+            $companyThresholdHours = max(1, min(168, (int) ($config['sunat_exception_notify_hours'] ?? $thresholdHours)));
+            $ageHours = max(0, (int) floor(now()->diffInMinutes(\Carbon\Carbon::parse((string) $row->updated_at)) / 60));
+            if ($ageHours < $companyThresholdHours) {
+                continue;
+            }
+
             $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
             $metadata = is_array($metadata) ? $metadata : [];
 
-            $repeatMinutes = max(10, (int) ($metadata['sunat_alert_repeat_minutes'] ?? 60));
+            $repeatMinutes = max(10, (int) ($config['sunat_alert_repeat_minutes'] ?? ($metadata['sunat_alert_repeat_minutes'] ?? 60)));
             $lastAlertAt = trim((string) ($metadata['sunat_alert_last_at'] ?? ''));
             if ($lastAlertAt !== '') {
                 try {
@@ -1863,11 +1933,10 @@ class TaxBridgeService
                 }
             }
 
-            $config = $this->resolveConfig((int) $row->company_id, $row->branch_id !== null ? (int) $row->branch_id : null);
-            $emails = $this->resolveAlertEmails((int) $row->company_id, $config);
+            $emails = $this->resolveAlertEmails($companyId, $config);
             $whatsappWebhook = trim((string) ($config['alerts_whatsapp_webhook'] ?? ''));
             $status = strtoupper((string) ($metadata['sunat_status'] ?? 'PENDING_CONFIRMATION'));
-            $hoursPending = max(0, (int) floor(now()->diffInMinutes(\Carbon\Carbon::parse((string) $row->updated_at)) / 60));
+            $hoursPending = $ageHours;
 
             $message = sprintf(
                 'Excepcion SUNAT pendiente %dh: doc #%d %s %s-%s estado=%s',
@@ -1927,13 +1996,14 @@ class TaxBridgeService
 
             DB::table('sales.commercial_documents')
                 ->where('id', (int) $row->id)
-                ->where('company_id', (int) $row->company_id)
+                ->where('company_id', $companyId)
                 ->update([
                     'metadata' => json_encode($metadata),
                     'updated_at' => now(),
                 ]);
 
             $notified++;
+            $seenByCompany[$companyId] = ($seenByCompany[$companyId] ?? 0) + 1;
         }
 
         return [

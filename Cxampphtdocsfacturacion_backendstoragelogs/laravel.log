@@ -1,0 +1,780 @@
+[2026-05-19 17:17:27] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:27] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:27] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:28] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:36] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:36] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:36] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:17:36] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:43:06] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:43:06] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:43:06] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:43:06] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 
+[2026-05-19 17:45:42] local.ERROR: SQLSTATE[08006] [7] could not connect to server: Connection refused
+	Is the server running on host "127.0.0.1" and accepting
+	TCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') {"exception":"[object] (Illuminate\\Database\\QueryException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? (Connection: pgsql, SQL: SET TIME ZONE 'America/Lima') at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:829)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#4 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#12 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#18 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#19 {main}
+
+[previous exception] [object] (PDOException(code: 7): SQLSTATE[08006] [7] could not connect to server: Connection refused
+\tIs the server running on host \"127.0.0.1\" and accepting
+\tTCP/IP connections on port 5432? at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php:65)
+[stacktrace]
+#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(65): PDO->__construct('pgsql:host=127....', 'postgres', Object(SensitiveParameterValue), Array)
+#1 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(44): Illuminate\\Database\\Connectors\\Connector->createPdoConnection('pgsql:host=127....', 'postgres', '1234', Array)
+#2 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/PostgresConnector.php(35): Illuminate\\Database\\Connectors\\Connector->createConnection('pgsql:host=127....', Array, Array)
+#3 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connectors/ConnectionFactory.php(184): Illuminate\\Database\\Connectors\\PostgresConnector->connect(Array)
+#4 [internal function]: Illuminate\\Database\\Connectors\\ConnectionFactory->Illuminate\\Database\\Connectors\\{closure}()
+#5 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(1339): call_user_func(Object(Closure))
+#6 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(636): Illuminate\\Database\\Connection->getPdo()
+#7 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(816): Illuminate\\Database\\Connection->Illuminate\\Database\\{closure}('SET TIME ZONE '...', Array)
+#8 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(783): Illuminate\\Database\\Connection->runQueryCallback('SET TIME ZONE '...', Array, Object(Closure))
+#9 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(630): Illuminate\\Database\\Connection->run('SET TIME ZONE '...', Array, Object(Closure))
+#10 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(509): Illuminate\\Database\\Connection->unprepared('SET TIME ZONE '...')
+#11 /var/www/html/vendor/laravel/framework/src/Illuminate/Support/Facades/Facade.php(355): Illuminate\\Database\\DatabaseManager->__call('unprepared', Array)
+#12 /var/www/html/app/Providers/AppServiceProvider.php(37): Illuminate\\Support\\Facades\\Facade::__callStatic('unprepared', Array)
+#13 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Providers\\AppServiceProvider->boot()
+#14 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Util.php(41): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#15 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(93): Illuminate\\Container\\Util::unwrapIfClosure(Object(Closure))
+#16 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(Object(Illuminate\\Foundation\\Application), Array, Object(Closure))
+#17 /var/www/html/vendor/laravel/framework/src/Illuminate/Container/Container.php(662): Illuminate\\Container\\BoundMethod::call(Object(Illuminate\\Foundation\\Application), Array, Array, NULL)
+#18 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1059): Illuminate\\Container\\Container->call(Array)
+#19 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1040): Illuminate\\Foundation\\Application->bootProvider(Object(App\\Providers\\AppServiceProvider))
+#20 [internal function]: Illuminate\\Foundation\\Application->Illuminate\\Foundation\\{closure}(Object(App\\Providers\\AppServiceProvider), 19)
+#21 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1039): array_walk(Array, Object(Closure))
+#22 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/BootProviders.php(17): Illuminate\\Foundation\\Application->boot()
+#23 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(286): Illuminate\\Foundation\\Bootstrap\\BootProviders->bootstrap(Object(Illuminate\\Foundation\\Application))
+#24 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(447): Illuminate\\Foundation\\Application->bootstrapWith(Array)
+#25 /var/www/html/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(199): Illuminate\\Foundation\\Console\\Kernel->bootstrap()
+#26 /var/www/html/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle(Object(Symfony\\Component\\Console\\Input\\ArgvInput), Object(Symfony\\Component\\Console\\Output\\ConsoleOutput))
+#27 {main}
+"} 

@@ -17,7 +17,4 @@ RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoload
 COPY docker/Caddyfile.railway /etc/caddy/Caddyfile
 
 EXPOSE 8000
-
-
-CMD ["sh", "-lc", "php artisan storage:link >/dev/null 2>&1 || true; frankenphp run --config /etc/caddy/Caddyfile"]
-
+CMD ["sh", "-lc", "php artisan storage:link >/dev/null 2>&1 || true; if [ \"${RUN_LARAVEL_SCHEDULER:-true}\" = \"true\" ]; then (while true; do php artisan schedule:run --no-interaction >/dev/null 2>&1 || true; sleep ${SCHEDULER_INTERVAL_SECONDS:-60}; done) & fi; frankenphp run --config /etc/caddy/Caddyfile"]

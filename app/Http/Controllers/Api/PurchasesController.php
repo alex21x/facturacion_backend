@@ -1666,7 +1666,7 @@ class PurchasesController
         $this->ensurePurchaseSuppliersTable();
 
         $query = DB::table('inventory.purchase_suppliers')
-            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
             ->where('company_id', $companyId)
             ->orderByRaw('COALESCE(last_used_at, updated_at, created_at) DESC')
             ->limit($limit);
@@ -1678,7 +1678,8 @@ class PurchasesController
             $query->where(function ($nested) use ($like, $normalizedDoc) {
                 $nested->where('doc_number', 'ilike', $like)
                     ->orWhere('legal_name', 'ilike', $like)
-                    ->orWhere('address', 'ilike', $like);
+                    ->orWhere('address', 'ilike', $like)
+                    ->orWhere('phone', 'ilike', $like);
 
                 if ($normalizedDoc !== '') {
                     $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
@@ -1719,7 +1720,7 @@ class PurchasesController
         $this->ensurePurchaseSuppliersTable();
 
         $query = DB::table('inventory.purchase_suppliers')
-            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
             ->where('company_id', $companyId)
             ->orderBy('legal_name')
             ->limit($limit);
@@ -1731,7 +1732,8 @@ class PurchasesController
             $query->where(function ($nested) use ($like, $normalizedDoc) {
                 $nested->where('doc_number', 'ilike', $like)
                     ->orWhere('legal_name', 'ilike', $like)
-                    ->orWhere('address', 'ilike', $like);
+                    ->orWhere('address', 'ilike', $like)
+                    ->orWhere('phone', 'ilike', $like);
 
                 if ($normalizedDoc !== '') {
                     $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
@@ -1766,6 +1768,7 @@ class PurchasesController
             'rows.*.doc_number' => 'required|string|max:40',
             'rows.*.legal_name' => 'required|string|max:255',
             'rows.*.address' => 'nullable|string|max:255',
+            'rows.*.phone' => 'nullable|string|max:40',
             'rows.*.source' => 'nullable|string|max:20',
         ]);
 
@@ -1832,6 +1835,7 @@ class PurchasesController
                 'doc_number' => $docNumber,
                 'legal_name' => $legalName,
                 'address' => $this->nullIfBlank((string) ($row['address'] ?? '')),
+                'phone' => $this->nullIfBlank((string) ($row['phone'] ?? '')),
                 'source' => $this->nullIfBlank((string) ($row['source'] ?? 'import')) ?? 'import',
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -1969,25 +1973,26 @@ class PurchasesController
 
     private function ensurePurchaseSuppliersTable(): void
     {
-        if ($this->tableExists('inventory.purchase_suppliers')) {
-            return;
+        if (!$this->tableExists('inventory.purchase_suppliers')) {
+            DB::statement(<<<'SQL'
+                CREATE TABLE IF NOT EXISTS inventory.purchase_suppliers (
+                    id BIGSERIAL PRIMARY KEY,
+                    company_id BIGINT NOT NULL,
+                    doc_type VARCHAR(3) NOT NULL,
+                    doc_number VARCHAR(20) NOT NULL,
+                    legal_name VARCHAR(255) NOT NULL,
+                    address VARCHAR(255) NULL,
+                    phone VARCHAR(40) NULL,
+                    source VARCHAR(20) NULL,
+                    created_at TIMESTAMP NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NULL DEFAULT NOW(),
+                    last_used_at TIMESTAMP NULL DEFAULT NOW(),
+                    CONSTRAINT purchase_suppliers_company_doc_unique UNIQUE (company_id, doc_number)
+                )
+            SQL);
         }
 
-        DB::statement(<<<'SQL'
-            CREATE TABLE IF NOT EXISTS inventory.purchase_suppliers (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL,
-                doc_type VARCHAR(3) NOT NULL,
-                doc_number VARCHAR(20) NOT NULL,
-                legal_name VARCHAR(255) NOT NULL,
-                address VARCHAR(255) NULL,
-                source VARCHAR(20) NULL,
-                created_at TIMESTAMP NULL DEFAULT NOW(),
-                updated_at TIMESTAMP NULL DEFAULT NOW(),
-                last_used_at TIMESTAMP NULL DEFAULT NOW(),
-                CONSTRAINT purchase_suppliers_company_doc_unique UNIQUE (company_id, doc_number)
-            )
-        SQL);
+        DB::statement('ALTER TABLE inventory.purchase_suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
 
         DB::statement('CREATE INDEX IF NOT EXISTS purchase_suppliers_company_name_idx ON inventory.purchase_suppliers (company_id, legal_name)');
     }
@@ -1995,7 +2000,7 @@ class PurchasesController
     private function fetchSupplierRowByDocument(int $companyId, string $document)
     {
         return DB::table('inventory.purchase_suppliers')
-            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
             ->where('company_id', $companyId)
             ->where('doc_number', $document)
             ->first();
@@ -2004,16 +2009,17 @@ class PurchasesController
     private function upsertPurchaseSupplier(int $companyId, array $data): void
     {
         DB::statement(
-            'INSERT INTO inventory.purchase_suppliers (company_id, doc_type, doc_number, legal_name, address, source, created_at, updated_at, last_used_at) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW()) '
+            'INSERT INTO inventory.purchase_suppliers (company_id, doc_type, doc_number, legal_name, address, phone, source, created_at, updated_at, last_used_at) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW()) '
             . 'ON CONFLICT (company_id, doc_number) DO UPDATE SET '
-            . 'doc_type = EXCLUDED.doc_type, legal_name = EXCLUDED.legal_name, address = EXCLUDED.address, source = EXCLUDED.source, updated_at = NOW(), last_used_at = NOW()',
+            . 'doc_type = EXCLUDED.doc_type, legal_name = EXCLUDED.legal_name, address = EXCLUDED.address, phone = EXCLUDED.phone, source = EXCLUDED.source, updated_at = NOW(), last_used_at = NOW()',
             [
                 $companyId,
                 (string) ($data['doc_type'] ?? ''),
                 (string) ($data['doc_number'] ?? ''),
                 (string) ($data['legal_name'] ?? ''),
                 $data['address'] ?? null,
+                $data['phone'] ?? null,
                 $data['source'] ?? null,
             ]
         );
@@ -2027,6 +2033,7 @@ class PurchasesController
             'doc_number' => isset($row->doc_number) ? (string) $row->doc_number : '',
             'name' => isset($row->legal_name) ? (string) $row->legal_name : '',
             'address' => isset($row->address) ? (string) $row->address : null,
+            'phone' => isset($row->phone) ? (string) $row->phone : null,
             'source' => isset($row->source) ? (string) $row->source : 'local',
         ];
     }

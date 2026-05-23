@@ -39,6 +39,9 @@ fi
 # Rebuild package manifest at runtime (build uses composer --no-scripts).
 php artisan package:discover --ansi >/dev/null 2>&1 || true
 
+# Prevent stale cached config from previous environments (e.g. DB_HOST=127.0.0.1).
+rm -f bootstrap/cache/config.php bootstrap/cache/routes-v7.php bootstrap/cache/services.php bootstrap/cache/packages.php 2>/dev/null || true
+
 php artisan optimize:clear >/dev/null 2>&1 || true
 
 php artisan storage:link >/dev/null 2>&1 || true

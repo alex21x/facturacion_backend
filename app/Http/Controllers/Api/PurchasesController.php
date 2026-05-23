@@ -1698,6 +1698,166 @@ class PurchasesController
         ]);
     }
 
+    public function suppliers(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $search = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 5000);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 10000) {
+            $limit = 10000;
+        }
+
+        $this->ensurePurchaseSuppliersTable();
+
+        $query = DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'source'])
+            ->where('company_id', $companyId)
+            ->orderBy('legal_name')
+            ->limit($limit);
+
+        if ($search !== '') {
+            $like = '%' . $search . '%';
+            $normalizedDoc = preg_replace('/\D+/', '', $search);
+
+            $query->where(function ($nested) use ($like, $normalizedDoc) {
+                $nested->where('doc_number', 'ilike', $like)
+                    ->orWhere('legal_name', 'ilike', $like)
+                    ->orWhere('address', 'ilike', $like);
+
+                if ($normalizedDoc !== '') {
+                    $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+            });
+        }
+
+        $rows = $query
+            ->get()
+            ->map(function ($row) {
+                return $this->supplierSuggestionFromRow($row);
+            })
+            ->values();
+
+        return response()->json([
+            'data' => $rows,
+        ]);
+    }
+
+    public function bulkImportSuppliers(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rows' => 'required|array|min:1|max:5000',
+            'rows.*.doc_type' => 'nullable|string|max:10',
+            'rows.*.doc_number' => 'required|string|max:40',
+            'rows.*.legal_name' => 'required|string|max:255',
+            'rows.*.address' => 'nullable|string|max:255',
+            'rows.*.source' => 'nullable|string|max:20',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $this->ensurePurchaseSuppliersTable();
+
+        $rows = $validator->validated()['rows'];
+        $existingDocs = DB::table('inventory.purchase_suppliers')
+            ->where('company_id', $companyId)
+            ->pluck('doc_number')
+            ->map(fn ($value) => (string) $value)
+            ->flip()
+            ->all();
+
+        $seenInFile = [];
+        $created = 0;
+        $skipped = 0;
+        $errors = [];
+        $toInsert = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNumber = $index + 2;
+            $docNumber = preg_replace('/\D+/', '', (string) ($row['doc_number'] ?? ''));
+            if (!is_string($docNumber)) {
+                $docNumber = '';
+            }
+            $docNumber = trim($docNumber);
+            $legalName = trim((string) ($row['legal_name'] ?? ''));
+
+            if ($docNumber === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Número de documento es obligatorio.'];
+                continue;
+            }
+
+            if ($legalName === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Nombre del proveedor es obligatorio.'];
+                continue;
+            }
+
+            if (isset($seenInFile[$docNumber])) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Proveedor duplicado dentro del archivo (mismo documento).'];
+                continue;
+            }
+            $seenInFile[$docNumber] = true;
+
+            if (isset($existingDocs[$docNumber])) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Proveedor ya existe en el catálogo local (mismo documento).'];
+                continue;
+            }
+
+            $docTypeInput = strtoupper(trim((string) ($row['doc_type'] ?? '')));
+            $docType = $this->normalizeSupplierDocType($docTypeInput, $docNumber);
+
+            $toInsert[] = [
+                'company_id' => $companyId,
+                'doc_type' => $docType,
+                'doc_number' => $docNumber,
+                'legal_name' => $legalName,
+                'address' => $this->nullIfBlank((string) ($row['address'] ?? '')),
+                'source' => $this->nullIfBlank((string) ($row['source'] ?? 'import')) ?? 'import',
+                'created_at' => now(),
+                'updated_at' => now(),
+                'last_used_at' => now(),
+            ];
+
+            $existingDocs[$docNumber] = true;
+            $created++;
+        }
+
+        foreach (array_chunk($toInsert, 500) as $chunk) {
+            DB::table('inventory.purchase_suppliers')->insert($chunk);
+        }
+
+        return response()->json([
+            'message' => 'Importación de proveedores procesada.',
+            'summary' => [
+                'total' => count($rows),
+                'created' => $created,
+                'skipped' => $skipped,
+                'errors' => count($errors),
+            ],
+            'errors' => array_slice($errors, 0, 300),
+        ]);
+    }
+
     public function resolveSupplierByDocument(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -1869,5 +2029,32 @@ class PurchasesController
             'address' => isset($row->address) ? (string) $row->address : null,
             'source' => isset($row->source) ? (string) $row->source : 'local',
         ];
+    }
+
+    private function normalizeSupplierDocType(string $docTypeInput, string $docNumber): string
+    {
+        if (in_array($docTypeInput, ['RUC', 'DNI', 'CE', 'PAS'], true)) {
+            return $docTypeInput;
+        }
+
+        if (strlen($docNumber) === 11) {
+            return 'RUC';
+        }
+
+        if (strlen($docNumber) === 8) {
+            return 'DNI';
+        }
+
+        return 'OTR';
+    }
+
+    private function nullIfBlank(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        return $trimmed === '' ? null : $trimmed;
     }
 }

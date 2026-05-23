@@ -216,6 +216,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/purchases/lookups', 'Api\\PurchasesController@lookups');
         Route::get('/purchases/list', 'Api\\PurchasesController@listStockEntries');
         Route::get('/purchases/export', 'Api\\PurchasesController@exportStockEntries');
+        Route::get('/purchases/suppliers', 'Api\\PurchasesController@suppliers');
         Route::get('/purchases/suppliers/autocomplete', 'Api\\PurchasesController@supplierAutocomplete');
         Route::get('/purchases/suppliers/resolve-document', 'Api\\PurchasesController@resolveSupplierByDocument');
     });
@@ -249,6 +250,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::post('/inventory/stock-entries', 'Api\\InventoryController@createStockEntry');
         Route::post('/inventory/product-masters', 'Api\\InventoryController@createProductMaster');
         Route::put('/inventory/product-masters/{id}', 'Api\\InventoryController@updateProductMaster');
+        Route::post('/purchases/suppliers/bulk-import', 'Api\\PurchasesController@bulkImportSuppliers');
     });
 
     Route::middleware(['rbac.module:INVENTORY,view', 'throttle:1200,1'])->prefix('inventory-pro')->group(function () {

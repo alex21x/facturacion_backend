@@ -3731,6 +3731,30 @@ class SalesController extends Controller
             ? '<div class="company-footer-banks"><div class="company-footer-title">Bancos</div>' . $bankRows . '</div>'
             : '';
 
+        $showPaymentBrandsRaw = $company['show_payment_brand_icons'] ?? $company['showPaymentBrandIcons'] ?? true;
+        if ($showPaymentBrandsRaw === null) {
+            $showPaymentBrands = true;
+        } else {
+            $showPaymentBrands = filter_var($showPaymentBrandsRaw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($showPaymentBrands === null) {
+                $showPaymentBrands = (bool) $showPaymentBrandsRaw;
+            }
+        }
+
+        $paymentBrandsSection = '';
+        if ($showPaymentBrands) {
+            $logosClass = $isA4 ? 'company-footer-logos company-footer-logos--a4' : 'company-footer-logos company-footer-logos--ticket';
+            $yapeLogo = $this->escapeHtml('/assets/payment-logos/yape-official.png');
+            $plinLogo = $this->escapeHtml('/assets/payment-logos/plin-official.png');
+            $culqiLogo = $this->escapeHtml('/assets/payment-logos/culqi-official.png');
+
+            $paymentBrandsSection = '<div class="' . $logosClass . '">'
+                . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
+                . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
+                . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
+                . '</div>';
+        }
+
         $sheetWidth = $isA4 ? '210mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
         $logoMaxWidth = $isA4 ? '170px' : '74mm';
@@ -3778,6 +3802,12 @@ class SalesController extends Controller
     .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
     .company-footer-bank { margin: 0.5mm 0; font-size: 11px; font-weight: 900; }
+        .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }
+        .company-footer-logos--a4 { justify-content: flex-start; margin-top: 1.4mm; }
+        .paybrand { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 1mm 2mm; height: 10mm; display: inline-flex; align-items: center; justify-content: center; }
+        .paybrand img { height: 7mm; width: auto; display: block; }
+        .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
+        .company-footer-logos--ticket .paybrand img { height: 6mm; }
   </style>
 </head>
 <body>
@@ -3815,6 +3845,7 @@ class SalesController extends Controller
 
     <div class="footer">
       {$banksSection}
+            {$paymentBrandsSection}
       <div>Gracias por su compra</div>
     </div>
   </div>

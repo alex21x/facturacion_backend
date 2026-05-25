@@ -233,7 +233,7 @@ class SalesController extends Controller
             $settingColumns = $this->tableColumns('core.company_settings');
             $settingEmailColumn = $this->firstExistingColumn($settingColumns, ['email', 'contact_email']);
 
-            $settingsSelect = ['address', 'phone', 'logo_path'];
+            $settingsSelect = ['address', 'phone', 'logo_path', 'bank_accounts', 'extra_data'];
             if ($settingEmailColumn) {
                 $settingsSelect[] = $settingEmailColumn;
             }
@@ -254,6 +254,19 @@ class SalesController extends Controller
         $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
         $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
+        $extraData = [];
+        if ($settings && isset($settings->extra_data)) {
+            $decodedExtra = json_decode((string) $settings->extra_data, true);
+            $extraData = is_array($decodedExtra) ? $decodedExtra : [];
+        }
+
+        $bankAccounts = [];
+        if ($settings && isset($settings->bank_accounts)) {
+            $decodedBanks = json_decode((string) $settings->bank_accounts, true);
+            if (is_array($decodedBanks)) {
+                $bankAccounts = array_values(array_filter($decodedBanks, static fn ($item) => is_array($item)));
+            }
+        }
 
         return [
             'tax_id'     => $company->tax_id ?? null,
@@ -263,6 +276,10 @@ class SalesController extends Controller
             'phone'      => $settings->phone ?? null,
             'email'      => $companyEmail,
             'logo_url'   => $logoUrl,
+            'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
+                ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
+                : true,
+            'bank_accounts' => $bankAccounts,
         ];
     }
 

@@ -1649,11 +1649,20 @@ HTML;
         }
 
         $direccion = trim((string) (($company->settings_address ?? '') ?: ($company->address ?? '')));
+        $pseEnabled = trim((string) ($config['envio_pse'] ?? '')) !== '';
+        $bridgeUser = $pseEnabled
+            ? trim((string) ($config['sol_user'] ?? ''))
+            : trim((string) (($config['sunat_secondary_user'] ?? '') ?: ($config['sol_user'] ?? '')));
+        $bridgePass = $pseEnabled
+            ? (string) ($config['sol_pass'] ?? '')
+            : (string) (($config['sunat_secondary_pass'] ?? '') !== ''
+                ? $config['sunat_secondary_pass']
+                : ($config['sol_pass'] ?? ''));
 
         return [
             'ruc' => (string) ($company->tax_id ?? ''),
-            'user' => (string) (($config['sunat_secondary_user'] ?? '') ?: ($config['sol_user'] ?? '')),
-            'pass' => (string) (($config['sunat_secondary_pass'] ?? '') ?: ($config['sol_pass'] ?? '')),
+            'user' => $bridgeUser,
+            'pass' => $bridgePass,
             'razon_social' => (string) ($company->legal_name ?? ''),
             'nombre_comercial' => (string) ($company->trade_name ?? ''),
             'direccion' => $direccion,
@@ -1731,10 +1740,6 @@ HTML;
                 $datePart = Carbon::parse($issueDate, 'America/Lima')->toDateString();
                 $timePart = Carbon::parse($createdAt)->setTimezone('America/Lima')->format('H:i:s');
                 return Carbon::parse($datePart . ' ' . $timePart, 'America/Lima')->format('d/m/Y H:i:s');
-            }
-
-            if ($issueDate !== '') {
-                return Carbon::parse($issueDate, 'America/Lima')->format('d/m/Y H:i:s');
             }
 
             if ($createdAt !== '') {

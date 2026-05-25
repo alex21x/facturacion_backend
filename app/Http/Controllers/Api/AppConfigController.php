@@ -4177,6 +4177,7 @@ class AppConfigController extends Controller
             'phone'           => $settings->phone       ?? null,
             'telefono_movil'  => $extraData['telefono_movil'] ?? null,
             'telefono_fijo'   => $extraData['telefono_fijo'] ?? null,
+            'company_description' => $extraData['company_description'] ?? null,
             'email'           => $settings->email       ?? null,
             'website'         => $settings->website     ?? null,
             'ubigeo'          => $extraData['ubigeo'] ?? null,
@@ -4212,6 +4213,7 @@ class AppConfigController extends Controller
             'phone'         => 'nullable|string|max:60',
             'telefono_movil'=> 'nullable|string|max:60',
             'telefono_fijo' => 'nullable|string|max:60',
+            'company_description' => 'nullable|string|max:600',
             'email'         => 'nullable|email|max:200',
             'website'       => 'nullable|url|max:300',
             'ubigeo'        => 'nullable|string|max:6',
@@ -4278,7 +4280,7 @@ class AppConfigController extends Controller
                 $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
             }
 
-            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret', 'show_payment_brand_icons'];
+            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'company_description', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret', 'show_payment_brand_icons'];
             $hasExtraDataUpdates = false;
             foreach ($extraDataFields as $field) {
                 if (array_key_exists($field, $payload)) {

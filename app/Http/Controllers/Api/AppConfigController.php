@@ -4155,9 +4155,20 @@ class AppConfigController extends Controller
 
         $settings = null;
         if ($this->tableExists('core', 'company_settings')) {
-            $settings = DB::table('core.company_settings')
-                ->where('company_id', $companyId)
-                ->first();
+            $settingsQuery = DB::table('core.company_settings')
+                ->where('company_id', $companyId);
+
+            if ($this->columnExists('core', 'company_settings', 'logo_path')) {
+                $settingsQuery->orderByRaw("CASE WHEN COALESCE(logo_path, '') <> '' THEN 0 ELSE 1 END");
+            }
+            if ($this->columnExists('core', 'company_settings', 'updated_at')) {
+                $settingsQuery->orderByDesc('updated_at');
+            }
+            if ($this->columnExists('core', 'company_settings', 'created_at')) {
+                $settingsQuery->orderByDesc('created_at');
+            }
+
+            $settings = $settingsQuery->first();
         }
 
         $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
@@ -4261,6 +4272,19 @@ class AppConfigController extends Controller
 
         // Actualizar configuracion extendida si la tabla existe
         if ($this->tableExists('core', 'company_settings')) {
+            $currentSettingsQuery = DB::table('core.company_settings')
+                ->where('company_id', $companyId);
+            if ($this->columnExists('core', 'company_settings', 'logo_path')) {
+                $currentSettingsQuery->orderByRaw("CASE WHEN COALESCE(logo_path, '') <> '' THEN 0 ELSE 1 END");
+            }
+            if ($this->columnExists('core', 'company_settings', 'updated_at')) {
+                $currentSettingsQuery->orderByDesc('updated_at');
+            }
+            if ($this->columnExists('core', 'company_settings', 'created_at')) {
+                $currentSettingsQuery->orderByDesc('created_at');
+            }
+            $currentSettings = $currentSettingsQuery->first();
+
             $settingsUpdates = [
                 'updated_at' => now(),
             ];
@@ -4290,10 +4314,6 @@ class AppConfigController extends Controller
             }
 
             if ($hasExtraDataUpdates) {
-                $currentSettings = DB::table('core.company_settings')
-                    ->where('company_id', $companyId)
-                    ->first();
-
                 $currentExtra = $currentSettings
                     ? json_decode((string) ($currentSettings->extra_data ?? '{}'), true) ?? []
                     : [];
@@ -4313,10 +4333,21 @@ class AppConfigController extends Controller
                 $settingsUpdates['extra_data'] = json_encode($currentExtra);
             }
 
-            DB::table('core.company_settings')->updateOrInsert(
-                ['company_id' => $companyId],
-                $settingsUpdates
-            );
+            if ($currentSettings && !empty($currentSettings->logo_path) && !array_key_exists('logo_path', $settingsUpdates)) {
+                $settingsUpdates['logo_path'] = $currentSettings->logo_path;
+            }
+
+            $affectedRows = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->update($settingsUpdates);
+
+            if ($affectedRows === 0) {
+                DB::table('core.company_settings')->insert(array_merge(
+                    ['company_id' => $companyId],
+                    $this->columnExists('core', 'company_settings', 'created_at') ? ['created_at' => now()] : [],
+                    $settingsUpdates
+                ));
+            }
         }
 
         return $this->companyProfile($request, $companyIgvRateService);
@@ -4407,10 +4438,19 @@ class AppConfigController extends Controller
         }
 
         if ($this->tableExists('core', 'company_settings')) {
-            DB::table('core.company_settings')->updateOrInsert(
-                ['company_id' => $companyId],
-                ['logo_path' => $path, 'updated_at' => now()]
-            );
+            $settingsUpdates = ['logo_path' => $path, 'updated_at' => now()];
+
+            $affectedRows = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->update($settingsUpdates);
+
+            if ($affectedRows === 0) {
+                DB::table('core.company_settings')->insert(array_merge(
+                    ['company_id' => $companyId],
+                    $this->columnExists('core', 'company_settings', 'created_at') ? ['created_at' => now()] : [],
+                    $settingsUpdates
+                ));
+            }
         }
 
         return response()->json([
@@ -4456,14 +4496,23 @@ class AppConfigController extends Controller
         $encPassword = Crypt::encryptString($certPassword);
 
         if ($this->tableExists('core', 'company_settings')) {
-            DB::table('core.company_settings')->updateOrInsert(
-                ['company_id' => $companyId],
-                [
-                    'cert_path'         => $certPath,
-                    'cert_password_enc' => $encPassword,
-                    'updated_at'        => now(),
-                ]
-            );
+            $settingsUpdates = [
+                'cert_path'         => $certPath,
+                'cert_password_enc' => $encPassword,
+                'updated_at'        => now(),
+            ];
+
+            $affectedRows = DB::table('core.company_settings')
+                ->where('company_id', $companyId)
+                ->update($settingsUpdates);
+
+            if ($affectedRows === 0) {
+                DB::table('core.company_settings')->insert(array_merge(
+                    ['company_id' => $companyId],
+                    $this->columnExists('core', 'company_settings', 'created_at') ? ['created_at' => now()] : [],
+                    $settingsUpdates
+                ));
+            }
         }
 
         $company = DB::table('core.companies')

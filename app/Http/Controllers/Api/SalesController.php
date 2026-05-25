@@ -3814,22 +3814,22 @@ class SalesController extends Controller
         $logoMaxHeight = $isA4 ? '130px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
-        $bodyFontSize = $isA4 ? '11px' : '13px';
+        $bodyFontSize = $isA4 ? '10px' : '13px';
         $sheetPadding = $isA4 ? '2mm' : '3mm';
-        $titleFontSize = $isA4 ? '13px' : '15px';
-        $docNoFontSize = $isA4 ? '14px' : '16px';
-        $metaFontSize = $isA4 ? '10px' : '12px';
-        $infoFontSize = $isA4 ? '10px' : '12px';
+        $titleFontSize = $isA4 ? '12px' : '15px';
+        $docNoFontSize = $isA4 ? '13px' : '16px';
+        $metaFontSize = $isA4 ? '9px' : '12px';
+        $infoFontSize = $isA4 ? '9px' : '12px';
         $itemCodeFontSize = $isA4 ? '9px' : '10px';
-        $itemDescFontSize = $isA4 ? '10px' : '12px';
-        $itemUnitFontSize = $isA4 ? '10px' : '12px';
-        $itemTotalFontSize = $isA4 ? '10px' : '13px';
-        $summaryFontSize = $isA4 ? '10px' : '12px';
-        $totalFontSize = $isA4 ? '13px' : '15px';
-        $itemDescPaddingTop = $isA4 ? '0.6mm' : '1.1mm';
+        $itemDescFontSize = $isA4 ? '9px' : '12px';
+        $itemUnitFontSize = $isA4 ? '9px' : '12px';
+        $itemTotalFontSize = $isA4 ? '9px' : '13px';
+        $summaryFontSize = $isA4 ? '9px' : '12px';
+        $totalFontSize = $isA4 ? '12px' : '15px';
+        $itemDescPaddingTop = $isA4 ? '0.45mm' : '1.1mm';
         $itemDescPaddingBottom = $isA4 ? '0.2mm' : '0.4mm';
         $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
-        $itemPricePaddingBottom = $isA4 ? '0.6mm' : '1.1mm';
+        $itemPricePaddingBottom = $isA4 ? '0.45mm' : '1.1mm';
 
         return <<<HTML
 <!doctype html>
@@ -3868,6 +3868,7 @@ class SalesController extends Controller
     .summary-row { display: flex; justify-content: space-between; font-size: {$summaryFontSize}; margin: 0.4mm 0; }
     .summary-label, .summary-value { font-weight: 900; }
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 0.8mm; padding-top: 0.7mm; font-size: {$totalFontSize}; font-weight: 900; }
+    .summary-words { margin-top: 0.6mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.2; text-align: left; word-break: break-word; }
     .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
     .company-footer-bank { margin: 0.5mm 0; font-size: 12px; font-weight: 900; }
@@ -3911,7 +3912,7 @@ class SalesController extends Controller
     <div class="summary">
       <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
-            <div class="summary-row"><span class="summary-label">SON</span><span class="summary-value">{$totalInWords}</span></div>
+            <div class="summary-words">SON: {$totalInWords}</div>
     </div>
 
     <div class="footer">
@@ -3954,7 +3955,7 @@ HTML;
         $decimalText = str_pad((string) $decimalPart, 2, '0', STR_PAD_LEFT);
         $words = strtoupper($this->numberToSpanishWords($integerPart));
 
-        return 'SON: ' . $words . ' CON ' . $decimalText . '/100 ' . $currencyName;
+        return $words . ' CON ' . $decimalText . '/100 ' . $currencyName;
     }
 
     private function numberToSpanishWords(int $number): string

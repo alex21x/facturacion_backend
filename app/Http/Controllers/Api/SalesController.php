@@ -3580,6 +3580,212 @@ class SalesController extends Controller
         ]);
     }
 
+    public function printableCommercialDocument(Request $request, int $id)
+    {
+        $jsonResponse = $this->showCommercialDocument($request, $id);
+        if ($jsonResponse->getStatusCode() >= 400) {
+            return $jsonResponse;
+        }
+
+        $payload = $jsonResponse->getData(true);
+        $doc = $payload['data'] ?? null;
+        if (!is_array($doc)) {
+            return response()->json([
+                'message' => 'No se pudo generar la impresion del documento',
+            ], 422);
+        }
+
+        $format = in_array($request->query('format'), ['ticket', 'a4'], true)
+            ? (string) $request->query('format')
+            : 'ticket';
+
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
+        return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
+    {
+        $title = $this->escapeHtml((string) (($doc['company']['tradeName'] ?? $doc['company']['legalName'] ?? 'SISTEMA FACTURACION')));
+        $taxId = $this->escapeHtml((string) ($doc['company']['taxId'] ?? ''));
+        $address = $this->escapeHtml((string) ($doc['company']['address'] ?? ''));
+        $phone = $this->escapeHtml((string) ($doc['company']['phone'] ?? ''));
+        $email = $this->escapeHtml((string) ($doc['company']['email'] ?? ''));
+        $docKind = $this->escapeHtml((string) ($doc['documentKind'] ?? 'DOCUMENTO'));
+        $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
+        $number = str_pad((string) ((int) ($doc['number'] ?? 0)), 6, '0', STR_PAD_LEFT);
+        $issueAt = $this->escapeHtml($this->formatIssueDateTime((string) ($doc['issueDate'] ?? '')));
+        $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
+        $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
+        $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+        $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
+        $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? 'S/'));
+        $total = $currency . ' ' . $this->formatAmount((float) ($doc['grandTotal'] ?? 0));
+        $fileName = $this->escapeHtml(trim((string) ($doc['series'] ?? '')) . '-' . trim((string) ($doc['number'] ?? '')) . '.pdf');
+        $taxIdRow = $taxId !== '' ? '<div class="meta">RUC: ' . $taxId . '</div>' : '';
+        $addressRow = $address !== '' ? '<div class="meta">' . $address . '</div>' : '';
+        $phoneRow = $phone !== '' ? '<div class="meta">TEL: ' . $phone . '</div>' : '';
+        $emailRow = $email !== '' ? '<div class="meta">EMAIL: ' . $email . '</div>' : '';
+
+        $items = is_array($doc['items'] ?? null) ? $doc['items'] : [];
+        $itemRows = '';
+        foreach ($items as $item) {
+            $description = $this->escapeHtml((string) ($item['description'] ?? '-'));
+            $qty = $this->formatAmount((float) ($item['qty'] ?? 0));
+            $unitPrice = $this->formatAmount((float) ($item['unitPrice'] ?? 0));
+            $lineTotal = $this->formatAmount((float) ($item['lineTotal'] ?? 0));
+
+            $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$description}</td></tr>\n";
+            $itemRows .= "                <tr class=\"item-price-row\"><td><div class=\"item-price-wrap\"><span class=\"item-price-unit\">{$qty} x {$currency} {$unitPrice}</span><span class=\"item-price-total\">{$currency} {$lineTotal}</span></div></td></tr>\n";
+        }
+
+        if ($itemRows === '') {
+            $itemRows = '<tr><td style="text-align:center;font-weight:800">Sin items</td></tr>';
+        }
+
+        $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
+        $logoUrl = $this->escapeHtml((string) ($company['logoUrl'] ?? ''));
+        $logoHtml = $logoUrl !== '' ? '<img src="' . $logoUrl . '" alt="Logo" class="header-logo" />' : '';
+        $bankAccounts = is_array($company['bankAccounts'] ?? null) ? $company['bankAccounts'] : [];
+        $bankRows = '';
+        foreach ($bankAccounts as $bank) {
+            if (!is_array($bank)) {
+                continue;
+            }
+            $bankName = $this->escapeHtml((string) ($bank['bank_name'] ?? ''));
+            $account = $this->escapeHtml((string) ($bank['account_number'] ?? ''));
+            $cci = $this->escapeHtml((string) ($bank['cci'] ?? ''));
+            $holder = $this->escapeHtml((string) ($bank['account_holder'] ?? ''));
+
+            if ($bankName === '' && $account === '' && $cci === '' && $holder === '') {
+                continue;
+            }
+
+            $bankRows .= '<div class="company-footer-bank">';
+            if ($bankName !== '') {
+                $bankRows .= '<div><strong>' . $bankName . '</strong></div>';
+            }
+            if ($account !== '') {
+                $bankRows .= '<div>Cuenta: ' . $account . '</div>';
+            }
+            if ($cci !== '') {
+                $bankRows .= '<div>CCI: ' . $cci . '</div>';
+            }
+            if ($holder !== '') {
+                $bankRows .= '<div>Titular: ' . $holder . '</div>';
+            }
+            $bankRows .= '</div>';
+        }
+
+        $banksSection = $bankRows !== ''
+            ? '<div class="company-footer-banks"><div class="company-footer-title">Bancos</div>' . $bankRows . '</div>'
+            : '';
+
+        $sheetWidth = $format === 'a4' ? '210mm' : '80mm';
+        $pageSize = $format === 'a4' ? 'A4 portrait' : '80mm auto';
+        $logoMaxWidth = $format === 'a4' ? '145mm' : '74mm';
+        $logoMaxHeight = $format === 'a4' ? '55mm' : '40mm';
+
+        return <<<HTML
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{$fileName}</title>
+  <style>
+    @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: 13px; line-height: 1.3; font-weight: 800; }
+    .sheet { width: {$sheetWidth}; margin: 0 auto; padding: 3mm; }
+    .header { text-align: center; margin-bottom: 2mm; }
+    .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
+    .title { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .docno { font-size: 16px; font-weight: 900; letter-spacing: 0.6px; margin-bottom: 0.8mm; }
+    .meta { font-size: 12px; font-weight: 900; margin: 0.3mm 0; }
+    .divider { border-top: 1px dashed #000; margin: 1.6mm 0; }
+    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: 12px; margin: 0.5mm 0; }
+    .info-label { font-weight: 900; }
+    .info-value { font-weight: 900; text-align: right; flex: 1; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 0; }
+    .item-desc-row td { padding-top: 1.1mm; padding-bottom: 0.4mm; }
+    .item-desc { font-size: 12px; line-height: 1.25; font-weight: 900; }
+    .item-price-row td { padding-top: 0.1mm; padding-bottom: 1.1mm; }
+    .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
+    .item-price-unit { font-size: 12px; font-weight: 900; }
+    .item-price-total { font-size: 13px; font-weight: 900; white-space: nowrap; }
+    .summary { border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1.2mm; }
+    .summary-row { display: flex; justify-content: space-between; font-size: 12px; margin: 0.6mm 0; }
+    .summary-label, .summary-value { font-weight: 900; }
+    .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1mm; font-size: 15px; font-weight: 900; }
+    .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
+    .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
+    .company-footer-bank { margin: 0.5mm 0; font-size: 11px; font-weight: 900; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+            {$logoHtml}
+      <div class="title">{$title}</div>
+            {$taxIdRow}
+            {$addressRow}
+            {$phoneRow}
+            {$emailRow}
+      <div class="title">{$docKind}</div>
+      <div class="docno">{$series}-{$number}</div>
+      <div class="meta">{$issueAt}</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
+    <div class="info-row"><div class="info-label">DOC:</div><div class="info-value">{$customerDoc}</div></div>
+    <div class="info-row"><div class="info-label">DIRECCION:</div><div class="info-value">{$customerAddress}</div></div>
+
+    <div class="divider"></div>
+
+    <table><tbody>
+{$itemRows}    </tbody></table>
+
+    <div class="summary">
+      <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
+      <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
+    </div>
+
+    <div class="footer">
+      {$banksSection}
+      <div>Gracias por su compra</div>
+    </div>
+  </div>
+</body>
+</html>
+HTML;
+    }
+
+    private function formatIssueDateTime(string $raw): string
+    {
+        $value = trim($raw);
+        if ($value === '') {
+            return '-';
+        }
+
+        try {
+            return Carbon::parse($value)->setTimezone('America/Lima')->format('d/m/Y H:i:s');
+        } catch (\Throwable $e) {
+            return $value;
+        }
+    }
+
+    private function formatAmount(float $value): string
+    {
+        return number_format($value, 2, '.', '');
+    }
+
+    private function escapeHtml(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    }
+
     private function registerCashIncomeFromDocument(
         int $companyId,
         ?int $branchId,

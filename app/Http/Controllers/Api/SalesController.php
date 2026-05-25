@@ -3688,7 +3688,16 @@ class SalesController extends Controller
         $companyDescriptionHtml = $companyDescription !== ''
             ? '<div class="company-description">' . $this->escapeHtml($companyDescription) . '</div>'
             : '';
-        $docKind = $this->escapeHtml((string) ($doc['documentKind'] ?? 'DOCUMENTO'));
+        $docKindRaw = strtoupper(trim((string) ($doc['documentKind'] ?? 'DOCUMENTO')));
+        $docKindLabel = [
+            'INVOICE' => 'FACTURA ELECTRONICA',
+            'RECEIPT' => 'BOLETA DE VENTA ELECTRONICA',
+            'CREDIT_NOTE' => 'NOTA DE CREDITO',
+            'DEBIT_NOTE' => 'NOTA DE DEBITO',
+            'SALES_ORDER' => 'PEDIDO DE VENTA',
+            'QUOTATION' => 'COTIZACION',
+        ][$docKindRaw] ?? ($docKindRaw !== '' ? $docKindRaw : 'DOCUMENTO');
+        $docKind = $this->escapeHtml($docKindLabel);
         $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
         $number = str_pad((string) ((int) ($doc['number'] ?? 0)), 6, '0', STR_PAD_LEFT);
         $issueAt = $this->escapeHtml($this->formatIssueDateTime((string) ($doc['issueDate'] ?? '')));
@@ -3843,18 +3852,18 @@ class SalesController extends Controller
         $logoMaxHeight = $isA4 ? '130px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
-        $bodyFontSize = $isA4 ? '10px' : '13px';
+        $bodyFontSize = $isA4 ? '11px' : '13px';
         $sheetPadding = $isA4 ? '2mm' : '3mm';
-        $titleFontSize = $isA4 ? '12px' : '15px';
-        $docNoFontSize = $isA4 ? '13px' : '16px';
-        $metaFontSize = $isA4 ? '9px' : '12px';
-        $infoFontSize = $isA4 ? '9px' : '12px';
-        $itemCodeFontSize = $isA4 ? '9px' : '10px';
-        $itemDescFontSize = $isA4 ? '9px' : '12px';
-        $itemUnitFontSize = $isA4 ? '9px' : '12px';
-        $itemTotalFontSize = $isA4 ? '9px' : '13px';
-        $summaryFontSize = $isA4 ? '9px' : '12px';
-        $totalFontSize = $isA4 ? '12px' : '15px';
+        $titleFontSize = $isA4 ? '14px' : '15px';
+        $docNoFontSize = $isA4 ? '15px' : '16px';
+        $metaFontSize = $isA4 ? '11px' : '12px';
+        $infoFontSize = $isA4 ? '11px' : '12px';
+        $itemCodeFontSize = $isA4 ? '10px' : '10px';
+        $itemDescFontSize = $isA4 ? '11px' : '12px';
+        $itemUnitFontSize = $isA4 ? '11px' : '12px';
+        $itemTotalFontSize = $isA4 ? '11px' : '13px';
+        $summaryFontSize = $isA4 ? '11px' : '12px';
+        $totalFontSize = $isA4 ? '14px' : '15px';
         $itemDescPaddingTop = $isA4 ? '0.45mm' : '1.1mm';
         $itemDescPaddingBottom = $isA4 ? '0.2mm' : '0.4mm';
         $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
@@ -3890,7 +3899,7 @@ class SalesController extends Controller
     .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
     .header--a4 .header-logo { width: 170px !important; min-width: 170px; max-width: 170px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
-    .company-description { font-size: 11px; font-weight: 800; line-height: 1.2; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
+    .company-description { font-size: 12px; font-weight: 800; line-height: 1.25; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
     .meta { font-size: {$metaFontSize}; font-weight: 900; margin: 0.2mm 0; }
     .divider { border-top: 1px dashed #000; margin: 1.6mm 0; }
@@ -3899,8 +3908,8 @@ class SalesController extends Controller
     .info-value { font-weight: 900; text-align: right; flex: 1; }
     table { width: 100%; border-collapse: collapse; }
     .items-a4 { border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
-    .items-a4 thead th { background: #60a5fa; color: #0f172a; font-size: 9px; text-transform: uppercase; letter-spacing: 0.2px; padding: 4px 5px; border-bottom: 1px solid #1f2937; }
-    .items-a4 tbody td { border-bottom: 1px solid #e2e8f0; font-size: 9px; padding: 4px 5px; vertical-align: top; }
+    .items-a4 thead th { background: #60a5fa; color: #0f172a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.2px; padding: 5px 6px; border-bottom: 1px solid #1f2937; }
+    .items-a4 tbody td { border-bottom: 1px solid #e2e8f0; font-size: 10px; padding: 5px 6px; vertical-align: top; }
     .items-a4-row:last-child td { border-bottom: none; }
     .ta-r { text-align: right; }
     .ta-c { text-align: center; }
@@ -3961,9 +3970,9 @@ class SalesController extends Controller
 
     <div class="summary">
             {$a4SummaryRows}
-      <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
             <div class="summary-words">SON: {$totalInWords}</div>
+        <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
     </div>
 
     <div class="footer">

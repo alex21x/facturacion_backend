@@ -264,11 +264,28 @@ class SalesController extends Controller
         }
         $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
-        $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
         $extraData = [];
         if ($settings && isset($settings->extra_data)) {
             $decodedExtra = json_decode((string) $settings->extra_data, true);
             $extraData = is_array($decodedExtra) ? $decodedExtra : [];
+        }
+
+        $logoPath = $settings->logo_path ?? null;
+        $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
+        $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
+        $logoUrl = $logoExistsInStorage
+            ? $this->resolveCompanyLogoUrl($logoPath)
+            : null;
+
+        if (($logoUrl === null || $logoUrl === '') && isset($extraData['company_logo_data_uri'])) {
+            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
+            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
+                $logoUrl = $candidateDataUri;
+            }
+        }
+
+        if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
+            $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
         }
 
         $bankAccounts = [];
@@ -3801,7 +3818,7 @@ class SalesController extends Controller
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1mm; font-size: 15px; font-weight: 900; }
     .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
-    .company-footer-bank { margin: 0.5mm 0; font-size: 11px; font-weight: 900; }
+    .company-footer-bank { margin: 0.5mm 0; font-size: 12px; font-weight: 900; }
         .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }
         .company-footer-logos--a4 { justify-content: flex-start; margin-top: 1.4mm; }
         .paybrand { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 1mm 2mm; height: 10mm; display: inline-flex; align-items: center; justify-content: center; }
@@ -5868,6 +5885,39 @@ HTML;
         }
 
         return url('/storage/' . $normalized);
+    }
+
+    private function normalizeCompanyLogoStoragePath($logoPath): ?string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        $normalized = str_replace('\\', '/', $raw);
+        if (preg_match('/^https?:\/\//i', $normalized) === 1) {
+            $pathFromUrl = parse_url($normalized, PHP_URL_PATH);
+            $normalized = $pathFromUrl !== null ? (string) $pathFromUrl : $normalized;
+        }
+
+        $normalized = ltrim($normalized, '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+        if (str_starts_with($normalized, 'public/')) {
+            $normalized = ltrim(substr($normalized, strlen('public/')), '/');
+        }
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function publicStorageLogoExists(string $normalizedPath): bool
+    {
+        try {
+            return \Storage::disk('public')->exists($normalizedPath);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }
 

@@ -3848,28 +3848,28 @@ class SalesController extends Controller
 
         $sheetWidth = $isA4 ? '210mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $isA4 ? '170px' : '74mm';
-        $logoMaxHeight = $isA4 ? '130px' : '40mm';
+        $logoMaxWidth = $isA4 ? '140px' : '74mm';
+        $logoMaxHeight = $isA4 ? '90px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
-        $bodyFontSize = $isA4 ? '11px' : '13px';
-        $sheetPadding = $isA4 ? '2mm' : '3mm';
-        $titleFontSize = $isA4 ? '14px' : '15px';
-        $docNoFontSize = $isA4 ? '15px' : '16px';
-        $metaFontSize = $isA4 ? '11px' : '12px';
-        $infoFontSize = $isA4 ? '11px' : '12px';
-        $itemCodeFontSize = $isA4 ? '10px' : '10px';
-        $itemDescFontSize = $isA4 ? '11px' : '12px';
-        $itemUnitFontSize = $isA4 ? '11px' : '12px';
-        $itemTotalFontSize = $isA4 ? '11px' : '13px';
-        $summaryFontSize = $isA4 ? '11px' : '12px';
-        $totalFontSize = $isA4 ? '14px' : '15px';
-        $itemDescPaddingTop = $isA4 ? '0.45mm' : '1.1mm';
-        $itemDescPaddingBottom = $isA4 ? '0.2mm' : '0.4mm';
+        $bodyFontSize = $isA4 ? '10pt' : '13px';
+        $sheetPadding = $isA4 ? '6mm' : '3mm';
+        $titleFontSize = $isA4 ? '13pt' : '15px';
+        $docNoFontSize = $isA4 ? '14pt' : '16px';
+        $metaFontSize = $isA4 ? '9pt' : '12px';
+        $infoFontSize = $isA4 ? '9pt' : '12px';
+        $itemCodeFontSize = $isA4 ? '8pt' : '10px';
+        $itemDescFontSize = $isA4 ? '9pt' : '12px';
+        $itemUnitFontSize = $isA4 ? '9pt' : '12px';
+        $itemTotalFontSize = $isA4 ? '9pt' : '13px';
+        $summaryFontSize = $isA4 ? '9pt' : '12px';
+        $totalFontSize = $isA4 ? '12pt' : '15px';
+        $itemDescPaddingTop = $isA4 ? '1mm' : '1.1mm';
+        $itemDescPaddingBottom = $isA4 ? '0.5mm' : '0.4mm';
         $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
-        $itemPricePaddingBottom = $isA4 ? '0.45mm' : '1.1mm';
+        $itemPricePaddingBottom = $isA4 ? '1mm' : '1.1mm';
         $a4ItemTableHead = $isA4
-            ? '<thead><tr><th style="width:28px">#</th><th style="width:86px">CODIGO</th><th style="width:70px">CANT.</th><th style="width:76px">UNID.</th><th>DESCRIPCION</th><th style="width:88px">VALOR U.</th><th style="width:96px">VALOR TOTAL</th></tr></thead>'
+            ? '<thead><tr><th style="width:7mm">#</th><th style="width:22mm">CODIGO</th><th style="width:16mm">CANT.</th><th style="width:14mm">UNID.</th><th>DESCRIPCION</th><th style="width:22mm">VALOR U.</th><th style="width:24mm">VALOR TOTAL</th></tr></thead>'
             : '';
         $itemsTableClass = $isA4 ? 'items-a4' : '';
         $a4SummaryRows = $isA4
@@ -3882,6 +3882,42 @@ class SalesController extends Controller
                     : '')
             : '';
 
+        $a4HeaderHtml = $isA4 ? <<<A4HEAD
+<div class="header--a4">
+  <div class="brand-col">
+    {$logoHtml}
+    <div class="brand-name">{$title}</div>
+    {$companyDescriptionHtml}
+    {$taxIdRow}
+    {$addressRow}
+    {$phoneRow}
+    {$emailRow}
+  </div>
+  <div class="voucher-box">
+    <div class="voucher-ruc">RUC {$taxId}</div>
+    <div class="voucher-type">{$docKind}</div>
+    <div class="voucher-number">{$series}-{$number}</div>
+    <div class="voucher-date">{$issueAt}</div>
+  </div>
+</div>
+A4HEAD
+            : <<<TICKETHEAD
+<div class="{$headerClass}">
+  {$logoHtml}
+  <div class="{$headerCopyClass}">
+    <div class="title">{$title}</div>
+    {$companyDescriptionHtml}
+    {$taxIdRow}
+    {$addressRow}
+    {$phoneRow}
+    {$emailRow}
+    <div class="title">{$docKind}</div>
+    <div class="docno">{$series}-{$number}</div>
+    <div class="meta">{$issueAt}</div>
+  </div>
+</div>
+TICKETHEAD;
+
         return <<<HTML
 <!doctype html>
 <html>
@@ -3891,79 +3927,76 @@ class SalesController extends Controller
   <style>
     @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.2; font-weight: 800; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: 'Arial', 'Helvetica', sans-serif; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.3; font-weight: 700; }
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
+    /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
+    .header--a4 { display: grid; grid-template-columns: 1fr 54mm; gap: 4mm; align-items: stretch; margin-bottom: 3mm; }
+    .brand-col { display: flex; flex-direction: column; gap: 0.5mm; }
+    .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin-bottom: 1.5mm; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; }
+    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.5mm; }
+    .company-description { font-size: 9pt; font-weight: 700; color: #374151; }
+    /* ── Fiscal box (right) ── */
+    .voucher-box { border: 2px solid #1e3a8a; border-radius: 6px; padding: 3mm 4mm; text-align: center; background: #f0f4ff; display: flex; flex-direction: column; justify-content: center; gap: 1.5mm; }
+    .voucher-ruc { font-size: 9pt; font-weight: 900; color: #374151; }
+    .voucher-type { font-size: 9pt; font-weight: 900; text-transform: uppercase; border-top: 1px solid #93c5fd; border-bottom: 1px solid #93c5fd; padding: 1.5mm 0; color: #1e3a8a; letter-spacing: 0.2px; }
+    .voucher-number { font-size: 16pt; font-weight: 900; color: #0f172a; letter-spacing: 1px; }
+    .voucher-date { font-size: 8pt; color: #374151; }
+    /* ── Ticket header ── */
     .header { text-align: center; margin-bottom: 2mm; }
-    .header--a4 { display: grid; grid-template-columns: 180px 1fr; gap: 10px; text-align: left; align-items: flex-start; }
     .header-copy--a4 { text-align: left; }
-    .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
-    .header--a4 .header-logo { width: 170px !important; min-width: 170px; max-width: 170px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
-    .company-description { font-size: 12px; font-weight: 800; line-height: 1.25; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
-    .meta { font-size: {$metaFontSize}; font-weight: 900; margin: 0.2mm 0; }
-    .divider { border-top: 1px dashed #000; margin: 1.6mm 0; }
-    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.35mm 0; }
-    .info-label { font-weight: 900; }
-    .info-value { font-weight: 900; text-align: right; flex: 1; }
+    .meta { font-size: {$metaFontSize}; font-weight: 800; margin: 0.2mm 0; }
+    .divider { border-top: 1px dashed #000; margin: 2mm 0; }
+    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.5mm 0; }
+    .info-label { font-weight: 900; flex-shrink: 0; }
+    .info-value { font-weight: 800; text-align: right; flex: 1; }
     table { width: 100%; border-collapse: collapse; }
-    .items-a4 { border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
-    .items-a4 thead th { background: #60a5fa; color: #0f172a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.2px; padding: 5px 6px; border-bottom: 1px solid #1f2937; }
-    .items-a4 tbody td { border-bottom: 1px solid #e2e8f0; font-size: 10px; padding: 5px 6px; vertical-align: top; }
+    .items-a4 { border: 1px solid #cbd5e1; overflow: hidden; }
+    .items-a4 thead th { background: #1e3a8a; color: #fff; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.2px; padding: 1.5mm 2mm; border-bottom: 1px solid #1e3a8a; font-weight: 700; }
+    .items-a4 tbody td { border-bottom: 1px solid #e2e8f0; font-size: 8.5pt; padding: 1.5mm 2mm; vertical-align: top; }
     .items-a4-row:last-child td { border-bottom: none; }
     .ta-r { text-align: right; }
     .ta-c { text-align: center; }
     td { padding: 0; }
     .item-desc-row td { padding-top: {$itemDescPaddingTop}; padding-bottom: {$itemDescPaddingBottom}; }
-    .item-desc { font-size: {$itemDescFontSize}; line-height: 1.15; font-weight: 900; }
-    .item-code { font-size: {$itemCodeFontSize}; font-weight: 900; margin-bottom: 0.2mm; letter-spacing: 0.1px; }
+    .item-desc { font-size: {$itemDescFontSize}; line-height: 1.2; font-weight: 900; }
+    .item-code { font-size: {$itemCodeFontSize}; font-weight: 800; margin-bottom: 0.2mm; }
     .item-price-row td { padding-top: {$itemPricePaddingTop}; padding-bottom: {$itemPricePaddingBottom}; }
     .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
     .item-price-unit { font-size: {$itemUnitFontSize}; font-weight: 900; }
     .item-price-total { font-size: {$itemTotalFontSize}; font-weight: 900; white-space: nowrap; }
-    .summary { border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1.2mm; }
-    .summary-row { display: flex; justify-content: space-between; font-size: {$summaryFontSize}; margin: 0.4mm 0; }
+    .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; }
+    .summary-row { display: flex; justify-content: space-between; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
     .summary-label, .summary-value { font-weight: 900; }
-    .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 0.8mm; padding-top: 0.7mm; font-size: {$totalFontSize}; font-weight: 900; }
-    .summary-words { margin-top: 0.6mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.2; text-align: left; word-break: break-word; }
-    .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
-    .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
-    .company-footer-bank { margin: 0.5mm 0; font-size: 12px; font-weight: 900; }
-        .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }
-        .company-footer-logos--a4 { justify-content: flex-start; margin-top: 1.4mm; }
-        .paybrand { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 1mm 2mm; height: 10mm; display: inline-flex; align-items: center; justify-content: center; }
-        .paybrand img { height: 7mm; width: auto; display: block; }
-        .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
-        .company-footer-logos--ticket .paybrand img { height: 6mm; }
+    .total-row { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 1mm; padding-top: 1mm; font-size: {$totalFontSize}; font-weight: 900; background: #f0f4ff; padding-left: 2mm; padding-right: 2mm; border-radius: 4px; }
+    .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
+    .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
+    .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 9pt; font-weight: 900; }
+    .company-footer-bank { margin: 0.5mm 0; font-size: 9pt; font-weight: 700; }
+    .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }
+    .company-footer-logos--a4 { justify-content: flex-start; margin-top: 1.4mm; }
+    .paybrand { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 1mm 2mm; height: 10mm; display: inline-flex; align-items: center; justify-content: center; }
+    .paybrand img { height: 7mm; width: auto; display: block; }
+    .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
+    .company-footer-logos--ticket .paybrand img { height: 6mm; }
   </style>
 </head>
 <body>
   <div class="sheet">
-        <div class="{$headerClass}">
-            {$logoHtml}
-            <div class="{$headerCopyClass}">
-      <div class="title">{$title}</div>
-            {$companyDescriptionHtml}
-            {$taxIdRow}
-            {$addressRow}
-            {$phoneRow}
-            {$emailRow}
-      <div class="title">{$docKind}</div>
-      <div class="docno">{$series}-{$number}</div>
-      <div class="meta">{$issueAt}</div>
-            </div>
-    </div>
+    {$a4HeaderHtml}
 
     <div class="divider"></div>
 
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
-    <div class="info-row"><div class="info-label">DOC:</div><div class="info-value">{$customerDoc}</div></div>
-    <div class="info-row"><div class="info-label">DIRECCION:</div><div class="info-value">{$customerAddress}</div></div>
+    <div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div>
+    <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
     {$vehicleRow}
 
     <div class="divider"></div>
 
-        <table class="{$itemsTableClass}">
+    <table class="{$itemsTableClass}">
 {$a4ItemTableHead}
 <tbody>
 {$itemRows}    </tbody></table>

@@ -3466,9 +3466,23 @@ class SalesController extends Controller
                 }
             }
 
+            $productCode = trim((string) ($item->product_code ?? ''));
+            if ($productCode === '' && is_array($itemMetadata)) {
+                $productCode = trim((string) (
+                    $itemMetadata['product_code']
+                    ?? $itemMetadata['productCode']
+                    ?? $itemMetadata['code']
+                    ?? ''
+                ));
+            }
+            if ($productCode === '' && $item->product_id !== null) {
+                $productCode = 'ID-' . (int) $item->product_id;
+            }
+
             return [
                 'lineNo' => (int) $item->line_no,
                 'productId' => $item->product_id !== null ? (int) $item->product_id : null,
+                'productCode' => $productCode !== '' ? $productCode : null,
                 'unitId' => $item->unit_id !== null ? (int) $item->unit_id : null,
                 'priceTierId' => $item->price_tier_id !== null ? (int) $item->price_tier_id : null,
                 'qty' => (float) $item->qty,
@@ -3617,6 +3631,7 @@ class SalesController extends Controller
 
     private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
     {
+        $isA4 = $format === 'a4';
         $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
         $companyTradeName = trim((string) ($company['trade_name'] ?? $company['tradeName'] ?? ''));
         $companyLegalName = trim((string) ($company['legal_name'] ?? $company['legalName'] ?? ''));
@@ -3653,8 +3668,23 @@ class SalesController extends Controller
             $qty = $this->formatAmount((float) ($item['qty'] ?? 0));
             $unitPrice = $this->formatAmount((float) ($item['unitPrice'] ?? 0));
             $lineTotal = $this->formatAmount((float) ($item['lineTotal'] ?? 0));
+            $itemMetadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+            $productCodeRaw = trim((string) (
+                $item['productCode']
+                ?? $item['product_code']
+                ?? $itemMetadata['product_code']
+                ?? $itemMetadata['productCode']
+                ?? $itemMetadata['code']
+                ?? ''
+            ));
+            if ($productCodeRaw === '' && !empty($item['productId'])) {
+                $productCodeRaw = 'ID-' . (int) $item['productId'];
+            }
+            $itemCodeHtml = $productCodeRaw !== ''
+                ? '<div class="item-code">COD: ' . $this->escapeHtml($productCodeRaw) . '</div>'
+                : '';
 
-            $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$description}</td></tr>\n";
+            $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$itemCodeHtml}{$description}</td></tr>\n";
             $itemRows .= "                <tr class=\"item-price-row\"><td><div class=\"item-price-wrap\"><span class=\"item-price-unit\">{$qty} x {$currency} {$unitPrice}</span><span class=\"item-price-total\">{$currency} {$lineTotal}</span></div></td></tr>\n";
         }
 
@@ -3701,10 +3731,12 @@ class SalesController extends Controller
             ? '<div class="company-footer-banks"><div class="company-footer-title">Bancos</div>' . $bankRows . '</div>'
             : '';
 
-        $sheetWidth = $format === 'a4' ? '210mm' : '80mm';
-        $pageSize = $format === 'a4' ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $format === 'a4' ? '145mm' : '74mm';
-        $logoMaxHeight = $format === 'a4' ? '55mm' : '40mm';
+        $sheetWidth = $isA4 ? '210mm' : '80mm';
+        $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
+        $logoMaxWidth = $isA4 ? '210px' : '74mm';
+        $logoMaxHeight = $isA4 ? '150px' : '40mm';
+        $headerClass = $isA4 ? 'header header--a4' : 'header';
+        $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
 
         return <<<HTML
 <!doctype html>
@@ -3718,7 +3750,10 @@ class SalesController extends Controller
     body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: 13px; line-height: 1.3; font-weight: 800; }
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: 3mm; }
     .header { text-align: center; margin-bottom: 2mm; }
+    .header--a4 { display: grid; grid-template-columns: 220px 1fr; gap: 10px; text-align: left; align-items: flex-start; }
+    .header-copy--a4 { text-align: left; }
     .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
+    .header--a4 .header-logo { width: 210px !important; min-width: 210px; max-width: 210px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
     .title { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 0.8mm; }
     .company-description { font-size: 11px; font-weight: 800; line-height: 1.2; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
     .docno { font-size: 16px; font-weight: 900; letter-spacing: 0.6px; margin-bottom: 0.8mm; }
@@ -3731,6 +3766,7 @@ class SalesController extends Controller
     td { padding: 0; }
     .item-desc-row td { padding-top: 1.1mm; padding-bottom: 0.4mm; }
     .item-desc { font-size: 12px; line-height: 1.25; font-weight: 900; }
+    .item-code { font-size: 10px; font-weight: 900; margin-bottom: 0.35mm; letter-spacing: 0.1px; }
     .item-price-row td { padding-top: 0.1mm; padding-bottom: 1.1mm; }
     .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
     .item-price-unit { font-size: 12px; font-weight: 900; }
@@ -3746,8 +3782,9 @@ class SalesController extends Controller
 </head>
 <body>
   <div class="sheet">
-    <div class="header">
+        <div class="{$headerClass}">
             {$logoHtml}
+            <div class="{$headerCopyClass}">
       <div class="title">{$title}</div>
             {$companyDescriptionHtml}
             {$taxIdRow}
@@ -3757,6 +3794,7 @@ class SalesController extends Controller
       <div class="title">{$docKind}</div>
       <div class="docno">{$series}-{$number}</div>
       <div class="meta">{$issueAt}</div>
+            </div>
     </div>
 
     <div class="divider"></div>
@@ -4675,6 +4713,13 @@ HTML;
     {
         $visited = [];
         $currentDocumentId = $documentId;
+        $productTableExists = $this->tableExists('inventory.products');
+        $productCodeColumn = null;
+
+        if ($productTableExists) {
+            $productColumns = $this->tableColumns('inventory.products');
+            $productCodeColumn = $this->firstExistingColumn($productColumns, ['code', 'sku', 'internal_code']);
+        }
 
         for ($depth = 0; $depth <= $maxDepth; $depth++) {
             if (in_array($currentDocumentId, $visited, true)) {
@@ -4682,9 +4727,14 @@ HTML;
             }
             $visited[] = $currentDocumentId;
 
-            $items = DB::table('sales.commercial_document_items as i')
-                ->leftJoin('core.units as u', 'u.id', '=', 'i.unit_id')
-                ->select([
+            $query = DB::table('sales.commercial_document_items as i')
+                ->leftJoin('core.units as u', 'u.id', '=', 'i.unit_id');
+
+            if ($productTableExists && $productCodeColumn) {
+                $query->leftJoin('inventory.products as p', 'p.id', '=', 'i.product_id');
+            }
+
+            $selectColumns = [
                     'i.id',
                     'i.line_no',
                     'i.product_id',
@@ -4706,7 +4756,14 @@ HTML;
                     'i.subtotal',
                     'i.total',
                     'i.metadata',
-                ])
+                ];
+
+            if ($productTableExists && $productCodeColumn) {
+                $selectColumns[] = 'p.' . $productCodeColumn . ' as product_code';
+            }
+
+            $items = $query
+                ->select($selectColumns)
                 ->where('i.document_id', $currentDocumentId)
                 ->orderBy('i.line_no')
                 ->get();

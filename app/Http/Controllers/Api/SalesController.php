@@ -272,6 +272,7 @@ class SalesController extends Controller
             'tax_id'     => $company->tax_id ?? null,
             'legal_name' => $company->legal_name ?? '',
             'trade_name' => $company->trade_name ?? null,
+            'company_description' => isset($extraData['company_description']) ? trim((string) $extraData['company_description']) : null,
             'address'    => $settings->address ?? null,
             'phone'      => $settings->phone ?? null,
             'email'      => $companyEmail,
@@ -3605,11 +3606,19 @@ class SalesController extends Controller
 
     private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
     {
-        $title = $this->escapeHtml((string) (($doc['company']['tradeName'] ?? $doc['company']['legalName'] ?? 'SISTEMA FACTURACION')));
-        $taxId = $this->escapeHtml((string) ($doc['company']['taxId'] ?? ''));
-        $address = $this->escapeHtml((string) ($doc['company']['address'] ?? ''));
-        $phone = $this->escapeHtml((string) ($doc['company']['phone'] ?? ''));
-        $email = $this->escapeHtml((string) ($doc['company']['email'] ?? ''));
+        $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
+        $companyTradeName = trim((string) ($company['trade_name'] ?? $company['tradeName'] ?? ''));
+        $companyLegalName = trim((string) ($company['legal_name'] ?? $company['legalName'] ?? ''));
+        $companyDescription = trim((string) ($company['company_description'] ?? $company['companyDescription'] ?? ''));
+
+        $title = $this->escapeHtml($companyTradeName !== '' ? $companyTradeName : ($companyLegalName !== '' ? $companyLegalName : 'SISTEMA FACTURACION'));
+        $taxId = $this->escapeHtml((string) ($company['tax_id'] ?? $company['taxId'] ?? ''));
+        $address = $this->escapeHtml((string) ($company['address'] ?? ''));
+        $phone = $this->escapeHtml((string) ($company['phone'] ?? ''));
+        $email = $this->escapeHtml((string) ($company['email'] ?? ''));
+        $companyDescriptionHtml = $companyDescription !== ''
+            ? '<div class="company-description">' . $this->escapeHtml($companyDescription) . '</div>'
+            : '';
         $docKind = $this->escapeHtml((string) ($doc['documentKind'] ?? 'DOCUMENTO'));
         $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
         $number = str_pad((string) ((int) ($doc['number'] ?? 0)), 6, '0', STR_PAD_LEFT);
@@ -3642,10 +3651,11 @@ class SalesController extends Controller
             $itemRows = '<tr><td style="text-align:center;font-weight:800">Sin items</td></tr>';
         }
 
-        $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
-        $logoUrl = $this->escapeHtml((string) ($company['logoUrl'] ?? ''));
+        $logoUrl = $this->escapeHtml((string) ($company['logo_url'] ?? $company['logoUrl'] ?? ''));
         $logoHtml = $logoUrl !== '' ? '<img src="' . $logoUrl . '" alt="Logo" class="header-logo" />' : '';
-        $bankAccounts = is_array($company['bankAccounts'] ?? null) ? $company['bankAccounts'] : [];
+        $bankAccounts = is_array($company['bank_accounts'] ?? null)
+            ? $company['bank_accounts']
+            : (is_array($company['bankAccounts'] ?? null) ? $company['bankAccounts'] : []);
         $bankRows = '';
         foreach ($bankAccounts as $bank) {
             if (!is_array($bank)) {
@@ -3699,6 +3709,7 @@ class SalesController extends Controller
     .header { text-align: center; margin-bottom: 2mm; }
     .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
     .title { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .company-description { font-size: 11px; font-weight: 800; line-height: 1.2; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
     .docno { font-size: 16px; font-weight: 900; letter-spacing: 0.6px; margin-bottom: 0.8mm; }
     .meta { font-size: 12px; font-weight: 900; margin: 0.3mm 0; }
     .divider { border-top: 1px dashed #000; margin: 1.6mm 0; }
@@ -3727,6 +3738,7 @@ class SalesController extends Controller
     <div class="header">
             {$logoHtml}
       <div class="title">{$title}</div>
+            {$companyDescriptionHtml}
             {$taxIdRow}
             {$addressRow}
             {$phoneRow}

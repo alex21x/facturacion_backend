@@ -4188,6 +4188,9 @@ class AppConfigController extends Controller
             'sunat_secondary_pass' => $extraData['sunat_secondary_pass'] ?? null,
             'client_id'       => $extraData['client_id'] ?? null,
             'client_secret'   => $extraData['client_secret'] ?? null,
+            'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
+                ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
+                : true,
             'logo_url'        => $logoUrl,
             'has_cert'        => $settings && !empty($settings->cert_path),
             'bank_accounts'   => $settings
@@ -4220,9 +4223,12 @@ class AppConfigController extends Controller
             'sunat_secondary_pass' => 'nullable|string|max:100',
             'client_id'     => 'nullable|string|max:200',
             'client_secret' => 'nullable|string|max:500',
+            'show_payment_brand_icons' => 'nullable|boolean',
             'bank_accounts' => 'nullable|array',
             'bank_accounts.*.bank_name'     => 'required_with:bank_accounts.*|string|max:100',
             'bank_accounts.*.account_number'=> 'required_with:bank_accounts.*|string|max:50',
+            'bank_accounts.*.cci'           => 'nullable|string|max:50',
+            'bank_accounts.*.account_holder'=> 'nullable|string|max:120',
             'bank_accounts.*.currency'      => 'nullable|string|max:10',
             'bank_accounts.*.account_type'  => 'nullable|string|max:50',
         ]);
@@ -4272,7 +4278,7 @@ class AppConfigController extends Controller
                 $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
             }
 
-            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret'];
+            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret', 'show_payment_brand_icons'];
             $hasExtraDataUpdates = false;
             foreach ($extraDataFields as $field) {
                 if (array_key_exists($field, $payload)) {
@@ -4295,7 +4301,9 @@ class AppConfigController extends Controller
                         if ($payload[$field] === null || $payload[$field] === '') {
                             unset($currentExtra[$field]);
                         } else {
-                            $currentExtra[$field] = $payload[$field];
+                            $currentExtra[$field] = $field === 'show_payment_brand_icons'
+                                ? (bool) $payload[$field]
+                                : $payload[$field];
                         }
                     }
                 }

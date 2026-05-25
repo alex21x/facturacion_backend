@@ -3814,6 +3814,22 @@ class SalesController extends Controller
         $logoMaxHeight = $isA4 ? '130px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
+        $bodyFontSize = $isA4 ? '11px' : '13px';
+        $sheetPadding = $isA4 ? '2mm' : '3mm';
+        $titleFontSize = $isA4 ? '13px' : '15px';
+        $docNoFontSize = $isA4 ? '14px' : '16px';
+        $metaFontSize = $isA4 ? '10px' : '12px';
+        $infoFontSize = $isA4 ? '10px' : '12px';
+        $itemCodeFontSize = $isA4 ? '9px' : '10px';
+        $itemDescFontSize = $isA4 ? '10px' : '12px';
+        $itemUnitFontSize = $isA4 ? '10px' : '12px';
+        $itemTotalFontSize = $isA4 ? '10px' : '13px';
+        $summaryFontSize = $isA4 ? '10px' : '12px';
+        $totalFontSize = $isA4 ? '13px' : '15px';
+        $itemDescPaddingTop = $isA4 ? '0.6mm' : '1.1mm';
+        $itemDescPaddingBottom = $isA4 ? '0.2mm' : '0.4mm';
+        $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
+        $itemPricePaddingBottom = $isA4 ? '0.6mm' : '1.1mm';
 
         return <<<HTML
 <!doctype html>
@@ -3824,34 +3840,34 @@ class SalesController extends Controller
   <style>
     @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: 13px; line-height: 1.3; font-weight: 800; }
-    .sheet { width: {$sheetWidth}; margin: 0 auto; padding: 3mm; }
+    body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.2; font-weight: 800; }
+    .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     .header { text-align: center; margin-bottom: 2mm; }
     .header--a4 { display: grid; grid-template-columns: 180px 1fr; gap: 10px; text-align: left; align-items: flex-start; }
     .header-copy--a4 { text-align: left; }
     .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
     .header--a4 .header-logo { width: 170px !important; min-width: 170px; max-width: 170px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
-    .title { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
     .company-description { font-size: 11px; font-weight: 800; line-height: 1.2; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
-    .docno { font-size: 16px; font-weight: 900; letter-spacing: 0.6px; margin-bottom: 0.8mm; }
-    .meta { font-size: 12px; font-weight: 900; margin: 0.3mm 0; }
+    .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
+    .meta { font-size: {$metaFontSize}; font-weight: 900; margin: 0.2mm 0; }
     .divider { border-top: 1px dashed #000; margin: 1.6mm 0; }
-    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: 12px; margin: 0.5mm 0; }
+    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.35mm 0; }
     .info-label { font-weight: 900; }
     .info-value { font-weight: 900; text-align: right; flex: 1; }
     table { width: 100%; border-collapse: collapse; }
     td { padding: 0; }
-    .item-desc-row td { padding-top: 1.1mm; padding-bottom: 0.4mm; }
-    .item-desc { font-size: 12px; line-height: 1.25; font-weight: 900; }
-    .item-code { font-size: 10px; font-weight: 900; margin-bottom: 0.35mm; letter-spacing: 0.1px; }
-    .item-price-row td { padding-top: 0.1mm; padding-bottom: 1.1mm; }
+    .item-desc-row td { padding-top: {$itemDescPaddingTop}; padding-bottom: {$itemDescPaddingBottom}; }
+    .item-desc { font-size: {$itemDescFontSize}; line-height: 1.15; font-weight: 900; }
+    .item-code { font-size: {$itemCodeFontSize}; font-weight: 900; margin-bottom: 0.2mm; letter-spacing: 0.1px; }
+    .item-price-row td { padding-top: {$itemPricePaddingTop}; padding-bottom: {$itemPricePaddingBottom}; }
     .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
-    .item-price-unit { font-size: 12px; font-weight: 900; }
-    .item-price-total { font-size: 13px; font-weight: 900; white-space: nowrap; }
+    .item-price-unit { font-size: {$itemUnitFontSize}; font-weight: 900; }
+    .item-price-total { font-size: {$itemTotalFontSize}; font-weight: 900; white-space: nowrap; }
     .summary { border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1.2mm; }
-    .summary-row { display: flex; justify-content: space-between; font-size: 12px; margin: 0.6mm 0; }
+    .summary-row { display: flex; justify-content: space-between; font-size: {$summaryFontSize}; margin: 0.4mm 0; }
     .summary-label, .summary-value { font-weight: 900; }
-    .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 1.2mm; padding-top: 1mm; font-size: 15px; font-weight: 900; }
+    .total-row { display: flex; justify-content: space-between; border-top: 2px solid #000; margin-top: 0.8mm; padding-top: 0.7mm; font-size: {$totalFontSize}; font-weight: 900; }
     .footer { margin-top: 1.6mm; border-top: 1px dashed #000; padding-top: 1.2mm; font-size: 11px; font-weight: 900; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 12px; font-weight: 900; }
     .company-footer-bank { margin: 0.5mm 0; font-size: 12px; font-weight: 900; }

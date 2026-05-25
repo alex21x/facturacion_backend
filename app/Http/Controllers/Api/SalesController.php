@@ -3681,6 +3681,9 @@ class SalesController extends Controller
         $companyDescription = trim((string) ($company['company_description'] ?? $company['companyDescription'] ?? ''));
 
         $title = $this->escapeHtml($companyTradeName !== '' ? $companyTradeName : ($companyLegalName !== '' ? $companyLegalName : 'SISTEMA FACTURACION'));
+        $legalNameHtml = ($companyLegalName !== '' && $companyTradeName !== '' && $companyLegalName !== $companyTradeName)
+            ? '<div class="brand-legal">' . $this->escapeHtml($companyLegalName) . '</div>'
+            : '';
         $taxId = $this->escapeHtml((string) ($company['tax_id'] ?? $company['taxId'] ?? ''));
         $address = $this->escapeHtml((string) ($company['address'] ?? ''));
         $phone = $this->escapeHtml((string) ($company['phone'] ?? ''));
@@ -3884,17 +3887,19 @@ class SalesController extends Controller
 
         $a4HeaderHtml = $isA4 ? <<<A4HEAD
 <div class="header--a4">
-  <div class="brand-col">
-    {$logoHtml}
-    <div class="brand-name">{$title}</div>
-    {$companyDescriptionHtml}
-    {$taxIdRow}
-    {$addressRow}
-    {$phoneRow}
-    {$emailRow}
-  </div>
-  <div class="voucher-box">
-    <div class="voucher-ruc">RUC {$taxId}</div>
+    <div class="logo-col">
+        {$logoHtml}
+    </div>
+    <div class="brand-col">
+        <div class="brand-name">{$title}</div>
+        {$legalNameHtml}
+        {$companyDescriptionHtml}
+        {$addressRow}
+        {$phoneRow}
+        {$emailRow}
+    </div>
+    <div class="voucher-box">
+        <div class="voucher-ruc">R.U.C. {$taxId}</div>
     <div class="voucher-type">{$docKind}</div>
     <div class="voucher-number">{$series}-{$number}</div>
     <div class="voucher-date">{$issueAt}</div>
@@ -3931,17 +3936,20 @@ TICKETHEAD;
     body { font-family: 'Arial', 'Helvetica', sans-serif; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.3; font-weight: 700; }
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
-    .header--a4 { display: grid; grid-template-columns: 1fr 54mm; gap: 4mm; align-items: stretch; margin-bottom: 3mm; }
-    .brand-col { display: flex; flex-direction: column; gap: 0.5mm; }
-    .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin-bottom: 1.5mm; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; }
-    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.5mm; }
-    .company-description { font-size: 9pt; font-weight: 700; color: #374151; }
+    /* ── A4 header: 3 cols (logo | company info | fiscal box) ── */
+    .header--a4 { display: grid; grid-template-columns: auto 1fr 58mm; gap: 4mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
+    .logo-col { display: flex; align-items: center; justify-content: center; padding-right: 2mm; border-right: 1px solid #e2e8f0; }
+    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.4mm; }
+    .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; }
+    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.3mm; }
+    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .company-description { font-size: 8.5pt; font-weight: 700; color: #374151; }
     /* ── Fiscal box (right) ── */
-    .voucher-box { border: 2px solid #1e3a8a; border-radius: 6px; padding: 3mm 4mm; text-align: center; background: #f0f4ff; display: flex; flex-direction: column; justify-content: center; gap: 1.5mm; }
-    .voucher-ruc { font-size: 9pt; font-weight: 900; color: #374151; }
-    .voucher-type { font-size: 9pt; font-weight: 900; text-transform: uppercase; border-top: 1px solid #93c5fd; border-bottom: 1px solid #93c5fd; padding: 1.5mm 0; color: #1e3a8a; letter-spacing: 0.2px; }
-    .voucher-number { font-size: 16pt; font-weight: 900; color: #0f172a; letter-spacing: 1px; }
-    .voucher-date { font-size: 8pt; color: #374151; }
+    .voucher-box { border: 2px solid #1e3a8a; border-radius: 4px; overflow: hidden; text-align: center; }
+    .voucher-ruc { padding: 2.5mm 3mm; font-size: 9.5pt; font-weight: 900; color: #1e3a8a; background: #fff; }
+    .voucher-type { padding: 3mm; background: #1e3a8a; color: #fff; font-size: 9pt; font-weight: 900; text-transform: uppercase; line-height: 1.3; }
+    .voucher-number { padding: 3mm; font-size: 15pt; font-weight: 900; color: #dc2626; letter-spacing: 0.5px; background: #fff; }
+    .voucher-date { font-size: 8pt; color: #374151; padding: 1.5mm 3mm; background: #f8fafc; border-top: 1px solid #bfdbfe; }
     /* ── Ticket header ── */
     .header { text-align: center; margin-bottom: 2mm; }
     .header-copy--a4 { text-align: left; }

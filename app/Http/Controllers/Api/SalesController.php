@@ -270,18 +270,44 @@ class SalesController extends Controller
             $extraData = is_array($decodedExtra) ? $decodedExtra : [];
         }
 
+        $logoDataUri = null;
+        if (isset($extraData['company_logo_data_uri'])) {
+            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
+            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
+                $logoDataUri = $candidateDataUri;
+            }
+        }
+
         $logoPath = $settings->logo_path ?? null;
         $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
         $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
+
+        if ($logoDataUri === null && $logoNormalizedPath && $logoExistsInStorage) {
+            $generatedDataUri = $this->companyLogoDataUriFromPublicStorage($logoNormalizedPath);
+            if ($generatedDataUri !== null) {
+                $logoDataUri = $generatedDataUri;
+                $extraData['company_logo_data_uri'] = $generatedDataUri;
+
+                if ($this->tableExists('core.company_settings')) {
+                    $settingsUpdates = ['extra_data' => json_encode($extraData)];
+                    $companySettingsColumns = $this->tableColumns('core.company_settings');
+                    if (in_array('updated_at', $companySettingsColumns, true)) {
+                        $settingsUpdates['updated_at'] = now();
+                    }
+
+                    DB::table('core.company_settings')
+                        ->where('company_id', $companyId)
+                        ->update($settingsUpdates);
+                }
+            }
+        }
+
         $logoUrl = $logoExistsInStorage
             ? $this->resolveCompanyLogoUrl($logoPath)
             : null;
 
-        if (($logoUrl === null || $logoUrl === '') && isset($extraData['company_logo_data_uri'])) {
-            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
-            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
-                $logoUrl = $candidateDataUri;
-            }
+        if (($logoUrl === null || $logoUrl === '') && $logoDataUri !== null) {
+            $logoUrl = $logoDataUri;
         }
 
         if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
@@ -3669,8 +3695,18 @@ class SalesController extends Controller
         $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
         $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+        $vehiclePlate = trim((string) ($doc['vehiclePlateSnapshot'] ?? ''));
+        $vehicleBrand = trim((string) ($doc['vehicleBrandSnapshot'] ?? ''));
+        $vehicleModel = trim((string) ($doc['vehicleModelSnapshot'] ?? ''));
+        $vehicleParts = array_values(array_filter([$vehiclePlate, $vehicleBrand, $vehicleModel], static fn ($v) => trim((string) $v) !== ''));
+        $vehicleLabel = implode(' ', $vehicleParts);
+        $vehicleRow = $vehicleLabel !== ''
+            ? '<div class="info-row"><div class="info-label">VEHICULO:</div><div class="info-value">' . $this->escapeHtml($vehicleLabel) . '</div></div>'
+            : '';
         $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
         $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? 'S/'));
+        $currencyCode = (string) ($doc['currencyCode'] ?? 'PEN');
+        $totalInWords = $this->escapeHtml($this->amountToSpanishWords((float) ($doc['grandTotal'] ?? 0), $currencyCode));
         $total = $currency . ' ' . $this->formatAmount((float) ($doc['grandTotal'] ?? 0));
         $fileName = $this->escapeHtml(trim((string) ($doc['series'] ?? '')) . '-' . trim((string) ($doc['number'] ?? '')) . '.pdf');
         $taxIdRow = $taxId !== '' ? '<div class="meta">RUC: ' . $taxId . '</div>' : '';
@@ -3849,6 +3885,7 @@ class SalesController extends Controller
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
     <div class="info-row"><div class="info-label">DOC:</div><div class="info-value">{$customerDoc}</div></div>
     <div class="info-row"><div class="info-label">DIRECCION:</div><div class="info-value">{$customerAddress}</div></div>
+    {$vehicleRow}
 
     <div class="divider"></div>
 
@@ -3858,6 +3895,7 @@ class SalesController extends Controller
     <div class="summary">
       <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
+            <div class="summary-row"><span class="summary-label">SON</span><span class="summary-value">{$totalInWords}</span></div>
     </div>
 
     <div class="footer">
@@ -3883,6 +3921,107 @@ HTML;
         } catch (\Throwable $e) {
             return $value;
         }
+    }
+
+    private function amountToSpanishWords(float $amount, string $currencyCode = 'PEN'): string
+    {
+        $safeAmount = max(0, $amount);
+        $integerPart = (int) floor($safeAmount);
+        $decimalPart = (int) round(($safeAmount - $integerPart) * 100);
+
+        if ($decimalPart >= 100) {
+            $integerPart += 1;
+            $decimalPart = 0;
+        }
+
+        $currencyName = strtoupper(trim($currencyCode)) === 'USD' ? 'DOLARES' : 'SOLES';
+        $decimalText = str_pad((string) $decimalPart, 2, '0', STR_PAD_LEFT);
+        $words = strtoupper($this->numberToSpanishWords($integerPart));
+
+        return 'SON: ' . $words . ' CON ' . $decimalText . '/100 ' . $currencyName;
+    }
+
+    private function numberToSpanishWords(int $number): string
+    {
+        if ($number === 0) {
+            return 'cero';
+        }
+
+        $millions = intdiv($number, 1000000);
+        $thousands = intdiv($number % 1000000, 1000);
+        $hundreds = $number % 1000;
+        $parts = [];
+
+        if ($millions > 0) {
+            if ($millions === 1) {
+                $parts[] = 'un millon';
+            } else {
+                $parts[] = $this->numberToSpanishWords($millions) . ' millones';
+            }
+        }
+
+        if ($thousands > 0) {
+            if ($thousands === 1) {
+                $parts[] = 'mil';
+            } else {
+                $parts[] = $this->convertThreeDigitsToSpanishWords($thousands) . ' mil';
+            }
+        }
+
+        if ($hundreds > 0) {
+            $parts[] = $this->convertThreeDigitsToSpanishWords($hundreds);
+        }
+
+        return trim(preg_replace('/\s+/', ' ', implode(' ', $parts)) ?? '');
+    }
+
+    private function convertThreeDigitsToSpanishWords(int $number): string
+    {
+        $units = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
+        $teens = ['diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciseis', 'diecisiete', 'dieciocho', 'diecinueve'];
+        $tens = ['', '', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+        $hundreds = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+
+        if ($number === 0) {
+            return '';
+        }
+
+        if ($number === 100) {
+            return 'cien';
+        }
+
+        $c = intdiv($number, 100);
+        $rest = $number % 100;
+        $parts = [];
+
+        if ($c > 0) {
+            $parts[] = $hundreds[$c];
+        }
+
+        if ($rest >= 10 && $rest <= 19) {
+            $parts[] = $teens[$rest - 10];
+        } else {
+            $d = intdiv($rest, 10);
+            $u = $rest % 10;
+
+            if ($d === 2 && $u > 0) {
+                $parts[] = 'veinti' . $units[$u];
+            } else {
+                if ($d > 0) {
+                    $parts[] = $tens[$d];
+                }
+
+                if ($u > 0) {
+                    if ($d > 2) {
+                        $parts[] = 'y ' . $units[$u];
+                    } elseif ($d === 0) {
+                        $parts[] = $units[$u];
+                    }
+                }
+            }
+        }
+
+        return trim(implode(' ', $parts));
     }
 
     private function formatAmount(float $value): string
@@ -5917,6 +6056,47 @@ HTML;
             return \Storage::disk('public')->exists($normalizedPath);
         } catch (\Throwable $e) {
             return false;
+        }
+    }
+
+    private function companyLogoDataUriFromPublicStorage(string $normalizedPath): ?string
+    {
+        try {
+            if (!\Storage::disk('public')->exists($normalizedPath)) {
+                return null;
+            }
+
+            $absolutePath = \Storage::disk('public')->path($normalizedPath);
+            $binary = @file_get_contents($absolutePath);
+            if ($binary === false || $binary === '') {
+                return null;
+            }
+
+            $extension = strtolower((string) pathinfo($absolutePath, PATHINFO_EXTENSION));
+            $mimeType = match ($extension) {
+                'jpg', 'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                'gif' => 'image/gif',
+                'webp' => 'image/webp',
+                default => '',
+            };
+
+            if ($mimeType === '') {
+                $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+                if ($finfo !== false) {
+                    $detected = @finfo_file($finfo, $absolutePath);
+                    @finfo_close($finfo);
+                    $mimeType = is_string($detected) ? trim($detected) : '';
+                }
+            }
+
+            if ($mimeType === '' || !str_starts_with($mimeType, 'image/')) {
+                $mimeType = 'image/png';
+            }
+
+            return 'data:' . $mimeType . ';base64,' . base64_encode($binary);
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 }

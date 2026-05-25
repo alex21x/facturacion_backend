@@ -4179,15 +4179,40 @@ class AppConfigController extends Controller
         $logoPath = $settings->logo_path ?? null;
         $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
         $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
+
+        $logoDataUri = null;
+        if (isset($extraData['company_logo_data_uri'])) {
+            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
+            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
+                $logoDataUri = $candidateDataUri;
+            }
+        }
+
+        if ($logoDataUri === null && $logoNormalizedPath && $logoExistsInStorage) {
+            $generatedDataUri = $this->companyLogoDataUriFromPublicStorage($logoNormalizedPath);
+            if ($generatedDataUri !== null) {
+                $logoDataUri = $generatedDataUri;
+                $extraData['company_logo_data_uri'] = $generatedDataUri;
+
+                if ($settings && $this->tableExists('core', 'company_settings')) {
+                    $settingsUpdates = ['extra_data' => json_encode($extraData)];
+                    if ($this->columnExists('core', 'company_settings', 'updated_at')) {
+                        $settingsUpdates['updated_at'] = now();
+                    }
+
+                    DB::table('core.company_settings')
+                        ->where('company_id', $companyId)
+                        ->update($settingsUpdates);
+                }
+            }
+        }
+
         $logoUrl = $logoExistsInStorage
             ? $this->resolveCompanyLogoUrl($logoPath)
             : null;
 
-        if (($logoUrl === null || $logoUrl === '') && isset($extraData['company_logo_data_uri'])) {
-            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
-            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
-                $logoUrl = $candidateDataUri;
-            }
+        if (($logoUrl === null || $logoUrl === '') && $logoDataUri !== null) {
+            $logoUrl = $logoDataUri;
         }
 
         if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
@@ -5115,6 +5140,47 @@ class AppConfigController extends Controller
             return Storage::disk('public')->exists($normalizedPath);
         } catch (\Throwable $e) {
             return false;
+        }
+    }
+
+    private function companyLogoDataUriFromPublicStorage(string $normalizedPath): ?string
+    {
+        try {
+            if (!Storage::disk('public')->exists($normalizedPath)) {
+                return null;
+            }
+
+            $absolutePath = Storage::disk('public')->path($normalizedPath);
+            $binary = @file_get_contents($absolutePath);
+            if ($binary === false || $binary === '') {
+                return null;
+            }
+
+            $extension = strtolower((string) pathinfo($absolutePath, PATHINFO_EXTENSION));
+            $mimeType = match ($extension) {
+                'jpg', 'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                'gif' => 'image/gif',
+                'webp' => 'image/webp',
+                default => '',
+            };
+
+            if ($mimeType === '') {
+                $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+                if ($finfo !== false) {
+                    $detected = @finfo_file($finfo, $absolutePath);
+                    @finfo_close($finfo);
+                    $mimeType = is_string($detected) ? trim($detected) : '';
+                }
+            }
+
+            if ($mimeType === '' || !str_starts_with($mimeType, 'image/')) {
+                $mimeType = 'image/png';
+            }
+
+            return 'data:' . $mimeType . ';base64,' . base64_encode($binary);
+        } catch (\Throwable $e) {
+            return null;
         }
     }
 }

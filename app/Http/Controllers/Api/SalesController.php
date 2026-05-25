@@ -3695,9 +3695,25 @@ class SalesController extends Controller
         $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
         $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
-        $vehiclePlate = trim((string) ($doc['vehiclePlateSnapshot'] ?? ''));
-        $vehicleBrand = trim((string) ($doc['vehicleBrandSnapshot'] ?? ''));
-        $vehicleModel = trim((string) ($doc['vehicleModelSnapshot'] ?? ''));
+        $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
+        $vehiclePlate = trim((string) (
+            $doc['vehiclePlateSnapshot']
+            ?? $docMetadata['vehicle_plate']
+            ?? $docMetadata['vehiclePlateSnapshot']
+            ?? ''
+        ));
+        $vehicleBrand = trim((string) (
+            $doc['vehicleBrandSnapshot']
+            ?? $docMetadata['vehicle_brand']
+            ?? $docMetadata['vehicleBrand']
+            ?? ''
+        ));
+        $vehicleModel = trim((string) (
+            $doc['vehicleModelSnapshot']
+            ?? $docMetadata['vehicle_model']
+            ?? $docMetadata['vehicleModel']
+            ?? ''
+        ));
         $vehicleParts = array_values(array_filter([$vehiclePlate, $vehicleBrand, $vehicleModel], static fn ($v) => trim((string) $v) !== ''));
         $vehicleLabel = implode(' ', $vehicleParts);
         $vehicleRow = $vehicleLabel !== ''
@@ -3708,6 +3724,12 @@ class SalesController extends Controller
         $currencyCode = (string) ($doc['currencyCode'] ?? 'PEN');
         $totalInWords = $this->escapeHtml($this->amountToSpanishWords((float) ($doc['grandTotal'] ?? 0), $currencyCode));
         $total = $currency . ' ' . $this->formatAmount((float) ($doc['grandTotal'] ?? 0));
+        $gravadaTotal = (float) ($doc['gravadaTotal'] ?? 0);
+        $inafectaTotal = (float) ($doc['inafectaTotal'] ?? 0);
+        $exoneradaTotal = (float) ($doc['exoneradaTotal'] ?? 0);
+        $taxTotal = (float) ($doc['taxTotal'] ?? 0);
+        $itemDiscountTotal = 0.0;
+        $hasTributarySummary = in_array(strtoupper(trim((string) ($doc['documentKind'] ?? ''))), ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
         $fileName = $this->escapeHtml(trim((string) ($doc['series'] ?? '')) . '-' . trim((string) ($doc['number'] ?? '')) . '.pdf');
         $taxIdRow = $taxId !== '' ? '<div class="meta">RUC: ' . $taxId . '</div>' : '';
         $addressRow = $address !== '' ? '<div class="meta">' . $address . '</div>' : '';
@@ -3721,6 +3743,9 @@ class SalesController extends Controller
             $qty = $this->formatAmount((float) ($item['qty'] ?? 0));
             $unitPrice = $this->formatAmount((float) ($item['unitPrice'] ?? 0));
             $lineTotal = $this->formatAmount((float) ($item['lineTotal'] ?? 0));
+            $lineNo = (int) ($item['lineNo'] ?? 0);
+            $unitLabel = $this->escapeHtml((string) ($item['unitLabel'] ?? 'NIU'));
+            $itemDiscountTotal += (float) ($item['discountTotal'] ?? 0);
             $itemMetadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
             $productCodeRaw = trim((string) (
                 $item['productCode']
@@ -3737,8 +3762,12 @@ class SalesController extends Controller
                 ? '<div class="item-code">COD: ' . $this->escapeHtml($productCodeRaw) . '</div>'
                 : '';
 
-            $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$itemCodeHtml}{$description}</td></tr>\n";
-            $itemRows .= "                <tr class=\"item-price-row\"><td><div class=\"item-price-wrap\"><span class=\"item-price-unit\">{$qty} x {$currency} {$unitPrice}</span><span class=\"item-price-total\">{$currency} {$lineTotal}</span></div></td></tr>\n";
+            if ($isA4) {
+                $itemRows .= "\n                <tr class=\"items-a4-row\"><td class=\"ta-c\">" . ($lineNo > 0 ? (string) $lineNo : '-') . "</td><td class=\"ta-c\">" . ($productCodeRaw !== '' ? $this->escapeHtml($productCodeRaw) : '-') . "</td><td class=\"ta-r\">{$qty}</td><td class=\"ta-c\">{$unitLabel}</td><td>{$description}</td><td class=\"ta-r\">{$currency} {$unitPrice}</td><td class=\"ta-r\">{$currency} {$lineTotal}</td></tr>\n";
+            } else {
+                $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$itemCodeHtml}{$description}</td></tr>\n";
+                $itemRows .= "                <tr class=\"item-price-row\"><td><div class=\"item-price-wrap\"><span class=\"item-price-unit\">{$qty} x {$currency} {$unitPrice}</span><span class=\"item-price-total\">{$currency} {$lineTotal}</span></div></td></tr>\n";
+            }
         }
 
         if ($itemRows === '') {
@@ -3830,6 +3859,19 @@ class SalesController extends Controller
         $itemDescPaddingBottom = $isA4 ? '0.2mm' : '0.4mm';
         $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
         $itemPricePaddingBottom = $isA4 ? '0.45mm' : '1.1mm';
+        $a4ItemTableHead = $isA4
+            ? '<thead><tr><th style="width:28px">#</th><th style="width:86px">CODIGO</th><th style="width:70px">CANT.</th><th style="width:76px">UNID.</th><th>DESCRIPCION</th><th style="width:88px">VALOR U.</th><th style="width:96px">VALOR TOTAL</th></tr></thead>'
+            : '';
+        $itemsTableClass = $isA4 ? 'items-a4' : '';
+        $a4SummaryRows = $isA4
+            ? '<div class="summary-row"><span class="summary-label">Op. Gravadas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($gravadaTotal) . '</span></div>'
+                . '<div class="summary-row"><span class="summary-label">Op. Inafectas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($inafectaTotal) . '</span></div>'
+                . '<div class="summary-row"><span class="summary-label">Op. Exoneradas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($exoneradaTotal) . '</span></div>'
+                . '<div class="summary-row"><span class="summary-label">IGV</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($taxTotal) . '</span></div>'
+                . (($itemDiscountTotal > 0.00001)
+                    ? '<div class="summary-row"><span class="summary-label">Dscto. item</span><span class="summary-value">-' . $currency . ' ' . $this->formatAmount($itemDiscountTotal) . '</span></div>'
+                    : '')
+            : '';
 
         return <<<HTML
 <!doctype html>
@@ -3856,6 +3898,12 @@ class SalesController extends Controller
     .info-label { font-weight: 900; }
     .info-value { font-weight: 900; text-align: right; flex: 1; }
     table { width: 100%; border-collapse: collapse; }
+    .items-a4 { border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
+    .items-a4 thead th { background: #60a5fa; color: #0f172a; font-size: 9px; text-transform: uppercase; letter-spacing: 0.2px; padding: 4px 5px; border-bottom: 1px solid #1f2937; }
+    .items-a4 tbody td { border-bottom: 1px solid #e2e8f0; font-size: 9px; padding: 4px 5px; vertical-align: top; }
+    .items-a4-row:last-child td { border-bottom: none; }
+    .ta-r { text-align: right; }
+    .ta-c { text-align: center; }
     td { padding: 0; }
     .item-desc-row td { padding-top: {$itemDescPaddingTop}; padding-bottom: {$itemDescPaddingBottom}; }
     .item-desc { font-size: {$itemDescFontSize}; line-height: 1.15; font-weight: 900; }
@@ -3906,10 +3954,13 @@ class SalesController extends Controller
 
     <div class="divider"></div>
 
-    <table><tbody>
+        <table class="{$itemsTableClass}">
+{$a4ItemTableHead}
+<tbody>
 {$itemRows}    </tbody></table>
 
     <div class="summary">
+            {$a4SummaryRows}
       <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
             <div class="summary-words">SON: {$totalInWords}</div>

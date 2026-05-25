@@ -4171,12 +4171,28 @@ class AppConfigController extends Controller
             $settings = $settingsQuery->first();
         }
 
-        $logoUrl = $this->resolveCompanyLogoUrl($settings->logo_path ?? null);
-
         // Extract location fields from extra_data
         $extraData = $settings
             ? json_decode((string) ($settings->extra_data ?? '{}'), true) ?? []
             : [];
+
+        $logoPath = $settings->logo_path ?? null;
+        $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
+        $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
+        $logoUrl = $logoExistsInStorage
+            ? $this->resolveCompanyLogoUrl($logoPath)
+            : null;
+
+        if (($logoUrl === null || $logoUrl === '') && isset($extraData['company_logo_data_uri'])) {
+            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
+            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
+                $logoUrl = $candidateDataUri;
+            }
+        }
+
+        if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
+            $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
+        }
 
         return response()->json([
             'company_id'      => $companyId,
@@ -4430,6 +4446,18 @@ class AppConfigController extends Controller
         }
 
         $path = "logos/company_{$companyId}.{$ext}";
+        $logoBinary = @file_get_contents($file->getRealPath());
+        $logoMime = strtolower((string) $file->getMimeType());
+        if ($logoMime === '') {
+            $logoMime = in_array($ext, ['jpg', 'jpeg'], true)
+                ? 'image/jpeg'
+                : ($ext === 'png' ? 'image/png' : ($ext === 'gif' ? 'image/gif' : 'image/webp'));
+        }
+
+        $logoDataUri = null;
+        if ($logoBinary !== false && $logoBinary !== '') {
+            $logoDataUri = 'data:' . $logoMime . ';base64,' . base64_encode($logoBinary);
+        }
 
         try {
             Storage::disk('public')->putFileAs('logos', $file, "company_{$companyId}.{$ext}");
@@ -4439,6 +4467,28 @@ class AppConfigController extends Controller
 
         if ($this->tableExists('core', 'company_settings')) {
             $settingsUpdates = ['logo_path' => $path, 'updated_at' => now()];
+
+            $currentSettingsQuery = DB::table('core.company_settings')
+                ->where('company_id', $companyId);
+            if ($this->columnExists('core', 'company_settings', 'updated_at')) {
+                $currentSettingsQuery->orderByDesc('updated_at');
+            }
+            if ($this->columnExists('core', 'company_settings', 'created_at')) {
+                $currentSettingsQuery->orderByDesc('created_at');
+            }
+            $currentSettings = $currentSettingsQuery->first();
+
+            $currentExtra = $currentSettings
+                ? json_decode((string) ($currentSettings->extra_data ?? '{}'), true) ?? []
+                : [];
+
+            if ($logoDataUri !== null) {
+                $currentExtra['company_logo_data_uri'] = $logoDataUri;
+            }
+
+            if (!empty($currentExtra)) {
+                $settingsUpdates['extra_data'] = json_encode($currentExtra);
+            }
 
             $affectedRows = DB::table('core.company_settings')
                 ->where('company_id', $companyId)
@@ -5033,5 +5083,38 @@ class AppConfigController extends Controller
         }
 
         return '/storage/' . $normalized;
+    }
+
+    private function normalizeCompanyLogoStoragePath($logoPath): ?string
+    {
+        $raw = trim((string) ($logoPath ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        $normalized = str_replace('\\', '/', $raw);
+        if (preg_match('/^https?:\/\//i', $normalized) === 1) {
+            $pathFromUrl = parse_url($normalized, PHP_URL_PATH);
+            $normalized = $pathFromUrl !== null ? (string) $pathFromUrl : $normalized;
+        }
+
+        $normalized = ltrim($normalized, '/');
+        if (str_starts_with($normalized, 'storage/')) {
+            $normalized = ltrim(substr($normalized, strlen('storage/')), '/');
+        }
+        if (str_starts_with($normalized, 'public/')) {
+            $normalized = ltrim(substr($normalized, strlen('public/')), '/');
+        }
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function publicStorageLogoExists(string $normalizedPath): bool
+    {
+        try {
+            return Storage::disk('public')->exists($normalizedPath);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

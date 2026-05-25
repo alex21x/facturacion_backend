@@ -238,10 +238,21 @@ class SalesController extends Controller
                 $settingsSelect[] = $settingEmailColumn;
             }
 
-            $settings = DB::table('core.company_settings')
+            $settingsQuery = DB::table('core.company_settings')
                 ->select($settingsSelect)
-                ->where('company_id', $companyId)
-                ->first();
+                ->where('company_id', $companyId);
+
+            if (in_array('logo_path', $settingColumns, true)) {
+                $settingsQuery->orderByRaw("CASE WHEN COALESCE(logo_path, '') <> '' THEN 0 ELSE 1 END");
+            }
+            if (in_array('updated_at', $settingColumns, true)) {
+                $settingsQuery->orderByDesc('updated_at');
+            }
+            if (in_array('created_at', $settingColumns, true)) {
+                $settingsQuery->orderByDesc('created_at');
+            }
+
+            $settings = $settingsQuery->first();
         }
 
         $companyEmail = null;
@@ -5762,13 +5773,13 @@ HTML;
 
         try {
             if (\Storage::disk('public')->exists($normalized)) {
-                return '/storage/' . $normalized;
+                return url('/storage/' . $normalized);
             }
         } catch (\Throwable $e) {
             // Ignorar para evitar ocultar logo por una validacion temporal del storage.
         }
 
-        return '/storage/' . $normalized;
+        return url('/storage/' . $normalized);
     }
 }
 

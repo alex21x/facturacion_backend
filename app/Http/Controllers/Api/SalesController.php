@@ -3733,8 +3733,8 @@ class SalesController extends Controller
 
         $sheetWidth = $isA4 ? '210mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $isA4 ? '210px' : '74mm';
-        $logoMaxHeight = $isA4 ? '150px' : '40mm';
+        $logoMaxWidth = $isA4 ? '170px' : '74mm';
+        $logoMaxHeight = $isA4 ? '130px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
 
@@ -3750,10 +3750,10 @@ class SalesController extends Controller
     body { margin: 0; font-family: 'Courier New', monospace; background: #fff; color: #000; font-size: 13px; line-height: 1.3; font-weight: 800; }
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: 3mm; }
     .header { text-align: center; margin-bottom: 2mm; }
-    .header--a4 { display: grid; grid-template-columns: 220px 1fr; gap: 10px; text-align: left; align-items: flex-start; }
+    .header--a4 { display: grid; grid-template-columns: 180px 1fr; gap: 10px; text-align: left; align-items: flex-start; }
     .header-copy--a4 { text-align: left; }
     .header-logo { display: block; width: 100%; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto 1mm; }
-    .header--a4 .header-logo { width: 210px !important; min-width: 210px; max-width: 210px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+    .header--a4 .header-logo { width: 170px !important; min-width: 170px; max-width: 170px; margin: 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
     .title { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 0.8mm; }
     .company-description { font-size: 11px; font-weight: 800; line-height: 1.2; margin: 0.6mm 0 0.8mm; color: #111827; text-transform: none; }
     .docno { font-size: 16px; font-weight: 900; letter-spacing: 0.6px; margin-bottom: 0.8mm; }

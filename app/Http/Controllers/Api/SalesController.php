@@ -3920,14 +3920,14 @@ class SalesController extends Controller
                 . '</div>';
         }
 
-        $sheetWidth = ($isA4 && $forPdf) ? '198mm' : ($isA4 ? '210mm' : '80mm');
+        $sheetWidth = $isA4 ? '210mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
         $logoMaxWidth = $isA4 ? '102px' : '74mm';
         $logoMaxHeight = $isA4 ? '62px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
-        $sheetPadding = ($isA4 && $forPdf) ? '0' : ($isA4 ? '6mm' : '3mm');
+        $sheetPadding = $isA4 ? '6mm' : '3mm';
         $titleFontSize = $isA4 ? '13pt' : '15px';
         $docNoFontSize = $isA4 ? '14pt' : '16px';
         $metaFontSize = $isA4 ? '9pt' : '12px';
@@ -3963,20 +3963,7 @@ class SalesController extends Controller
         $pdfA4Css = ($isA4 && $forPdf)
             ? <<<PDFA4
     @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
-    body { padding-top: 0 !important; }
-    .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
-    .a4-top-spacer { display: block !important; height: 5mm !important; }
-    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 2.4mm !important; padding-bottom: 1.6mm !important; }
-    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 24mm !important; padding-right: 1.2mm !important; text-align: center !important; vertical-align: middle !important; }
-    .logo-col .header-logo { margin: 0 auto !important; }
-    .brand-col { width: auto !important; padding: 0 0 0 1.2mm !important; }
-    .brand-col .brand-name { margin-bottom: 0.4mm !important; }
-    .brand-col .meta, .brand-col .company-description, .brand-col .brand-legal { margin: 0.45mm 0 !important; }
-    .voucher-box { width: 58mm !important; margin-left: 1.4mm !important; }
-    .voucher-date { padding-top: 2.6mm !important; }
-    .items-a4 { width: 100% !important; table-layout: fixed !important; }
-    .items-a4 th, .items-a4 td { word-wrap: break-word; }
+    .no-print { display: none !important; }
 PDFA4
             : '';
 
@@ -4035,7 +4022,7 @@ A4HEAD
 </div>
 TICKETHEAD;
 
-    $pdfA4TopSpacerHtml = ($isA4 && $forPdf) ? '<div class="a4-top-spacer"></div>' : '';
+    $pdfA4TopSpacerHtml = '';
 
         return <<<HTML
 <!doctype html>

@@ -23,6 +23,9 @@ class InventoryController extends Controller
     private const FEATURE_PRODUCTS_BY_PROFILE = 'INVENTORY_PRODUCTS_BY_PROFILE';
     private const FEATURE_PRODUCT_MASTERS_BY_PROFILE = 'INVENTORY_PRODUCT_MASTERS_BY_PROFILE';
 
+    /** In-memory projection used by applyCurrentStockDelta to detect negative stock within a request. */
+    private array $stockProjection = [];
+
     public function __construct(
         private GetProductLookupsUseCase $getProductLookupsUseCase,
         private CreateInventoryStockEntryUseCase $createInventoryStockEntryUseCase,
@@ -1006,7 +1009,7 @@ class InventoryController extends Controller
                 return strtoupper(trim((string) $row->sku));
             });
 
-        $created = 0;
+        $createdProducts = 0;
         $updated = 0;
         $omitted = 0;
         $errors = [];
@@ -1023,7 +1026,7 @@ class InventoryController extends Controller
             $warehouseCache,
             $productsById,
             $productsBySku,
-            &$created,
+            &$createdProducts,
             &$updated,
             &$omitted,
             &$errors,
@@ -1061,23 +1064,56 @@ class InventoryController extends Controller
                 }
 
                 if (!$product) {
-                    $omitted++;
-                    $message = $id > 0
-                        ? 'Producto no encontrado por ID.'
-                        : 'Producto no encontrado por SKU.';
-                    $errors[] = ['row' => $rowNumber, 'message' => $message];
-                    $batchItems[] = [
-                        'batch_id' => $batchId,
-                        'row_number' => $rowNumber,
-                        'action_status' => 'OMITTED',
-                        'product_id' => $id > 0 ? $id : null,
-                        'sku' => $sku !== '' ? $sku : null,
-                        'barcode' => null,
-                        'name' => null,
-                        'message' => $message,
-                        'created_at' => now(),
+                    // When only an ID was given and not found, it's an unrecoverable error (can't infer product data from ID alone)
+                    if ($id > 0) {
+                        $omitted++;
+                        $message = 'Producto no encontrado por ID.';
+                        $errors[] = ['row' => $rowNumber, 'message' => $message];
+                        $batchItems[] = [
+                            'batch_id' => $batchId,
+                            'row_number' => $rowNumber,
+                            'action_status' => 'OMITTED',
+                            'product_id' => $id,
+                            'sku' => $sku !== '' ? $sku : null,
+                            'barcode' => null,
+                            'name' => null,
+                            'message' => $message,
+                            'created_at' => now(),
+                        ];
+                        continue;
+                    }
+
+                    // SKU provided but product doesn't exist → auto-create a minimal product record
+                    // so the stock entry is not lost. The user should complete product details later.
+                    $newProductId = (int) DB::table('inventory.products')->insertGetId([
+                        'company_id'                 => $companyId,
+                        'sku'                        => $sku,
+                        'name'                       => $sku,
+                        'product_nature'             => 'PRODUCT',
+                        'unit_id'                    => null,
+                        'is_stockable'               => true,
+                        'lot_tracking'               => false,
+                        'has_expiration'             => false,
+                        'status'                     => 1,
+                        'sale_price'                 => 0,
+                        'cost_price'                 => 0,
+                        'seller_commission_percent'  => 0,
+                        'created_by'                 => $userId,
+                        'updated_by'                 => $userId,
+                    ]);
+
+                    $product = (object) [
+                        'id'          => $newProductId,
+                        'sku'         => $sku,
+                        'barcode'     => null,
+                        'name'        => $sku,
+                        'is_stockable' => true,
+                        'status'      => 1,
                     ];
-                    continue;
+
+                    // Cache so duplicate SKU rows in the same batch resolve to the new product
+                    $productsBySku->put($sku, $product);
+                    $createdProducts++;
                 }
 
                 if ((int) ($product->status ?? 0) !== 1) {
@@ -1272,6 +1308,7 @@ class InventoryController extends Controller
             'summary' => [
                 'total' => count($rows),
                 'applied' => $updated,
+                'created_products' => $createdProducts,
                 'omitted' => $omitted,
                 'errors' => count($errors),
                 'ledger_rows' => $ledgerInserted,

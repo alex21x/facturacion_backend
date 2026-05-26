@@ -613,15 +613,43 @@ class MasterDataController extends Controller
 
         $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
         $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
+        $username = trim((string) $payload['username']);
+        $email = array_key_exists('email', $payload) && $payload['email'] !== null
+            ? trim(strtolower((string) $payload['email']))
+            : null;
+
+        $usernameExists = DB::table('auth.users')
+            ->where('company_id', $companyId)
+            ->whereRaw('LOWER(username) = ?', [strtolower($username)])
+            ->exists();
+
+        if ($usernameExists) {
+            return response()->json([
+                'message' => 'El usuario ya existe para esta compania.',
+            ], 422);
+        }
+
+        if ($email !== null && $email !== '') {
+            $emailExists = DB::table('auth.users')
+                ->where('company_id', $companyId)
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->exists();
+
+            if ($emailExists) {
+                return response()->json([
+                    'message' => 'El correo ya existe para esta compania.',
+                ], 422);
+            }
+        }
 
         $userInsert = [
             'company_id' => $companyId,
             'branch_id' => $payload['branch_id'] ?? null,
-            'username' => trim($payload['username']),
+            'username' => $username,
             'password_hash' => Hash::make($payload['password']),
             'first_name' => trim($payload['first_name']),
             'last_name' => $payload['last_name'] ?? null,
-            'email' => $payload['email'] ?? null,
+            'email' => $email,
             'phone' => $payload['phone'] ?? null,
             'status' => (int) ($payload['status'] ?? 1),
             'created_at' => now(),
@@ -651,10 +679,23 @@ class MasterDataController extends Controller
             });
         } catch (QueryException $e) {
             $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+            $driverMessage = strtolower((string) ($e->errorInfo[2] ?? ''));
 
             if ($sqlState === '23505') {
+                if (str_contains($driverMessage, 'username')) {
+                    return response()->json([
+                        'message' => 'El usuario ya existe para esta compania.',
+                    ], 422);
+                }
+
+                if (str_contains($driverMessage, 'email')) {
+                    return response()->json([
+                        'message' => 'El correo ya existe para esta compania.',
+                    ], 422);
+                }
+
                 return response()->json([
-                    'message' => 'El usuario o correo ya existe para esta compania.',
+                    'message' => 'No se pudo crear el usuario por conflicto de datos. Verifica rol y contexto operacional.',
                 ], 422);
             }
 

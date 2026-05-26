@@ -3693,7 +3693,6 @@ class SalesController extends Controller
             ? (string) $request->query('format')
             : 'a4';
 
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
         $series = preg_replace('/[^A-Za-z0-9\-_]/', '', trim((string) ($doc['series'] ?? 'DOC')));
         $number = preg_replace('/[^0-9]/', '', trim((string) ($doc['number'] ?? '0')));
         $fileName = ($series !== '' ? $series : 'DOC') . '-' . ($number !== '' ? $number : '0') . '.pdf';
@@ -3706,7 +3705,8 @@ class SalesController extends Controller
         $options->set('dpi', 96);
 
         $dompdf = new Dompdf($options);
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, true);
+        // Keep API PDF visually aligned with popup preview by using the same render variant.
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, false);
         $dompdf->loadHtml($html, 'UTF-8');
 
         if ($format === 'ticket') {

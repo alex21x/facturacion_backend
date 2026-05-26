@@ -13,6 +13,7 @@ use App\Application\UseCases\Inventory\GetProductLookupsUseCase;
 use App\Application\UseCases\Inventory\GetInventoryStockEntriesUseCase;
 use App\Application\UseCases\Inventory\UpdateInventoryProductCommercialConfigUseCase;
 use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -871,6 +872,416 @@ class InventoryController extends Controller
         ]);
     }
 
+    public function bulkUpdateProductStock(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->input('company_id', $authUser->company_id);
+
+        $this->ensureProductCatalogSchema();
+        $this->ensureStockBulkUpdateSchema();
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response()->json(['message' => 'Invalid company scope'], 403);
+        }
+
+        if (!$this->canManageProducts($authUser, $companyId)) {
+            return response()->json(['message' => 'No tienes permiso para actualizar stock.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'rows' => 'required|array|min:1|max:5000',
+            'rows.*.id' => 'nullable|integer|min:1',
+            'rows.*.sku' => 'nullable|string|max:60',
+            'rows.*.warehouse_code' => 'nullable|string|max:50',
+            'rows.*.qty' => 'required|numeric',
+            'rows.*.note' => 'nullable|string|max:300',
+            'rows.*.metadata' => 'nullable|array',
+            'mode' => 'required|string|in:add,replace',
+            'warehouse_code' => 'nullable|string|max:50',
+            'filename' => 'nullable|string|max:300',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+        }
+
+        $validated = $validator->validated();
+        $rows = $validated['rows'];
+        $mode = strtolower((string) $validated['mode']);
+        $filename = isset($validated['filename']) ? trim((string) $validated['filename']) : null;
+        $defaultWarehouseCode = strtoupper(trim((string) ($validated['warehouse_code'] ?? '')));
+        $userId = (int) $authUser->id;
+
+        $defaultWarehouse = null;
+        $warehouseCache = [];
+        if ($defaultWarehouseCode !== '') {
+            $resolvedWarehouseId = $this->resolveWarehouseIdFromCode($companyId, $defaultWarehouseCode, $warehouseCache);
+            if ($resolvedWarehouseId === null) {
+                return response()->json(['message' => 'warehouse_code por defecto no existe o está inactivo.'], 422);
+            }
+
+            $defaultWarehouse = [
+                'id' => $resolvedWarehouseId,
+                'code' => $defaultWarehouseCode,
+            ];
+        } else {
+            $defaultWarehouse = $this->resolveDefaultWarehouseForImport($companyId);
+        }
+
+        $batchId = (int) DB::table('inventory.stock_update_batches')->insertGetId([
+            'company_id' => $companyId,
+            'updated_by' => $userId,
+            'filename' => $filename !== '' ? $filename : null,
+            'mode' => strtoupper($mode),
+            'total_rows' => count($rows),
+            'status' => 'PROCESSING',
+            'started_at' => now(),
+            'created_at' => now(),
+        ]);
+
+        $productIds = [];
+        $normalizedRows = [];
+        $seenKeys = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNumber = $index + 2;
+            $id = isset($row['id']) ? (int) $row['id'] : 0;
+            $sku = strtoupper(trim((string) ($row['sku'] ?? '')));
+            $qtyRaw = $row['qty'] ?? null;
+            $qty = $this->normalizeNumeric($qtyRaw, 0);
+            $rowWarehouseCode = strtoupper(trim((string) ($row['warehouse_code'] ?? '')));
+
+            $key = $id > 0 ? 'ID:' . $id : ($sku !== '' ? 'SKU:' . $sku : 'ROW:' . $rowNumber);
+            if (isset($seenKeys[$key])) {
+                $normalizedRows[] = [
+                    'row_number' => $rowNumber,
+                    'status' => 'OMITTED',
+                    'product_id' => null,
+                    'sku' => $sku !== '' ? $sku : null,
+                    'barcode' => null,
+                    'name' => null,
+                    'message' => 'Fila duplicada dentro del archivo.',
+                    'qty' => $qty,
+                    'applied_delta' => 0,
+                    'created_at' => now(),
+                ];
+                continue;
+            }
+            $seenKeys[$key] = true;
+
+            $normalizedRows[] = [
+                'row_number' => $rowNumber,
+                'status' => 'PENDING',
+                'product_id' => $id > 0 ? $id : null,
+                'sku' => $sku !== '' ? $sku : null,
+                'barcode' => null,
+                'name' => null,
+                'message' => null,
+                'qty' => $qty,
+                'applied_delta' => 0,
+                'created_at' => now(),
+                '_row' => $row,
+                '_warehouse_code' => $rowWarehouseCode,
+            ];
+
+            if ($id > 0) {
+                $productIds[$id] = true;
+            }
+        }
+
+        $productsById = DB::table('inventory.products')
+            ->where('company_id', $companyId)
+            ->whereNull('deleted_at')
+            ->whereIn('id', array_keys($productIds))
+            ->select('id', 'sku', 'barcode', 'name', 'is_stockable', 'status')
+            ->get()
+            ->keyBy('id');
+
+        $productsBySku = DB::table('inventory.products')
+            ->where('company_id', $companyId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('sku')
+            ->select('id', 'sku', 'barcode', 'name', 'is_stockable', 'status')
+            ->get()
+            ->keyBy(function ($row) {
+                return strtoupper(trim((string) $row->sku));
+            });
+
+        $created = 0;
+        $updated = 0;
+        $omitted = 0;
+        $errors = [];
+        $batchItems = [];
+        $ledgerInserted = 0;
+
+        DB::transaction(function () use (
+            $normalizedRows,
+            $mode,
+            $companyId,
+            $batchId,
+            $userId,
+            $defaultWarehouse,
+            $warehouseCache,
+            $productsById,
+            $productsBySku,
+            &$created,
+            &$updated,
+            &$omitted,
+            &$errors,
+            &$batchItems,
+            &$ledgerInserted
+        ) {
+            foreach ($normalizedRows as $index => $rowState) {
+                if (($rowState['status'] ?? '') === 'OMITTED') {
+                    $omitted++;
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowState['row_number'],
+                        'action_status' => 'OMITTED',
+                        'product_id' => null,
+                        'sku' => $rowState['sku'],
+                        'barcode' => null,
+                        'name' => null,
+                        'message' => $rowState['message'],
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                $row = $rowState['_row'];
+                $rowNumber = (int) $rowState['row_number'];
+                $id = (int) ($rowState['product_id'] ?? 0);
+                $sku = (string) ($rowState['sku'] ?? '');
+                $qty = round((float) ($rowState['qty'] ?? 0), 8);
+
+                $product = null;
+                if ($id > 0) {
+                    $product = $productsById->get($id);
+                } elseif ($sku !== '') {
+                    $product = $productsBySku->get($sku);
+                }
+
+                if (!$product) {
+                    $omitted++;
+                    $message = $id > 0
+                        ? 'Producto no encontrado por ID.'
+                        : 'Producto no encontrado por SKU.';
+                    $errors[] = ['row' => $rowNumber, 'message' => $message];
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'OMITTED',
+                        'product_id' => $id > 0 ? $id : null,
+                        'sku' => $sku !== '' ? $sku : null,
+                        'barcode' => null,
+                        'name' => null,
+                        'message' => $message,
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                if ((int) ($product->status ?? 0) !== 1) {
+                    $omitted++;
+                    $message = 'Producto inactivo.';
+                    $errors[] = ['row' => $rowNumber, 'message' => $message];
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'OMITTED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'message' => $message,
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                if (!(bool) ($product->is_stockable ?? false)) {
+                    $omitted++;
+                    $message = 'Producto no es stockeable.';
+                    $errors[] = ['row' => $rowNumber, 'message' => $message];
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'OMITTED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'message' => $message,
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                $rowWarehouseCode = (string) ($rowState['_warehouse_code'] ?? '');
+                $warehouseId = null;
+                $warehouseCodeUsed = null;
+                if ($rowWarehouseCode !== '') {
+                    $warehouseId = $this->resolveWarehouseIdFromCode($companyId, $rowWarehouseCode, $warehouseCache);
+                    if ($warehouseId !== null) {
+                        $warehouseCodeUsed = $rowWarehouseCode;
+                    }
+                }
+                if ($warehouseId === null && $defaultWarehouse !== null) {
+                    $warehouseId = (int) $defaultWarehouse['id'];
+                    $warehouseCodeUsed = (string) ($defaultWarehouse['code'] ?? '');
+                }
+
+                if ($warehouseId === null) {
+                    $omitted++;
+                    $message = $rowWarehouseCode !== ''
+                        ? 'warehouse_code no existe o está inactivo.'
+                        : 'No existe almacén activo para usar como destino.';
+                    $errors[] = ['row' => $rowNumber, 'message' => $message];
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'OMITTED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'message' => $message,
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                $currentRow = DB::table('inventory.current_stock')
+                    ->where('company_id', $companyId)
+                    ->where('warehouse_id', $warehouseId)
+                    ->where('product_id', (int) $product->id)
+                    ->select('stock')
+                    ->first();
+                $currentStock = $currentRow ? (float) $currentRow->stock : 0.0;
+
+                $desiredStock = $mode === 'replace'
+                    ? $qty
+                    : $currentStock + $qty;
+                $delta = round($desiredStock - $currentStock, 8);
+
+                if (abs($delta) < 0.00000001) {
+                    $omitted++;
+                    $message = $mode === 'replace'
+                        ? 'Sin cambios: el stock ya coincide con el valor solicitado.'
+                        : 'Sin cambios: el delta es cero.';
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'OMITTED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'message' => $message,
+                        'created_at' => now(),
+                    ];
+                    continue;
+                }
+
+                $movementType = $delta > 0 ? 'IN' : 'OUT';
+                $unitCost = $this->normalizeNumeric($row['unit_cost'] ?? null, 0);
+                $note = trim((string) ($row['note'] ?? ''));
+                $metadata = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
+
+                $allowNegativeStock = false;
+                $this->applyCurrentStockDelta(
+                    $companyId,
+                    $warehouseId,
+                    (int) $product->id,
+                    $delta,
+                    $allowNegativeStock
+                );
+
+                DB::table('inventory.inventory_ledger')->insert([
+                    'company_id' => $companyId,
+                    'warehouse_id' => $warehouseId,
+                    'product_id' => (int) $product->id,
+                    'lot_id' => null,
+                    'movement_type' => $movementType,
+                    'quantity' => round(abs($delta), 8),
+                    'unit_cost' => round($unitCost, 8),
+                    'ref_type' => 'STOCK_BULK_UPDATE',
+                    'ref_id' => $batchId,
+                    'notes' => $note !== '' ? $note : ('Actualización masiva de stock lote #' . $batchId),
+                    'moved_at' => now(),
+                    'created_by' => $userId,
+                ]);
+
+                if (!empty($metadata)) {
+                    DB::table('inventory.stock_update_batch_items')->insert([
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'APPLIED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'warehouse_id' => $warehouseId,
+                        'warehouse_code' => $warehouseCodeUsed,
+                        'mode' => strtoupper($mode),
+                        'requested_qty' => round($qty, 8),
+                        'current_stock' => round($currentStock, 8),
+                        'applied_delta' => round($delta, 8),
+                        'new_stock' => round($desiredStock, 8),
+                        'message' => $delta > 0 ? 'Stock incrementado.' : 'Stock reemplazado/reducido.',
+                        'metadata' => json_encode($metadata),
+                        'created_at' => now(),
+                    ]);
+                } else {
+                    $batchItems[] = [
+                        'batch_id' => $batchId,
+                        'row_number' => $rowNumber,
+                        'action_status' => 'APPLIED',
+                        'product_id' => (int) $product->id,
+                        'sku' => (string) ($product->sku ?? null),
+                        'barcode' => (string) ($product->barcode ?? null),
+                        'name' => (string) ($product->name ?? null),
+                        'message' => $delta > 0 ? 'Stock incrementado.' : 'Stock reemplazado/reducido.',
+                        'created_at' => now(),
+                    ];
+                }
+
+                $updated++;
+                $ledgerInserted++;
+            }
+
+            if (!empty($batchItems)) {
+                foreach (array_chunk($batchItems, 500) as $chunk) {
+                    DB::table('inventory.stock_update_batch_items')->insert($chunk);
+                }
+            }
+
+            DB::table('inventory.stock_update_batches')
+                ->where('id', $batchId)
+                ->update([
+                    'updated_count' => $updated,
+                    'omitted_count' => $omitted,
+                    'error_count' => count($errors),
+                    'status' => ($omitted > 0 || count($errors) > 0) ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED',
+                    'finished_at' => now(),
+                ]);
+        });
+
+        return response()->json([
+            'message' => 'Actualización masiva de stock procesada.',
+            'batch_id' => $batchId,
+            'summary' => [
+                'total' => count($rows),
+                'applied' => $updated,
+                'omitted' => $omitted,
+                'errors' => count($errors),
+                'ledger_rows' => $ledgerInserted,
+                'mode' => $mode,
+            ],
+            'errors' => array_slice($errors, 0, 300),
+        ]);
+    }
+
     public function productImportBatches(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -1280,6 +1691,43 @@ class InventoryController extends Controller
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )");
         DB::statement('CREATE INDEX IF NOT EXISTS idx_product_import_batch_items_batch ON inventory.product_import_batch_items (batch_id, id)');
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.stock_update_batches (
+            id BIGSERIAL PRIMARY KEY,
+            company_id BIGINT NOT NULL,
+            updated_by BIGINT NOT NULL,
+            filename VARCHAR(300) NULL,
+            mode VARCHAR(20) NOT NULL DEFAULT \'REPLACE\',
+            total_rows INT NOT NULL DEFAULT 0,
+            updated_count INT NOT NULL DEFAULT 0,
+            omitted_count INT NOT NULL DEFAULT 0,
+            error_count INT NOT NULL DEFAULT 0,
+            status VARCHAR(40) NOT NULL DEFAULT \'PROCESSING\',
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )');
+        DB::statement('CREATE INDEX IF NOT EXISTS idx_stock_update_batches_company ON inventory.stock_update_batches (company_id, created_at DESC)');
+        DB::statement('CREATE TABLE IF NOT EXISTS inventory.stock_update_batch_items (
+            id BIGSERIAL PRIMARY KEY,
+            batch_id BIGINT NOT NULL REFERENCES inventory.stock_update_batches(id) ON DELETE CASCADE,
+            row_number INT NOT NULL,
+            action_status VARCHAR(20) NOT NULL,
+            product_id BIGINT NULL,
+            sku VARCHAR(60) NULL,
+            barcode VARCHAR(80) NULL,
+            name VARCHAR(250) NULL,
+            warehouse_id BIGINT NULL,
+            warehouse_code VARCHAR(50) NULL,
+            mode VARCHAR(20) NULL,
+            requested_qty NUMERIC(18,8) NULL,
+            current_stock NUMERIC(18,8) NULL,
+            applied_delta NUMERIC(18,8) NULL,
+            new_stock NUMERIC(18,8) NULL,
+            message VARCHAR(500) NULL,
+            metadata JSONB NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )');
+        DB::statement('CREATE INDEX IF NOT EXISTS idx_stock_update_batch_items_batch ON inventory.stock_update_batch_items (batch_id, id)');
     }
 
     private function productMasterExists(string $table, int $id, int $companyId): bool
@@ -1628,6 +2076,30 @@ class InventoryController extends Controller
         }
 
         return (float) $normalized;
+    }
+
+    private function applyCurrentStockDelta(int $companyId, int $warehouseId, int $productId, float $delta, bool $allowNegativeStock): void
+    {
+        $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId;
+
+        if (!array_key_exists($projectionKey, $this->stockProjection)) {
+            $row = DB::table('inventory.current_stock')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->first();
+
+            $this->stockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
+        }
+
+        $current = $this->stockProjection[$projectionKey];
+        $next = $current + $delta;
+
+        if (!$allowNegativeStock && $next < -0.00000001) {
+            throw new \RuntimeException('Insufficient stock for product #' . $productId);
+        }
+
+        $this->stockProjection[$projectionKey] = round($next, 8);
     }
 
     private function normalizeBoolean($value, bool $default): bool

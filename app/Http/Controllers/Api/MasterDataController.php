@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Application\UseCases\Masters\GetMasterDataOptionsUseCase;
 use App\Http\Controllers\Controller;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -635,12 +636,32 @@ class MasterDataController extends Controller
             $userInsert['preferred_cash_register_id'] = $resolvedNewCashRegisterId;
         }
 
-        $userId = DB::table('auth.users')->insertGetId($userInsert);
+        try {
+            $userId = DB::transaction(function () use ($userInsert, $payload) {
+                $userId = DB::table('auth.users')->insertGetId($userInsert);
 
-        DB::table('auth.user_roles')->insert([
-            'user_id' => (int) $userId,
-            'role_id' => (int) $payload['role_id'],
-        ]);
+                DB::table('auth.user_roles')->insert([
+                    'user_id' => (int) $userId,
+                    'role_id' => (int) $payload['role_id'],
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                return $userId;
+            });
+        } catch (QueryException $e) {
+            $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+
+            if ($sqlState === '23505') {
+                return response()->json([
+                    'message' => 'El usuario o correo ya existe para esta compania.',
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => 'No se pudo crear el usuario. Verifica datos y configuracion operacional.',
+            ], 422);
+        }
 
         return response()->json(['message' => 'User created', 'id' => (int) $userId], 201);
     }

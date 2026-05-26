@@ -3705,8 +3705,8 @@ class SalesController extends Controller
         $options->set('dpi', 96);
 
         $dompdf = new Dompdf($options);
-        // Keep API PDF visually aligned with popup preview by using the same render variant.
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, false);
+        // DOMPDF needs print-focused CSS fallbacks to keep visual parity with browser popup.
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, true);
         $dompdf->loadHtml($html, 'UTF-8');
 
         if ($format === 'ticket') {
@@ -3909,9 +3909,9 @@ class SalesController extends Controller
         $paymentBrandsSection = '';
         if ($showPaymentBrands) {
             $logosClass = $isA4 ? 'company-footer-logos company-footer-logos--a4' : 'company-footer-logos company-footer-logos--ticket';
-            $yapeLogo = $this->escapeHtml('/assets/payment-logos/yape-official.png');
-            $plinLogo = $this->escapeHtml('/assets/payment-logos/plin-official.png');
-            $culqiLogo = $this->escapeHtml('/assets/payment-logos/culqi-official.png');
+            $yapeLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/yape-official.png'));
+            $plinLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/plin-official.png'));
+            $culqiLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/culqi-official.png'));
 
             $paymentBrandsSection = '<div class="' . $logosClass . '">'
                 . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
@@ -3964,6 +3964,23 @@ class SalesController extends Controller
             ? <<<PDFA4
     @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
     .no-print { display: none !important; }
+    .sheet { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; padding: 2mm 1mm 0 !important; }
+    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; border-bottom: 2px solid #1e3a8a !important; }
+    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
+    .logo-col { width: 24mm !important; padding-right: 1.2mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
+    .logo-col .header-logo { margin: 0 auto !important; max-width: 20mm !important; max-height: 20mm !important; }
+    .brand-col { width: auto !important; padding-left: 1.4mm !important; }
+    .voucher-box { width: 60mm !important; margin-left: 1.6mm !important; }
+    .info-row { display: table !important; width: 100% !important; }
+    .info-label, .info-value { display: table-cell !important; vertical-align: top !important; }
+    .info-label { width: 30mm !important; }
+    .info-value { text-align: right !important; }
+    .summary-row, .total-row { display: table !important; width: 100% !important; }
+    .summary-label, .summary-value, .total-row span { display: table-cell !important; }
+    .summary-value, .total-row span:last-child { text-align: right !important; }
+    .company-footer-logos { display: block !important; text-align: left !important; margin-top: 1.6mm !important; }
+    .paybrand { display: inline-block !important; vertical-align: middle !important; margin: 0.8mm 1.2mm 0 0 !important; padding: 0.9mm 1.6mm !important; height: auto !important; }
+    .paybrand img { display: block !important; height: 6.5mm !important; width: auto !important; }
 PDFA4
             : '';
 
@@ -4163,6 +4180,31 @@ HTML;
         }
 
         return '';
+    }
+
+    private function resolveFrontendAssetUrl(string $assetPath): string
+    {
+        $normalizedPath = '/' . ltrim($assetPath, '/');
+
+        $candidates = [
+            trim((string) env('FRONTEND_URL', '')),
+            trim((string) config('app.frontend_url', '')),
+            trim((string) request()->headers->get('origin', '')),
+        ];
+
+        foreach ($candidates as $baseUrl) {
+            if ($baseUrl === '') {
+                continue;
+            }
+
+            if (preg_match('#^https?://#i', $baseUrl) !== 1) {
+                continue;
+            }
+
+            return rtrim($baseUrl, '/') . $normalizedPath;
+        }
+
+        return $normalizedPath;
     }
 
     private function normalizeElectronicSignatureValue(string $raw): string

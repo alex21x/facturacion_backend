@@ -4021,39 +4021,31 @@ class SalesController extends Controller
                     : '')
             : '';
 
-        $printPageMargin = ($isA4 && $forPdf)
-            ? '5mm 3mm 3mm 3mm'
-            : ((!$isA4 && $forPdf) ? '2mm 2mm 3mm 2mm' : '0');
+        $pdfA4TopSpacer = ($isA4 && $forPdf)
+            ? '<div class="pdf-a4-top-spacer"></div>'
+            : '';
 
         $pdfA4Css = ($isA4 && $forPdf)
             ? <<<PDFA4
-    @page { size: A4 portrait; margin: 5mm 4mm 4mm 4mm; }
-    .no-print { display: none !important; }
-    .sheet { width: 190mm !important; max-width: 190mm !important; margin: 0 auto !important; padding: 0 !important; }
-    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; border-bottom: 2px solid #1e3a8a !important; }
-    .logo-col, .brand-col, .voucher-col { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 16mm !important; padding-right: 0.6mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
-    .logo-col .header-logo { margin: 0 auto !important; max-width: 15mm !important; max-height: 15mm !important; }
-    .brand-col { width: auto !important; padding-left: 1.1mm !important; }
-    .voucher-col { width: 51mm !important; padding-left: 0.7mm !important; }
-    .voucher-box { width: 100% !important; margin-left: 0 !important; }
-    .info-row { display: table !important; width: 100% !important; }
-    .info-label, .info-value { display: table-cell !important; vertical-align: top !important; }
-    .info-label { width: 24mm !important; }
-    .info-value { text-align: left !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
-    .info-row--doc-date { table-layout: fixed !important; }
-    .info-block { display: table-cell !important; vertical-align: top !important; }
-    .info-block--date { width: 72mm !important; }
-    .info-block--date .info-label { width: 28mm !important; text-align: right !important; padding-right: 1.2mm !important; }
-    .info-block--date .info-value { text-align: left !important; white-space: nowrap !important; }
-    .summary-row, .total-row { display: table !important; width: 100% !important; table-layout: fixed !important; }
-    .summary-label, .summary-value, .total-row span { display: table-cell !important; }
-    .summary--a4 { width: 76mm !important; margin-left: auto !important; }
-    .summary--a4 .summary-label, .summary--a4 .total-row span:first-child { width: 34mm !important; }
-    .summary--a4 .summary-value, .summary--a4 .total-row span:last-child { text-align: right !important; }
-    .company-footer-logos { display: block !important; text-align: left !important; margin-top: 1.6mm !important; }
-    .paybrand { display: inline-block !important; vertical-align: middle !important; margin: 0.8mm 1.2mm 0 0 !important; padding: 0.9mm 1.6mm !important; height: auto !important; }
-    .paybrand img { display: block !important; height: 6.5mm !important; width: auto !important; }
+    @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
+    .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
+    .pdf-a4-top-spacer { height: 7mm !important; width: 100% !important; }
+    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
+    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
+    .logo-col { width: 30mm !important; padding: 1.2mm 2mm 0 0 !important; text-align: center !important; }
+    .brand-col { width: auto !important; padding: 0.8mm 0 0 2mm !important; }
+    .voucher-box { width: 56mm !important; }
+    .logo-col .header-logo { display: block !important; margin: 0 auto !important; max-width: 26mm !important; max-height: 22mm !important; }
+    .brand-col .brand-name { margin-bottom: 1.1mm !important; }
+    .brand-col .brand-legal { margin-bottom: 1mm !important; }
+    .brand-col .company-description { margin-bottom: 0.9mm !important; line-height: 1.25 !important; }
+    .brand-col .meta { margin: 0.7mm 0 !important; line-height: 1.22 !important; }
+    .voucher-ruc { padding: 2.9mm 3mm !important; }
+    .voucher-type { padding: 3.2mm 3mm !important; }
+    .voucher-number { padding: 3.4mm 3mm !important; }
+    .voucher-date { padding: 1.8mm 3mm !important; }
+    .items-a4 { width: 100% !important; table-layout: fixed !important; }
+    .items-a4 th, .items-a4 td { word-wrap: break-word; }
 PDFA4
             : '';
 
@@ -4112,8 +4104,6 @@ A4HEAD
   </div>
 </div>
 TICKETHEAD;
-
-    $pdfA4TopSpacerHtml = '';
 
         return <<<HTML
 <!doctype html>
@@ -4206,7 +4196,7 @@ TICKETHEAD;
 </head>
 <body>
   <div class="sheet">
-        {$pdfA4TopSpacerHtml}
+        {$pdfA4TopSpacer}
     {$a4HeaderHtml}
 
     <div class="divider"></div>

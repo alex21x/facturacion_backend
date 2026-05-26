@@ -878,7 +878,6 @@ class InventoryController extends Controller
         $companyId = (int) $request->input('company_id', $authUser->company_id);
 
         $this->ensureProductCatalogSchema();
-        $this->ensureStockBulkUpdateSchema();
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);

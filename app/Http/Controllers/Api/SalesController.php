@@ -3951,6 +3951,7 @@ class SalesController extends Controller
             ? '<thead><tr><th style="width:7mm">#</th><th style="width:22mm">CODIGO</th><th style="width:16mm">CANT.</th><th style="width:14mm">UNID.</th><th>DESCRIPCION</th><th style="width:22mm">VALOR U.</th><th style="width:24mm">VALOR TOTAL</th></tr></thead>'
             : '';
         $itemsTableClass = $isA4 ? 'items-a4' : '';
+        $summaryClass = $isA4 ? 'summary summary--a4' : 'summary';
         $a4SummaryRows = $isA4
             ? '<div class="summary-row"><span class="summary-label">Op. Gravadas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($gravadaTotal) . '</span></div>'
                 . '<div class="summary-row"><span class="summary-label">Op. Inafectas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($inafectaTotal) . '</span></div>'
@@ -3986,9 +3987,11 @@ class SalesController extends Controller
     .info-block--date { width: 72mm !important; }
     .info-block--date .info-label { width: 28mm !important; text-align: right !important; padding-right: 1.2mm !important; }
     .info-block--date .info-value { text-align: left !important; white-space: nowrap !important; }
-    .summary-row, .total-row { display: table !important; width: 100% !important; }
+    .summary-row, .total-row { display: table !important; width: 100% !important; table-layout: fixed !important; }
     .summary-label, .summary-value, .total-row span { display: table-cell !important; }
-    .summary-value, .total-row span:last-child { text-align: right !important; }
+    .summary--a4 { width: 76mm !important; margin-left: auto !important; }
+    .summary--a4 .summary-label, .summary--a4 .total-row span:first-child { width: 34mm !important; }
+    .summary--a4 .summary-value, .summary--a4 .total-row span:last-child { text-align: right !important; }
     .company-footer-logos { display: block !important; text-align: left !important; margin-top: 1.6mm !important; }
     .paybrand { display: inline-block !important; vertical-align: middle !important; margin: 0.8mm 1.2mm 0 0 !important; padding: 0.9mm 1.6mm !important; height: auto !important; }
     .paybrand img { display: block !important; height: 6.5mm !important; width: auto !important; }
@@ -4113,10 +4116,14 @@ TICKETHEAD;
     .item-price-unit { font-size: {$itemUnitFontSize}; font-weight: 900; }
     .item-price-total { font-size: {$itemTotalFontSize}; font-weight: 900; white-space: nowrap; }
     .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; text-align: left; }
+    .summary--a4 { width: 76mm; margin-left: auto; }
     .summary-row { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
     .summary-label, .summary-value { font-weight: 900; }
     .summary-label { text-align: left; }
     .summary-value { text-align: right; }
+    .summary--a4 .summary-row { gap: 1.6mm; }
+    .summary--a4 .summary-label { flex: 0 0 34mm; }
+    .summary--a4 .summary-value { flex: 1; }
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 1mm; padding-top: 1mm; font-size: {$totalFontSize}; font-weight: 900; background: #f0f4ff; padding-left: 2mm; padding-right: 2mm; border-radius: 4px; }
     .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
     .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
@@ -4153,7 +4160,7 @@ TICKETHEAD;
 <tbody>
 {$itemRows}    </tbody></table>
 
-    <div class="summary">
+    <div class="{$summaryClass}">
             {$a4SummaryRows}
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
             <div class="summary-words">SON: {$totalInWords}</div>

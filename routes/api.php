@@ -258,6 +258,10 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::post('/purchases/suppliers/bulk-import', 'Api\\PurchasesController@bulkImportSuppliers');
     });
 
+    Route::middleware('rbac.module:INVENTORY,update')->group(function () {
+        Route::post('/inventory/products/bulk-stock-update', 'Api\\InventoryController@bulkUpdateProductStock');
+    });
+
     Route::middleware(['rbac.module:INVENTORY,view', 'throttle:1200,1'])->prefix('inventory-pro')->group(function () {
         Route::get('/dashboard', 'Api\\InventoryReportsController@dashboard');
         Route::get('/report-requests', 'Api\\InventoryReportsController@listRequests');

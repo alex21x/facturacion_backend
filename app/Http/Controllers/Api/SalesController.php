@@ -3920,18 +3920,23 @@ class SalesController extends Controller
                 . '</div>';
         }
 
-        $sheetWidth = $isA4 ? '198mm' : '80mm';
+        $sheetWidth = $isA4 ? ($forPdf ? '198mm' : '210mm') : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
         $logoMaxWidth = $isA4 ? '15mm' : '74mm';
         $logoMaxHeight = $isA4 ? '15mm' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
-        $sheetPadding = $isA4 ? '3.6mm 3mm 2.6mm' : '3mm';
+        $sheetPadding = $isA4 ? ($forPdf ? '3.6mm 3mm 2.6mm' : '4.5mm 4mm 3mm') : '3mm';
         $titleFontSize = $isA4 ? '13pt' : '15px';
         $docNoFontSize = $isA4 ? '14pt' : '16px';
         $metaFontSize = $isA4 ? '9pt' : '12px';
         $infoFontSize = $isA4 ? '8.6pt' : '12px';
+        $headerLogoColWidth = $isA4 ? ($forPdf ? '16mm' : '18mm') : '0';
+        $headerVoucherColWidth = $isA4 ? ($forPdf ? '53mm' : '56mm') : '0';
+        $headerGap = $isA4 ? ($forPdf ? '1.2mm' : '2mm') : '0';
+        $headerMarginBottom = $isA4 ? ($forPdf ? '1.2mm' : '1.6mm') : '0';
+        $headerPaddingBottom = $isA4 ? ($forPdf ? '1.2mm' : '1.6mm') : '0';
         $itemCodeFontSize = $isA4 ? '8pt' : '10px';
         $itemDescFontSize = $isA4 ? '9pt' : '12px';
         $itemUnitFontSize = $isA4 ? '9pt' : '12px';
@@ -4059,7 +4064,7 @@ TICKETHEAD;
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
     /* ── A4 header: 3 cols (logo | company info | fiscal box) ── */
-    .header--a4 { display: grid; grid-template-columns: 16mm 1fr 53mm; gap: 1.2mm; align-items: start; margin-bottom: 1.2mm; padding-bottom: 1.2mm; border-bottom: 2px solid #1e3a8a; }
+    .header--a4 { display: grid; grid-template-columns: {$headerLogoColWidth} 1fr {$headerVoucherColWidth}; gap: {$headerGap}; align-items: start; margin-bottom: {$headerMarginBottom}; padding-bottom: {$headerPaddingBottom}; border-bottom: 2px solid #1e3a8a; }
     .logo-col { display: flex; align-items: flex-start; justify-content: center; padding-right: 0.6mm; border-right: 1px solid #e2e8f0; }
     .brand-col { display: flex; flex-direction: column; justify-content: flex-start; gap: 0.1mm; min-width: 0; }
     .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; }

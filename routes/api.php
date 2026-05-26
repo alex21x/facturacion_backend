@@ -133,6 +133,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/sales/commercial-documents/export', 'Api\\SalesController@exportCommercialDocuments');
         Route::get('/sales/commercial-documents/{id}', 'Api\\SalesController@showCommercialDocument');
         Route::get('/sales/commercial-documents/{id}/print', 'Api\\SalesController@printableCommercialDocument');
+        Route::get('/sales/commercial-documents/{id}/print-pdf', 'Api\\SalesController@printableCommercialDocumentPdf');
         Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesController@previewTaxBridgePayload');
         Route::get('/sales/commercial-documents/{id}/tax-bridge-debug', 'Api\\SalesController@taxBridgeDebug');
         Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesController@downloadSunatXml');

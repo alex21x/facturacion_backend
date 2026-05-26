@@ -3818,6 +3818,10 @@ class SalesController extends Controller
         $electronicSignatureHtml = $electronicSignatureRaw !== ''
             ? '<div class="electronic-signature"><strong>Firma electr&oacute;nica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
             : '';
+        $footerSignatureHtml = $isA4 ? $electronicSignatureHtml : '';
+        $thankYouHtml = $isA4
+            ? '<div class="thank-you">Gracias por su compra</div>'
+            : '<div>Gracias por su compra</div>';
 
         $items = is_array($doc['items'] ?? null) ? $doc['items'] : [];
         $itemRows = '';
@@ -4054,10 +4058,6 @@ A4HEAD
 </div>
 TICKETHEAD;
 
-        $docInfoRow = $isA4
-            ? '<div class="info-row info-row--doc-date"><div class="info-block"><div class="info-label">DOC.:</div><div class="info-value">' . $customerDoc . '</div></div><div class="info-block info-block--date"><div class="info-label">FECHA Y HORA:</div><div class="info-value">' . $issueAt . '</div></div></div>'
-            : '<div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">' . $customerDoc . '</div></div>';
-
     $pdfA4TopSpacerHtml = '';
 
         return <<<HTML
@@ -4096,9 +4096,9 @@ TICKETHEAD;
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
     .meta { font-size: {$metaFontSize}; font-weight: 800; margin: 0.2mm 0; }
     .divider { border-top: 1px dashed #000; margin: 2mm 0; }
-    .info-row { display: flex; justify-content: flex-start; align-items: flex-start; gap: 1.4mm; font-size: {$infoFontSize}; margin: 0.35mm 0; }
-    .info-label { font-weight: 900; flex: 0 0 24mm; }
-    .info-value { font-weight: 800; text-align: left; flex: 1; line-height: 1.16; word-break: break-word; overflow-wrap: anywhere; }
+    .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.5mm 0; }
+    .info-label { font-weight: 900; flex-shrink: 0; }
+    .info-value { font-weight: 800; text-align: right; flex: 1; }
     .info-row--doc-date { justify-content: space-between; gap: 4mm; }
     .info-block { display: flex; align-items: flex-start; gap: 1.4mm; min-width: 0; flex: 1; }
     .info-block--date { flex: 0 0 72mm; justify-content: flex-end; }
@@ -4156,7 +4156,7 @@ TICKETHEAD;
     <div class="divider"></div>
 
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
-    {$docInfoRow}
+    <div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div>
     <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
     {$vehicleRow}
 
@@ -4177,8 +4177,8 @@ TICKETHEAD;
         <div class="footer">
             {$banksSection}
                         {$paymentBrandsSection}
-            {$electronicSignatureHtml}
-            <div class="thank-you">Gracias por su compra</div>
+            {$footerSignatureHtml}
+            {$thankYouHtml}
         </div>
   </div>
 </body>

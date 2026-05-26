@@ -4091,6 +4091,7 @@ TICKETHEAD;
     .voucher-number { padding: 2mm 1.8mm; font-size: 11.5pt; font-weight: 900; color: #dc2626; letter-spacing: 0.2px; background: #fff; }
     /* ── Ticket header ── */
     .header { text-align: center; margin-bottom: 2mm; }
+    .header .header-logo { margin-left: auto; margin-right: auto; }
     .header-copy--a4 { text-align: left; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }

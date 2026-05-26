@@ -10,6 +10,8 @@ use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\Documents\SalesDocumentException;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -3670,6 +3672,58 @@ class SalesController extends Controller
 
         $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    public function printableCommercialDocumentPdf(Request $request, int $id)
+    {
+        $jsonResponse = $this->showCommercialDocument($request, $id);
+        if ($jsonResponse->getStatusCode() >= 400) {
+            return $jsonResponse;
+        }
+
+        $payload = $jsonResponse->getData(true);
+        $doc = $payload['data'] ?? null;
+        if (!is_array($doc)) {
+            return response()->json([
+                'message' => 'No se pudo generar el PDF del documento',
+            ], 422);
+        }
+
+        $format = in_array($request->query('format'), ['ticket', 'a4'], true)
+            ? (string) $request->query('format')
+            : 'a4';
+
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
+        $series = preg_replace('/[^A-Za-z0-9\-_]/', '', trim((string) ($doc['series'] ?? 'DOC')));
+        $number = preg_replace('/[^0-9]/', '', trim((string) ($doc['number'] ?? '0')));
+        $fileName = ($series !== '' ? $series : 'DOC') . '-' . ($number !== '' ? $number : '0') . '.pdf';
+
+        $options = new Options();
+        $options->set('isRemoteEnabled', true);
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isPhpEnabled', false);
+        $options->set('defaultMediaType', 'screen');
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html, 'UTF-8');
+
+        if ($format === 'ticket') {
+            // 80mm width in points: 80 / 25.4 * 72 = 226.77
+            // Height is intentionally tall to avoid clipping long tickets.
+            $dompdf->setPaper([0, 0, 226.77, 1800], 'portrait');
+        } else {
+            $dompdf->setPaper('A4', 'portrait');
+        }
+
+        $dompdf->render();
+
+        return response($dompdf->output(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ]);
     }
 
     private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string

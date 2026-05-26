@@ -3670,7 +3670,7 @@ class SalesController extends Controller
             ? (string) $request->query('format')
             : 'ticket';
 
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, false);
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -3702,9 +3702,11 @@ class SalesController extends Controller
         $options->set('isRemoteEnabled', true);
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isPhpEnabled', false);
-        $options->set('defaultMediaType', 'screen');
+        $options->set('defaultMediaType', 'print');
+        $options->set('dpi', 96);
 
         $dompdf = new Dompdf($options);
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, true);
         $dompdf->loadHtml($html, 'UTF-8');
 
         if ($format === 'ticket') {
@@ -3726,7 +3728,7 @@ class SalesController extends Controller
         ]);
     }
 
-    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
+    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket', bool $forPdf = false): string
     {
         $isA4 = $format === 'a4';
         $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
@@ -3903,14 +3905,14 @@ class SalesController extends Controller
                 . '</div>';
         }
 
-        $sheetWidth = $isA4 ? '210mm' : '80mm';
+        $sheetWidth = ($isA4 && $forPdf) ? '198mm' : ($isA4 ? '210mm' : '80mm');
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
         $logoMaxWidth = $isA4 ? '140px' : '74mm';
         $logoMaxHeight = $isA4 ? '90px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
-        $sheetPadding = $isA4 ? '6mm' : '3mm';
+        $sheetPadding = ($isA4 && $forPdf) ? '0' : ($isA4 ? '6mm' : '3mm');
         $titleFontSize = $isA4 ? '13pt' : '15px';
         $docNoFontSize = $isA4 ? '14pt' : '16px';
         $metaFontSize = $isA4 ? '9pt' : '12px';
@@ -3937,6 +3939,20 @@ class SalesController extends Controller
                 . (($itemDiscountTotal > 0.00001)
                     ? '<div class="summary-row"><span class="summary-label">Dscto. item</span><span class="summary-value">-' . $currency . ' ' . $this->formatAmount($itemDiscountTotal) . '</span></div>'
                     : '')
+            : '';
+
+        $pdfA4Css = ($isA4 && $forPdf)
+            ? <<<PDFA4
+    @page { size: A4 portrait; margin: 4mm 3mm; }
+    .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
+    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
+    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
+    .logo-col { width: 30mm !important; padding-right: 2mm !important; }
+    .brand-col { width: auto !important; padding-left: 2mm !important; }
+    .voucher-box { width: 56mm !important; }
+    .items-a4 { width: 100% !important; table-layout: fixed !important; }
+    .items-a4 th, .items-a4 td { word-wrap: break-word; }
+PDFA4
             : '';
 
         $a4HeaderHtml = $isA4 ? <<<A4HEAD
@@ -4043,6 +4059,7 @@ TICKETHEAD;
     .paybrand img { height: 7mm; width: auto; display: block; }
     .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
     .company-footer-logos--ticket .paybrand img { height: 6mm; }
+{$pdfA4Css}
   </style>
 </head>
 <body>

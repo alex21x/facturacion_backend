@@ -3920,10 +3920,10 @@ class SalesController extends Controller
                 . '</div>';
         }
 
-        $sheetWidth = $isA4 ? '210mm' : '80mm';
+        $sheetWidth = $isA4 ? '198mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $isA4 ? '12mm' : '74mm';
-        $logoMaxHeight = $isA4 ? '12mm' : '40mm';
+        $logoMaxWidth = $isA4 ? '15mm' : '74mm';
+        $logoMaxHeight = $isA4 ? '15mm' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
@@ -3966,12 +3966,13 @@ class SalesController extends Controller
     .no-print { display: none !important; }
     .sheet { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; padding: 1.4mm 0.5mm 0 !important; }
     .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; border-bottom: 2px solid #1e3a8a !important; }
-    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 14mm !important; padding-right: 0.6mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
-    .logo-col .header-logo { margin: 0 auto !important; max-width: 10.5mm !important; max-height: 10.5mm !important; }
+    .logo-col, .brand-col, .voucher-col { display: table-cell !important; vertical-align: top !important; }
+    .logo-col { width: 16mm !important; padding-right: 0.6mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
+    .logo-col .header-logo { margin: 0 auto !important; max-width: 15mm !important; max-height: 15mm !important; }
     .brand-col { width: auto !important; padding-left: 1.1mm !important; }
-    .voucher-box { width: 52mm !important; margin-left: 0.9mm !important; }
-    .issued-at-row { margin-top: 1.2mm !important; margin-bottom: 1.2mm !important; text-align: right !important; font-size: 8pt !important; }
+    .voucher-col { width: 53mm !important; padding-left: 0.9mm !important; }
+    .voucher-box { width: 100% !important; margin-left: 0 !important; }
+    .voucher-issued-at { margin-top: 1.2mm !important; text-align: right !important; font-size: 8pt !important; }
     .info-row { display: table !important; width: 100% !important; }
     .info-label, .info-value { display: table-cell !important; vertical-align: top !important; }
     .info-label { width: 24mm !important; }
@@ -4015,11 +4016,14 @@ PDFTICKET
         {$phoneRow}
         {$emailRow}
     </div>
-    <div class="voucher-box">
-        <div class="voucher-ruc">R.U.C. {$taxId}</div>
-    <div class="voucher-type">{$docKind}</div>
-    <div class="voucher-number">{$series}-{$number}</div>
-  </div>
+        <div class="voucher-col">
+            <div class="voucher-box">
+                    <div class="voucher-ruc">R.U.C. {$taxId}</div>
+            <div class="voucher-type">{$docKind}</div>
+            <div class="voucher-number">{$series}-{$number}</div>
+            </div>
+            <div class="voucher-issued-at"><strong>FECHA Y HORA:</strong> {$issueAt}</div>
+        </div>
 </div>
 A4HEAD
             : <<<TICKETHEAD
@@ -4040,9 +4044,6 @@ A4HEAD
 TICKETHEAD;
 
     $pdfA4TopSpacerHtml = '';
-    $issuedAtRow = $isA4
-        ? '<div class="issued-at-row"><strong>FECHA Y HORA:</strong> ' . $issueAt . '</div>'
-        : '';
 
         return <<<HTML
 <!doctype html>
@@ -4058,7 +4059,7 @@ TICKETHEAD;
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
     /* ── A4 header: 3 cols (logo | company info | fiscal box) ── */
-    .header--a4 { display: grid; grid-template-columns: 14mm 1fr 52mm; gap: 1.2mm; align-items: start; margin-bottom: 1.2mm; padding-bottom: 1.2mm; border-bottom: 2px solid #1e3a8a; }
+    .header--a4 { display: grid; grid-template-columns: 16mm 1fr 53mm; gap: 1.2mm; align-items: start; margin-bottom: 1.2mm; padding-bottom: 1.2mm; border-bottom: 2px solid #1e3a8a; }
     .logo-col { display: flex; align-items: flex-start; justify-content: center; padding-right: 0.6mm; border-right: 1px solid #e2e8f0; }
     .brand-col { display: flex; flex-direction: column; justify-content: flex-start; gap: 0.1mm; min-width: 0; }
     .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; }
@@ -4069,10 +4070,11 @@ TICKETHEAD;
     .brand-col, .brand-col * { word-break: break-word; overflow-wrap: anywhere; }
     /* ── Fiscal box (right) ── */
     .voucher-box { border: 2px solid #1e3a8a; border-radius: 4px; overflow: hidden; text-align: center; }
+    .voucher-col { display: flex; flex-direction: column; align-items: stretch; }
     .voucher-ruc { padding: 1.4mm 2mm; font-size: 8pt; font-weight: 900; color: #1e3a8a; background: #fff; }
     .voucher-type { padding: 1.8mm; background: #1e3a8a; color: #fff; font-size: 7.8pt; font-weight: 900; text-transform: uppercase; line-height: 1.18; }
     .voucher-number { padding: 2mm 1.8mm; font-size: 11.5pt; font-weight: 900; color: #dc2626; letter-spacing: 0.2px; background: #fff; }
-    .issued-at-row { margin: 1.2mm 0 1.5mm; font-size: 8pt; font-weight: 800; text-align: right; color: #374151; }
+    .voucher-issued-at { margin: 1.1mm 0 0; font-size: 8pt; font-weight: 800; text-align: right; color: #374151; }
     /* ── Ticket header ── */
     .header { text-align: center; margin-bottom: 2mm; }
     .header-copy--a4 { text-align: left; }
@@ -4124,7 +4126,6 @@ TICKETHEAD;
   <div class="sheet">
         {$pdfA4TopSpacerHtml}
     {$a4HeaderHtml}
-    {$issuedAtRow}
 
     <div class="divider"></div>
 

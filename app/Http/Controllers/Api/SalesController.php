@@ -3941,15 +3941,24 @@ class SalesController extends Controller
                     : '')
             : '';
 
+        $printPageMargin = ($isA4 && $forPdf)
+            ? '8mm 4mm 4mm 4mm'
+            : ((!$isA4 && $forPdf) ? '2mm 2mm 3mm 2mm' : '0');
+
         $pdfA4Css = ($isA4 && $forPdf)
             ? <<<PDFA4
     @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
+    body { padding-top: 0 !important; }
     .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
+    .a4-top-spacer { display: block !important; height: 6mm !important; }
     .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
     .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 30mm !important; padding-right: 2mm !important; }
-    .brand-col { width: auto !important; padding-left: 2mm !important; }
-    .voucher-box { width: 56mm !important; }
+    .logo-col { width: 30mm !important; padding-right: 2mm !important; text-align: center !important; vertical-align: middle !important; }
+    .logo-col .header-logo { margin: 0 auto !important; }
+    .brand-col { width: auto !important; padding: 0 0 0 2mm !important; }
+    .brand-col .brand-name { margin-bottom: 0.9mm !important; }
+    .brand-col .meta, .brand-col .company-description, .brand-col .brand-legal { margin: 0.45mm 0 !important; }
+    .voucher-box { width: 56mm !important; margin-left: 2mm !important; }
     .items-a4 { width: 100% !important; table-layout: fixed !important; }
     .items-a4 th, .items-a4 td { word-wrap: break-word; }
 PDFA4
@@ -4006,6 +4015,8 @@ A4HEAD
 </div>
 TICKETHEAD;
 
+    $pdfA4TopSpacerHtml = ($isA4 && $forPdf) ? '<div class="a4-top-spacer"></div>' : '';
+
         return <<<HTML
 <!doctype html>
 <html>
@@ -4013,7 +4024,7 @@ TICKETHEAD;
   <meta charset="utf-8" />
   <title>{$fileName}</title>
   <style>
-    @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
+    @media print { @page { size: {$pageSize}; margin: {$printPageMargin}; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body { font-family: 'Arial', 'Helvetica', sans-serif; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.3; font-weight: 700; }
@@ -4078,6 +4089,7 @@ TICKETHEAD;
 </head>
 <body>
   <div class="sheet">
+        {$pdfA4TopSpacerHtml}
     {$a4HeaderHtml}
 
     <div class="divider"></div>

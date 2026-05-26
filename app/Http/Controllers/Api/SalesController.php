@@ -4054,6 +4054,10 @@ A4HEAD
 </div>
 TICKETHEAD;
 
+        $docInfoRow = $isA4
+            ? '<div class="info-row info-row--doc-date"><div class="info-block"><div class="info-label">DOC.:</div><div class="info-value">' . $customerDoc . '</div></div><div class="info-block info-block--date"><div class="info-label">FECHA Y HORA:</div><div class="info-value">' . $issueAt . '</div></div></div>'
+            : '<div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">' . $customerDoc . '</div></div>';
+
     $pdfA4TopSpacerHtml = '';
 
         return <<<HTML
@@ -4152,7 +4156,7 @@ TICKETHEAD;
     <div class="divider"></div>
 
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
-    <div class="info-row info-row--doc-date"><div class="info-block"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div><div class="info-block info-block--date"><div class="info-label">FECHA Y HORA:</div><div class="info-value">{$issueAt}</div></div></div>
+    {$docInfoRow}
     <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
     {$vehicleRow}
 

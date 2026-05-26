@@ -3943,7 +3943,7 @@ class SalesController extends Controller
 
         $pdfA4Css = ($isA4 && $forPdf)
             ? <<<PDFA4
-    @page { size: A4 portrait; margin: 4mm 3mm; }
+    @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
     .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
     .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
     .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
@@ -3953,6 +3953,19 @@ class SalesController extends Controller
     .items-a4 { width: 100% !important; table-layout: fixed !important; }
     .items-a4 th, .items-a4 td { word-wrap: break-word; }
 PDFA4
+            : '';
+
+        $pdfTicketCss = ((!$isA4) && $forPdf)
+            ? <<<PDFTICKET
+    @page { size: 80mm auto; margin: 2mm 2mm 3mm 2mm; }
+    .sheet { width: 76mm !important; max-width: 76mm !important; margin: 0 auto !important; padding: 0 !important; }
+    body { font-size: 12px !important; line-height: 1.24 !important; }
+    .info-row { display: block !important; margin: 0.9mm 0 !important; }
+    .info-label, .info-value { display: block !important; text-align: left !important; }
+    .info-value { word-break: break-word !important; }
+    .item-price-wrap { display: block !important; }
+    .item-price-total { display: block !important; text-align: right !important; margin-top: 0.2mm !important; }
+PDFTICKET
             : '';
 
         $a4HeaderHtml = $isA4 ? <<<A4HEAD
@@ -4060,6 +4073,7 @@ TICKETHEAD;
     .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
     .company-footer-logos--ticket .paybrand img { height: 6mm; }
 {$pdfA4Css}
+{$pdfTicketCss}
   </style>
 </head>
 <body>

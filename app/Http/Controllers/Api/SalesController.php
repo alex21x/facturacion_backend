@@ -4125,6 +4125,9 @@ TICKETHEAD;
     .summary--a4 .summary-label { flex: 0 0 34mm; }
     .summary--a4 .summary-value { flex: 1; }
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 1mm; padding-top: 1mm; font-size: {$totalFontSize}; font-weight: 900; background: #f0f4ff; padding-left: 2mm; padding-right: 2mm; border-radius: 4px; }
+    .summary--a4 .total-row { padding-left: 0; padding-right: 0; border-radius: 0; background: transparent; }
+    .summary--a4 .total-row span:first-child { flex: 0 0 34mm; }
+    .summary--a4 .total-row span:last-child { flex: 1; text-align: right; }
     .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
     .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
     .electronic-signature { margin-top: 1.2mm; margin-bottom: 1mm; font-size: 8.5pt; line-height: 1.25; word-break: break-word; }

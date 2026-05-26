@@ -613,32 +613,53 @@ class MasterDataController extends Controller
 
         $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
         $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
+        $hasUserRolesCreatedAtColumn = $this->tableColumnExists('auth', 'user_roles', 'created_at');
+        $hasUserRolesUpdatedAtColumn = $this->tableColumnExists('auth', 'user_roles', 'updated_at');
         $username = trim((string) $payload['username']);
         $email = array_key_exists('email', $payload) && $payload['email'] !== null
             ? trim(strtolower((string) $payload['email']))
             : null;
 
-        $usernameExists = DB::table('auth.users')
-            ->where('company_id', $companyId)
-            ->whereRaw('LOWER(username) = ?', [strtolower($username)])
-            ->exists();
+        $restorableUserId = null;
 
-        if ($usernameExists) {
-            return response()->json([
-                'message' => 'El usuario ya existe para esta compania.',
-            ], 422);
+        $existingByUsername = DB::table('auth.users')
+            ->select(['id', 'company_id', 'deleted_at'])
+            ->whereRaw('LOWER(username) = ?', [strtolower($username)])
+            ->first();
+
+        if ($existingByUsername) {
+            $sameCompany = (int) $existingByUsername->company_id === $companyId;
+            $isSoftDeleted = $existingByUsername->deleted_at !== null;
+
+            if ($sameCompany && $isSoftDeleted) {
+                $restorableUserId = (int) $existingByUsername->id;
+            } else {
+                return response()->json([
+                    'message' => 'El usuario ya existe.',
+                ], 422);
+            }
         }
 
         if ($email !== null && $email !== '') {
-            $emailExists = DB::table('auth.users')
-                ->where('company_id', $companyId)
+            $existingByEmail = DB::table('auth.users')
+                ->select(['id', 'company_id', 'deleted_at'])
                 ->whereRaw('LOWER(email) = ?', [$email])
-                ->exists();
+                ->first();
 
-            if ($emailExists) {
-                return response()->json([
-                    'message' => 'El correo ya existe para esta compania.',
-                ], 422);
+            if ($existingByEmail) {
+                $sameCompany = (int) $existingByEmail->company_id === $companyId;
+                $isSoftDeleted = $existingByEmail->deleted_at !== null;
+                $sameCandidate = $restorableUserId !== null && $restorableUserId === (int) $existingByEmail->id;
+
+                if (!$sameCandidate) {
+                    if ($sameCompany && $isSoftDeleted && $restorableUserId === null) {
+                        $restorableUserId = (int) $existingByEmail->id;
+                    } else {
+                        return response()->json([
+                            'message' => 'El correo ya existe.',
+                        ], 422);
+                    }
+                }
             }
         }
 
@@ -665,32 +686,65 @@ class MasterDataController extends Controller
         }
 
         try {
-            $userId = DB::transaction(function () use ($userInsert, $payload) {
-                $userId = DB::table('auth.users')->insertGetId($userInsert);
-
-                DB::table('auth.user_roles')->insert([
-                    'user_id' => (int) $userId,
+            $userId = DB::transaction(function () use (
+                $userInsert,
+                $payload,
+                $restorableUserId,
+                $hasUserRolesCreatedAtColumn,
+                $hasUserRolesUpdatedAtColumn
+            ) {
+                $roleInsert = [
+                    'user_id' => 0,
                     'role_id' => (int) $payload['role_id'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                ];
 
-                return $userId;
+                if ($hasUserRolesCreatedAtColumn) {
+                    $roleInsert['created_at'] = now();
+                }
+
+                if ($hasUserRolesUpdatedAtColumn) {
+                    $roleInsert['updated_at'] = now();
+                }
+
+                if ($restorableUserId !== null) {
+                    $userUpdate = $userInsert;
+                    unset($userUpdate['created_at']);
+                    $userUpdate['deleted_at'] = null;
+
+                    DB::table('auth.users')
+                        ->where('id', $restorableUserId)
+                        ->update($userUpdate);
+
+                    DB::table('auth.user_roles')
+                        ->where('user_id', $restorableUserId)
+                        ->delete();
+
+                    $roleInsert['user_id'] = (int) $restorableUserId;
+                    DB::table('auth.user_roles')->insert($roleInsert);
+
+                    return (int) $restorableUserId;
+                }
+
+                $userId = DB::table('auth.users')->insertGetId($userInsert);
+                $roleInsert['user_id'] = (int) $userId;
+                DB::table('auth.user_roles')->insert($roleInsert);
+
+                return (int) $userId;
             });
         } catch (QueryException $e) {
             $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
             $driverMessage = strtolower((string) ($e->errorInfo[2] ?? ''));
 
             if ($sqlState === '23505') {
-                if (str_contains($driverMessage, 'username')) {
+                if (str_contains($driverMessage, 'users_username_key') || str_contains($driverMessage, 'username')) {
                     return response()->json([
-                        'message' => 'El usuario ya existe para esta compania.',
+                        'message' => 'El usuario ya existe.',
                     ], 422);
                 }
 
                 if (str_contains($driverMessage, 'email')) {
                     return response()->json([
-                        'message' => 'El correo ya existe para esta compania.',
+                        'message' => 'El correo ya existe.',
                     ], 422);
                 }
 

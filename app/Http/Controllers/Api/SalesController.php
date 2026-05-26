@@ -3814,20 +3814,7 @@ class SalesController extends Controller
             'digest_value',
             'digestValue',
         ]);
-        $electronicSignatureHtml = $electronicSignatureRaw !== ''
-            ? '<div class="electronic-signature"><strong>Firma electr&oacute;nica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
-            : '';
-        $electronicSignatureRaw = $this->findFirstMetaStringValue($docMetadata, [
-            'sunat_electronic_signature',
-            'sunat_signature',
-            'firma_electronica',
-            'firma',
-            'signature',
-            'hash_cpe',
-            'codigo_hash',
-            'digest_value',
-            'digestValue',
-        ]);
+        $electronicSignatureRaw = $this->normalizeElectronicSignatureValue($electronicSignatureRaw);
         $electronicSignatureHtml = $electronicSignatureRaw !== ''
             ? '<div class="electronic-signature"><strong>Firma electr&oacute;nica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
             : '';
@@ -4002,10 +3989,10 @@ PDFA4
     .info-value { word-break: break-word !important; }
     .item-price-wrap { display: block !important; }
     .item-price-total { display: block !important; text-align: right !important; margin-top: 0.2mm !important; }
-    .summary { text-align: right !important; }
-    .summary-row { justify-content: flex-end !important; gap: 2mm !important; }
-    .summary-label { min-width: 19mm !important; }
-    .summary-value { min-width: 18mm !important; }
+    .summary { text-align: left !important; }
+    .summary-row { justify-content: space-between !important; gap: 2mm !important; }
+    .summary-label { text-align: left !important; }
+    .summary-value { text-align: right !important; }
 PDFTICKET
             : '';
 
@@ -4101,11 +4088,11 @@ TICKETHEAD;
     .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
     .item-price-unit { font-size: {$itemUnitFontSize}; font-weight: 900; }
     .item-price-total { font-size: {$itemTotalFontSize}; font-weight: 900; white-space: nowrap; }
-    .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; text-align: right; }
-    .summary-row { display: flex; justify-content: flex-end; align-items: baseline; gap: 3mm; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
-    .summary-label, .summary-value { font-weight: 900; text-align: right; }
-    .summary-label { min-width: 26mm; }
-    .summary-value { min-width: 24mm; }
+    .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; text-align: left; }
+    .summary-row { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
+    .summary-label, .summary-value { font-weight: 900; }
+    .summary-label { text-align: left; }
+    .summary-value { text-align: right; }
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 1mm; padding-top: 1mm; font-size: {$totalFontSize}; font-weight: 900; background: #f0f4ff; padding-left: 2mm; padding-right: 2mm; border-radius: 4px; }
     .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
     .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
@@ -4183,6 +4170,54 @@ HTML;
                 $nested = $this->findFirstMetaStringValue((array) $value, $keys);
                 if ($nested !== '') {
                     return $nested;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function normalizeElectronicSignatureValue(string $raw): string
+    {
+        $value = trim($raw);
+        if ($value === '') {
+            return '';
+        }
+
+        if ((str_starts_with($value, '{') && str_ends_with($value, '}'))
+            || (str_starts_with($value, '[') && str_ends_with($value, ']'))
+        ) {
+            $decoded = json_decode($value, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $firstScalar = $this->extractFirstScalarValue($decoded);
+                if ($firstScalar !== '') {
+                    return $firstScalar;
+                }
+            }
+        }
+
+        return $value;
+    }
+
+    private function extractFirstScalarValue($value): string
+    {
+        if (is_string($value)) {
+            return trim($value);
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $nested) {
+                $scalar = $this->extractFirstScalarValue($nested);
+                if ($scalar !== '') {
+                    return $scalar;
                 }
             }
         }

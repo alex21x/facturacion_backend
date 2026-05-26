@@ -610,11 +610,12 @@ class MasterDataController extends Controller
             ? (int) $payload['preferred_cash_register_id']
             : $defaultOperationalContext['cash_register_id'];
 
-        $userId = DB::table('auth.users')->insertGetId([
+        $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
+        $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
+
+        $userInsert = [
             'company_id' => $companyId,
             'branch_id' => $payload['branch_id'] ?? null,
-            'preferred_warehouse_id' => $resolvedNewWarehouseId,
-            'preferred_cash_register_id' => $resolvedNewCashRegisterId,
             'username' => trim($payload['username']),
             'password_hash' => Hash::make($payload['password']),
             'first_name' => trim($payload['first_name']),
@@ -624,7 +625,17 @@ class MasterDataController extends Controller
             'status' => (int) ($payload['status'] ?? 1),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($hasPreferredWarehouseColumn) {
+            $userInsert['preferred_warehouse_id'] = $resolvedNewWarehouseId;
+        }
+
+        if ($hasPreferredCashRegisterColumn) {
+            $userInsert['preferred_cash_register_id'] = $resolvedNewCashRegisterId;
+        }
+
+        $userId = DB::table('auth.users')->insertGetId($userInsert);
 
         DB::table('auth.user_roles')->insert([
             'user_id' => (int) $userId,
@@ -697,6 +708,8 @@ class MasterDataController extends Controller
         }
 
         $updates = ['updated_at' => now()];
+        $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
+        $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
 
         foreach (['branch_id', 'first_name', 'last_name', 'email', 'phone', 'status'] as $field) {
             if (array_key_exists($field, $payload)) {
@@ -718,21 +731,25 @@ class MasterDataController extends Controller
                 $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
             }
 
-            if (array_key_exists('preferred_warehouse_id', $payload)) {
+            if ($hasPreferredWarehouseColumn && array_key_exists('preferred_warehouse_id', $payload)) {
                 $updates['preferred_warehouse_id'] = $payload['preferred_warehouse_id'] !== null
                     ? (int) $payload['preferred_warehouse_id']
                     : ($defaultOperationalContext['warehouse_id'] ?? null);
             }
-            if (array_key_exists('preferred_cash_register_id', $payload)) {
+            if ($hasPreferredCashRegisterColumn && array_key_exists('preferred_cash_register_id', $payload)) {
                 $updates['preferred_cash_register_id'] = $payload['preferred_cash_register_id'] !== null
                     ? (int) $payload['preferred_cash_register_id']
                     : ($defaultOperationalContext['cash_register_id'] ?? null);
             }
-        } elseif (array_key_exists('branch_id', $payload)) {
+        } elseif (array_key_exists('branch_id', $payload) && ($hasPreferredWarehouseColumn || $hasPreferredCashRegisterColumn)) {
             // Branch changed without explicit warehouse/caja → reassign defaults for the new branch
             $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
-            $updates['preferred_warehouse_id'] = $defaultOperationalContext['warehouse_id'];
-            $updates['preferred_cash_register_id'] = $defaultOperationalContext['cash_register_id'];
+            if ($hasPreferredWarehouseColumn) {
+                $updates['preferred_warehouse_id'] = $defaultOperationalContext['warehouse_id'];
+            }
+            if ($hasPreferredCashRegisterColumn) {
+                $updates['preferred_cash_register_id'] = $defaultOperationalContext['cash_register_id'];
+            }
         }
 
         if (!empty($payload['password'])) {
@@ -2555,6 +2572,15 @@ class MasterDataController extends Controller
         return DB::table('information_schema.tables')
             ->where('table_schema', $schema)
             ->where('table_name', $table)
+            ->exists();
+    }
+
+    private function tableColumnExists(string $schema, string $table, string $column): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->where('column_name', $column)
             ->exists();
     }
 

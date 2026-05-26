@@ -3922,8 +3922,8 @@ class SalesController extends Controller
 
         $sheetWidth = ($isA4 && $forPdf) ? '198mm' : ($isA4 ? '210mm' : '80mm');
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $isA4 ? '140px' : '74mm';
-        $logoMaxHeight = $isA4 ? '90px' : '40mm';
+        $logoMaxWidth = $isA4 ? '102px' : '74mm';
+        $logoMaxHeight = $isA4 ? '62px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
@@ -3965,15 +3965,16 @@ class SalesController extends Controller
     @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
     body { padding-top: 0 !important; }
     .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
-    .a4-top-spacer { display: block !important; height: 6mm !important; }
-    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
+    .a4-top-spacer { display: block !important; height: 5mm !important; }
+    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 2.4mm !important; padding-bottom: 1.6mm !important; }
     .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 30mm !important; padding-right: 2mm !important; text-align: center !important; vertical-align: middle !important; }
+    .logo-col { width: 24mm !important; padding-right: 1.2mm !important; text-align: center !important; vertical-align: middle !important; }
     .logo-col .header-logo { margin: 0 auto !important; }
-    .brand-col { width: auto !important; padding: 0 0 0 2mm !important; }
-    .brand-col .brand-name { margin-bottom: 0.9mm !important; }
+    .brand-col { width: auto !important; padding: 0 0 0 1.2mm !important; }
+    .brand-col .brand-name { margin-bottom: 0.4mm !important; }
     .brand-col .meta, .brand-col .company-description, .brand-col .brand-legal { margin: 0.45mm 0 !important; }
-    .voucher-box { width: 56mm !important; margin-left: 2mm !important; }
+    .voucher-box { width: 58mm !important; margin-left: 1.4mm !important; }
+    .voucher-date { padding-top: 2.6mm !important; }
     .items-a4 { width: 100% !important; table-layout: fixed !important; }
     .items-a4 th, .items-a4 td { word-wrap: break-word; }
 PDFA4
@@ -4050,19 +4051,19 @@ TICKETHEAD;
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
     /* ── A4 header: 3 cols (logo | company info | fiscal box) ── */
-    .header--a4 { display: grid; grid-template-columns: auto 1fr 58mm; gap: 4mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
-    .logo-col { display: flex; align-items: center; justify-content: center; padding-right: 2mm; border-right: 1px solid #e2e8f0; }
-    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.4mm; }
+    .header--a4 { display: grid; grid-template-columns: 24mm 1fr 58mm; gap: 2.8mm; align-items: stretch; margin-bottom: 3mm; padding-bottom: 2.2mm; border-bottom: 2px solid #1e3a8a; }
+    .logo-col { display: flex; align-items: center; justify-content: center; padding-right: 1.2mm; border-right: 1px solid #e2e8f0; }
+    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.2mm; }
     .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; }
-    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.3mm; }
-    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.1mm; }
+    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.5mm; }
     .company-description { font-size: 8.5pt; font-weight: 700; color: #374151; }
     /* ── Fiscal box (right) ── */
     .voucher-box { border: 2px solid #1e3a8a; border-radius: 4px; overflow: hidden; text-align: center; }
     .voucher-ruc { padding: 2.5mm 3mm; font-size: 9.5pt; font-weight: 900; color: #1e3a8a; background: #fff; }
     .voucher-type { padding: 3mm; background: #1e3a8a; color: #fff; font-size: 9pt; font-weight: 900; text-transform: uppercase; line-height: 1.3; }
     .voucher-number { padding: 3mm; font-size: 15pt; font-weight: 900; color: #dc2626; letter-spacing: 0.5px; background: #fff; }
-    .voucher-date { font-size: 8pt; color: #374151; padding: 1.5mm 3mm; background: #f8fafc; border-top: 1px solid #bfdbfe; }
+    .voucher-date { font-size: 8pt; color: #374151; padding: 2.2mm 3mm 1.6mm; background: #f8fafc; border-top: 1px solid #bfdbfe; }
     /* ── Ticket header ── */
     .header { text-align: center; margin-bottom: 2mm; }
     .header-copy--a4 { text-align: left; }
@@ -4097,7 +4098,7 @@ TICKETHEAD;
     .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
     .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
     .electronic-signature { margin-top: 1.2mm; margin-bottom: 1mm; font-size: 8.5pt; line-height: 1.25; word-break: break-word; }
-    .thank-you { text-align: center; margin-top: 1.4mm; font-weight: 800; }
+    .thank-you { text-align: center; margin-top: 1.6mm; padding: 0.9mm 0; font-weight: 800; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 9pt; font-weight: 900; }
     .company-footer-bank { margin: 0.5mm 0; font-size: 9pt; font-weight: 700; }
     .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }

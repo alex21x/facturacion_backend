@@ -44,6 +44,9 @@ class SunatExceptionService
                 DB::raw("UPPER(COALESCE(d.metadata->>'sunat_status','')) as sunat_status"),
                 DB::raw("COALESCE(NULLIF(d.metadata->>'sunat_status_label',''), NULLIF(d.metadata->>'sunat_bridge_note',''), 'Pendiente SUNAT') as sunat_label"),
                 DB::raw("COALESCE((d.metadata->>'sunat_reconcile_attempts')::int, 0) as reconcile_attempts"),
+                DB::raw("(SELECT COUNT(*)::int FROM sales.tax_bridge_audit_logs l WHERE l.company_id = d.company_id AND l.document_id = d.id) as bridge_attempts"),
+                DB::raw("(SELECT UPPER(COALESCE(l.sunat_status, '')) FROM sales.tax_bridge_audit_logs l WHERE l.company_id = d.company_id AND l.document_id = d.id ORDER BY COALESCE(l.sent_at, l.created_at) DESC, l.id DESC LIMIT 1) as bridge_last_status"),
+                DB::raw("(SELECT COALESCE(l.sent_at, l.created_at) FROM sales.tax_bridge_audit_logs l WHERE l.company_id = d.company_id AND l.document_id = d.id ORDER BY COALESCE(l.sent_at, l.created_at) DESC, l.id DESC LIMIT 1) as bridge_last_at"),
                 DB::raw("COALESCE((d.metadata->>'inventory_pending_sunat')::boolean, false) as inventory_pending_sunat"),
                 DB::raw("COALESCE((d.metadata->>'inventory_sunat_settled')::boolean, false) as inventory_sunat_settled"),
                 DB::raw("COALESCE((d.metadata->>'sunat_needs_manual_confirmation')::boolean, false) as needs_manual_confirmation"),
@@ -78,7 +81,7 @@ class SunatExceptionService
         }
 
         if ($minAttempts > 0) {
-            $query->whereRaw("COALESCE((d.metadata->>'sunat_reconcile_attempts')::int, 0) >= ?", [$minAttempts]);
+            $query->whereRaw("GREATEST(COALESCE((d.metadata->>'sunat_reconcile_attempts')::int, 0), (SELECT COUNT(*)::int FROM sales.tax_bridge_audit_logs l WHERE l.company_id = d.company_id AND l.document_id = d.id)) >= ?", [$minAttempts]);
         }
 
         if ($onlyManualNeeded) {
@@ -97,6 +100,17 @@ class SunatExceptionService
             $metadata = json_decode((string) ($row->metadata ?? '{}'), true);
             $metadata = is_array($metadata) ? $metadata : [];
             $diagnostic = $this->taxBridgeService->summarizeBridgeDiagnostic($metadata['sunat_bridge_response'] ?? null);
+            $reconcileAttempts = (int) $row->reconcile_attempts;
+            $bridgeAttempts = (int) ($row->bridge_attempts ?? 0);
+            $effectiveAttempts = max($reconcileAttempts, $bridgeAttempts);
+            $bridgeLastStatus = strtoupper(trim((string) ($row->bridge_last_status ?? '')));
+            $effectiveSunatStatus = strtoupper(trim((string) $row->sunat_status));
+            $effectiveSunatLabel = (string) $row->sunat_label;
+
+            if ($bridgeLastStatus !== '' && $this->shouldPrioritizeBridgeStatus((string) $row->updated_at, $row->bridge_last_at ?? null)) {
+                $effectiveSunatStatus = $bridgeLastStatus;
+                $effectiveSunatLabel = $this->mapSunatStatusLabel($bridgeLastStatus, (string) $row->sunat_label);
+            }
 
             $data[] = [
                 'id' => (int) $row->id,
@@ -107,14 +121,18 @@ class SunatExceptionService
                 'issue_at' => (string) $row->issue_at,
                 'document_status' => (string) $row->document_status,
                 'customer_name' => (string) $row->customer_name,
-                'sunat_status' => (string) $row->sunat_status,
-                'sunat_label' => (string) $row->sunat_label,
+                'sunat_status' => $effectiveSunatStatus,
+                'sunat_label' => $effectiveSunatLabel,
                 'pending_hours' => (int) $row->pending_hours,
-                'reconcile_attempts' => (int) $row->reconcile_attempts,
+                'reconcile_attempts' => $reconcileAttempts,
+                'bridge_attempts' => $bridgeAttempts,
+                'effective_attempts' => $effectiveAttempts,
+                'bridge_last_status' => $bridgeLastStatus !== '' ? $bridgeLastStatus : null,
+                'bridge_last_at' => $row->bridge_last_at !== null ? (string) $row->bridge_last_at : null,
                 'needs_manual_confirmation' => (bool) $row->needs_manual_confirmation,
                 'inventory_pending_sunat' => (bool) $row->inventory_pending_sunat,
                 'inventory_sunat_settled' => (bool) $row->inventory_sunat_settled,
-                'inventory_mismatch' => $this->isInventoryMismatch((string) $row->sunat_status, (bool) $row->inventory_sunat_settled),
+                'inventory_mismatch' => $this->isInventoryMismatch($effectiveSunatStatus, (bool) $row->inventory_sunat_settled),
                 'sunat_reconcile_next_at' => $metadata['sunat_reconcile_next_at'] ?? null,
                 'sunat_bridge_http_code' => $metadata['sunat_bridge_http_code'] ?? null,
                 'sunat_bridge_note' => $metadata['sunat_bridge_note'] ?? null,
@@ -313,5 +331,36 @@ class SunatExceptionService
     {
         return ($sunatStatus === 'ACCEPTED' && !$inventorySettled)
             || ($sunatStatus !== 'ACCEPTED' && $inventorySettled);
+    }
+
+    private function mapSunatStatusLabel(string $status, string $fallback): string
+    {
+        return match (strtoupper(trim($status))) {
+            'ACCEPTED' => 'Aceptado',
+            'REJECTED' => 'Rechazado',
+            'PENDING_CONFIRMATION' => 'Pendiente confirmacion SUNAT',
+            'SENDING' => 'Enviando',
+            'SENT' => 'Enviado',
+            'HTTP_ERROR' => 'Error HTTP',
+            'NETWORK_ERROR' => 'Error de red',
+            default => $fallback,
+        };
+    }
+
+    private function shouldPrioritizeBridgeStatus(string $documentUpdatedAt, $bridgeLastAt): bool
+    {
+        if ($bridgeLastAt === null || trim((string) $bridgeLastAt) === '') {
+            return false;
+        }
+
+        try {
+            $docAt = \Carbon\Carbon::parse($documentUpdatedAt);
+            $bridgeAt = \Carbon\Carbon::parse((string) $bridgeLastAt);
+
+            return $bridgeAt->greaterThanOrEqualTo($docAt);
+        } catch (\Throwable $e) {
+            // Fallback: if parsing fails, prefer bridge only when metadata status is empty.
+            return trim($documentUpdatedAt) === '';
+        }
     }
 }

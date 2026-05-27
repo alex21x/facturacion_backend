@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use Throwable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 
@@ -34,7 +36,15 @@ class AppServiceProvider extends ServiceProvider
         // Enforce DB session timezone on PostgreSQL to avoid date shifts when persisting dates/timestamps.
         if ((string) config('database.default') === 'pgsql' && $timezone !== '') {
             $escapedTimezone = str_replace("'", "''", $timezone);
-            DB::unprepared("SET TIME ZONE '{$escapedTimezone}'");
+            try {
+                DB::unprepared("SET TIME ZONE '{$escapedTimezone}'");
+            } catch (Throwable $exception) {
+                // Keep app booting in local/dev even when DB credentials are temporarily invalid.
+                Log::warning('Skipping DB timezone session setup during boot', [
+                    'connection' => (string) config('database.default'),
+                    'reason' => $exception->getMessage(),
+                ]);
+            }
         }
     }
 }

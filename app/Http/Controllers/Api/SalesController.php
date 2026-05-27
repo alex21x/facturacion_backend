@@ -4022,25 +4022,38 @@ class SalesController extends Controller
             : '';
 
         $printPageMargin = ($isA4 && $forPdf)
-            ? '8mm 4mm 4mm 4mm'
+            ? '5mm 3mm 3mm 3mm'
             : ((!$isA4 && $forPdf) ? '2mm 2mm 3mm 2mm' : '0');
 
         $pdfA4Css = ($isA4 && $forPdf)
             ? <<<PDFA4
-    @page { size: A4 portrait; margin: 8mm 4mm 4mm 4mm; }
-    body { padding-top: 0 !important; }
-    .sheet { width: 100% !important; max-width: 198mm !important; margin: 0 auto !important; padding: 0 !important; }
-    .a4-top-spacer { display: block !important; height: 6mm !important; }
-    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; gap: 0 !important; margin-bottom: 3mm !important; padding-bottom: 2mm !important; }
-    .logo-col, .brand-col, .voucher-box { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 30mm !important; padding-right: 2mm !important; text-align: center !important; vertical-align: middle !important; }
-    .logo-col .header-logo { margin: 0 auto !important; }
-    .brand-col { width: auto !important; padding: 0 0 0 2mm !important; }
-    .brand-col .brand-name { margin-bottom: 0.9mm !important; }
-    .brand-col .meta, .brand-col .company-description, .brand-col .brand-legal { margin: 0.45mm 0 !important; }
-    .voucher-box { width: 56mm !important; margin-left: 2mm !important; }
-    .items-a4 { width: 100% !important; table-layout: fixed !important; }
-    .items-a4 th, .items-a4 td { word-wrap: break-word; }
+    @page { size: A4 portrait; margin: 5mm 4mm 4mm 4mm; }
+    .no-print { display: none !important; }
+    .sheet { width: 190mm !important; max-width: 190mm !important; margin: 0 auto !important; padding: 0 !important; }
+    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; border-bottom: 2px solid #1e3a8a !important; }
+    .logo-col, .brand-col, .voucher-col { display: table-cell !important; vertical-align: top !important; }
+    .logo-col { width: 16mm !important; padding-right: 0.6mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
+    .logo-col .header-logo { margin: 0 auto !important; max-width: 15mm !important; max-height: 15mm !important; }
+    .brand-col { width: auto !important; padding-left: 1.1mm !important; }
+    .voucher-col { width: 51mm !important; padding-left: 0.7mm !important; }
+    .voucher-box { width: 100% !important; margin-left: 0 !important; }
+    .info-row { display: table !important; width: 100% !important; }
+    .info-label, .info-value { display: table-cell !important; vertical-align: top !important; }
+    .info-label { width: 24mm !important; }
+    .info-value { text-align: left !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
+    .info-row--doc-date { table-layout: fixed !important; }
+    .info-block { display: table-cell !important; vertical-align: top !important; }
+    .info-block--date { width: 72mm !important; }
+    .info-block--date .info-label { width: 28mm !important; text-align: right !important; padding-right: 1.2mm !important; }
+    .info-block--date .info-value { text-align: left !important; white-space: nowrap !important; }
+    .summary-row, .total-row { display: table !important; width: 100% !important; table-layout: fixed !important; }
+    .summary-label, .summary-value, .total-row span { display: table-cell !important; }
+    .summary--a4 { width: 76mm !important; margin-left: auto !important; }
+    .summary--a4 .summary-label, .summary--a4 .total-row span:first-child { width: 34mm !important; }
+    .summary--a4 .summary-value, .summary--a4 .total-row span:last-child { text-align: right !important; }
+    .company-footer-logos { display: block !important; text-align: left !important; margin-top: 1.6mm !important; }
+    .paybrand { display: inline-block !important; vertical-align: middle !important; margin: 0.8mm 1.2mm 0 0 !important; padding: 0.9mm 1.6mm !important; height: auto !important; }
+    .paybrand img { display: block !important; height: 6.5mm !important; width: auto !important; }
 PDFA4
             : '';
 
@@ -4100,7 +4113,7 @@ A4HEAD
 </div>
 TICKETHEAD;
 
-    $pdfA4TopSpacerHtml = ($isA4 && $forPdf) ? '<div class="a4-top-spacer"></div>' : '';
+    $pdfA4TopSpacerHtml = '';
 
         return <<<HTML
 <!doctype html>

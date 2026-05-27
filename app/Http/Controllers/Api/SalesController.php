@@ -3614,13 +3614,68 @@ class SalesController extends Controller
             }
         }
 
+        $vehiclePlateSnapshot = trim((string) (
+            $doc->vehicle_plate_snapshot
+            ?? $docMetadata['vehicle_plate']
+            ?? $docMetadata['vehiclePlateSnapshot']
+            ?? ''
+        ));
+        $vehicleBrandSnapshot = trim((string) (
+            $doc->vehicle_brand_snapshot
+            ?? $docMetadata['vehicle_brand']
+            ?? $docMetadata['vehicleBrand']
+            ?? ''
+        ));
+        $vehicleModelSnapshot = trim((string) (
+            $doc->vehicle_model_snapshot
+            ?? $docMetadata['vehicle_model']
+            ?? $docMetadata['vehicleModel']
+            ?? ''
+        ));
+
+        $customerVehicleId = $doc->customer_vehicle_id !== null ? (int) $doc->customer_vehicle_id : 0;
+        if ($customerVehicleId <= 0) {
+            $metadataCustomerVehicleId = $docMetadata['customer_vehicle_id'] ?? $docMetadata['customerVehicleId'] ?? null;
+            if (is_numeric($metadataCustomerVehicleId)) {
+                $customerVehicleId = (int) $metadataCustomerVehicleId;
+            }
+        }
+
+        $branchId = $doc->branch_id !== null ? (int) $doc->branch_id : null;
+        $workshopMultiVehicleEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
+            && $this->tableExists('sales.customer_vehicles');
+
+        if ($workshopMultiVehicleEnabled && $customerVehicleId > 0) {
+            $needsVehicleFallback = $vehiclePlateSnapshot === '' || $vehicleBrandSnapshot === '' || $vehicleModelSnapshot === '';
+            if ($needsVehicleFallback) {
+                $vehicle = DB::table('sales.customer_vehicles')
+                    ->select(['plate', 'brand', 'model'])
+                    ->where('company_id', $companyId)
+                    ->where('customer_id', (int) $doc->customer_id)
+                    ->where('id', $customerVehicleId)
+                    ->first();
+
+                if ($vehicle) {
+                    if ($vehiclePlateSnapshot === '') {
+                        $vehiclePlateSnapshot = strtoupper(trim((string) ($vehicle->plate ?? '')));
+                    }
+                    if ($vehicleBrandSnapshot === '') {
+                        $vehicleBrandSnapshot = trim((string) ($vehicle->brand ?? ''));
+                    }
+                    if ($vehicleModelSnapshot === '') {
+                        $vehicleModelSnapshot = trim((string) ($vehicle->model ?? ''));
+                    }
+                }
+            }
+        }
+
         return response()->json([
             'data' => [
                 'id' => (int) $doc->id,
                 'branchId' => $doc->branch_id !== null ? (int) $doc->branch_id : null,
                 'warehouseId' => $doc->warehouse_id !== null ? (int) $doc->warehouse_id : null,
                 'customerId' => (int) $doc->customer_id,
-                'customerVehicleId' => $doc->customer_vehicle_id !== null ? (int) $doc->customer_vehicle_id : null,
+                'customerVehicleId' => $customerVehicleId > 0 ? $customerVehicleId : null,
                 'currencyId' => (int) $doc->currency_id,
                 'paymentMethodId' => $doc->payment_method_id !== null ? (int) $doc->payment_method_id : null,
                 'documentKind' => (string) $doc->document_kind,
@@ -3639,9 +3694,9 @@ class SalesController extends Controller
                 'taxTotal' => (float) $taxTotal,
                 'grandTotal' => (float) $doc->total,
                 'metadata' => $docMetadata,
-                'vehiclePlateSnapshot' => $doc->vehicle_plate_snapshot !== null ? (string) $doc->vehicle_plate_snapshot : null,
-                'vehicleBrandSnapshot' => $doc->vehicle_brand_snapshot !== null ? (string) $doc->vehicle_brand_snapshot : null,
-                'vehicleModelSnapshot' => $doc->vehicle_model_snapshot !== null ? (string) $doc->vehicle_model_snapshot : null,
+                'vehiclePlateSnapshot' => $vehiclePlateSnapshot !== '' ? $vehiclePlateSnapshot : null,
+                'vehicleBrandSnapshot' => $vehicleBrandSnapshot !== '' ? $vehicleBrandSnapshot : null,
+                'vehicleModelSnapshot' => $vehicleModelSnapshot !== '' ? $vehicleModelSnapshot : null,
                 'gravadaTotal' => (float) $gravadaTotal,
                 'inafectaTotal' => (float) $inafectaTotal,
                 'exoneradaTotal' => (float) $exoneradaTotal,

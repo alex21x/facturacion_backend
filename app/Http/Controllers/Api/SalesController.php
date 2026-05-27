@@ -100,7 +100,7 @@ class SalesController extends Controller
             }
         }
 
-        // Pre-warm toggle maps once — all subsequent feature lookups use the in-memory cache (2 DB queries total)
+        // Pre-warm toggle maps once - all subsequent feature lookups use the in-memory cache (2 DB queries total)
         $this->prewarmFeatureToggles($companyId, $branchId);
 
         $currencies = DB::table('core.currencies')
@@ -325,6 +325,7 @@ class SalesController extends Controller
         }
 
         return [
+            'company_id' => $companyId,
             'tax_id'     => $company->tax_id ?? null,
             'legal_name' => $company->legal_name ?? '',
             'trade_name' => $company->trade_name ?? null,
@@ -333,6 +334,7 @@ class SalesController extends Controller
             'phone'      => $settings->phone ?? null,
             'email'      => $companyEmail,
             'logo_url'   => $logoUrl,
+            'logo_data_uri' => $logoDataUri,
             'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
                 ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
                 : true,
@@ -3725,7 +3727,7 @@ class SalesController extends Controller
             ? (string) $request->query('format')
             : 'ticket';
 
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, false);
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -3753,15 +3755,15 @@ class SalesController extends Controller
         $fileName = ($series !== '' ? $series : 'DOC') . '-' . ($number !== '' ? $number : '0') . '.pdf';
 
         $options = new Options();
-        $options->set('isRemoteEnabled', true);
+        // Local testing: avoid remote asset fetch timeouts during PDF rendering.
+        $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isPhpEnabled', false);
         $options->set('defaultMediaType', 'print');
         $options->set('dpi', 96);
 
         $dompdf = new Dompdf($options);
-        // DOMPDF needs print-focused CSS fallbacks to keep visual parity with browser popup.
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, true);
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
         $dompdf->loadHtml($html, 'UTF-8');
 
         if ($format === 'ticket') {
@@ -3783,9 +3785,421 @@ class SalesController extends Controller
         ]);
     }
 
-    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket', bool $forPdf = false): string
+        private function renderCommercialDocumentA4LegacyHtml(array $doc): string
+        {
+                $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
+                $metaData = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
+
+                $companyTitle = trim((string) ($company['trade_name'] ?? $company['tradeName'] ?? $company['legal_name'] ?? $company['legalName'] ?? 'SISTEMA FACTURACION'));
+                $companyLegalName = trim((string) ($company['legal_name'] ?? $company['legalName'] ?? $companyTitle));
+                $companyDescription = trim((string) ($company['company_description'] ?? $company['companyDescription'] ?? ''));
+                $companyTaxId = trim((string) ($company['tax_id'] ?? $company['taxId'] ?? '00000000000'));
+                $companyAddress = trim((string) ($company['address'] ?? ''));
+                $companyPhone = trim((string) ($company['phone'] ?? ''));
+                $companyEmail = trim((string) ($company['email'] ?? ''));
+                $logoDataUriRaw = trim((string) ($company['logo_data_uri'] ?? $company['logoDataUri'] ?? ''));
+                $logoUrlRaw = trim((string) ($company['logo_url'] ?? $company['logoUrl'] ?? ''));
+                $logoSourceRaw = trim((string) (
+                    $company['logo_data_uri']
+                    ?? $company['logoDataUri']
+                    ?? $company['logo_url']
+                    ?? $company['logoUrl']
+                    ?? ''
+                ));
+                if (!function_exists('imagecreatetruecolor') && preg_match('/^data:image\//i', $logoDataUriRaw) === 1) {
+                    $logoSourceRaw = $logoUrlRaw;
+                }
+                $logoUrl = $this->escapeHtml($logoSourceRaw);
+                $companyId = (int) ($company['company_id'] ?? $company['id'] ?? 0);
+                $branchId = isset($doc['branchId']) && $doc['branchId'] !== null
+                    ? (int) $doc['branchId']
+                    : null;
+                $workshopMultiVehicleEnabled = $companyId > 0
+                    ? $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
+                    : false;
+
+                $docKindRaw = strtoupper(trim((string) ($doc['documentKind'] ?? 'DOCUMENTO')));
+                $docKindLabel = [
+                        'INVOICE' => 'FACTURA ELECTRONICA',
+                        'RECEIPT' => 'BOLETA ELECTRONICA',
+                        'CREDIT_NOTE' => 'NOTA DE CREDITO',
+                        'DEBIT_NOTE' => 'NOTA DE DEBITO',
+                        'SALES_ORDER' => 'PEDIDO DE VENTA',
+                        'QUOTATION' => 'COTIZACION',
+                ][$docKindRaw] ?? ($docKindRaw !== '' ? $docKindRaw : 'DOCUMENTO');
+
+                $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
+                $number = $this->escapeHtml((string) ($doc['number'] ?? '0'));
+                $issueAtRaw = (string) ($doc['issueDate'] ?? '');
+                $issueAt = $this->escapeHtml($this->formatIssueDateTime($issueAtRaw));
+                $issueDateOnly = $issueAt;
+                if ($issueAtRaw !== '') {
+                        try {
+                                $issueDateOnly = $this->escapeHtml(Carbon::parse($issueAtRaw)->format('d/m/Y'));
+                        } catch (\Throwable $e) {
+                                $issueDateOnly = $issueAt;
+                        }
+                }
+
+                $dueDate = $this->findFirstMetaStringValue($metaData, ['due_date', 'fecha_vencimiento', 'dueDate']);
+                if ($dueDate === '') {
+                        $dueDate = $issueDateOnly;
+                }
+
+                $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
+                $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
+                $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+                $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
+                $currencyCode = strtoupper((string) ($doc['currencyCode'] ?? 'PEN'));
+                $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? ($currencyCode === 'PEN' ? 'S/' : $currencyCode)));
+                $currencyLabel = $currencyCode === 'PEN' ? 'SOLES' : $currencyCode;
+
+                $guideNo = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['guia', 'nro_guia', 'guide_number', 'guideNumber']));
+                $seller = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['seller_name', 'vendedor', 'salesperson_name']));
+                $orderPurchase = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['purchase_order', 'orden_compra', 'order_purchase']));
+                $customerCode = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['customer_code', 'codigo_cliente', 'client_code']));
+                $incoterm = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['incoterm']));
+                $areaVta = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['area_vta', 'area_venta', 'sales_area']));
+                $countryCode = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['country_code', 'codigo_pais']));
+                if ($countryCode === '') {
+                        $countryCode = 'PER';
+                }
+
+                $vehiclePlate = trim((string) (
+                        $doc['vehiclePlateSnapshot']
+                        ?? $metaData['vehicle_plate']
+                        ?? $metaData['vehiclePlateSnapshot']
+                        ?? ''
+                ));
+                $vehicleBrand = trim((string) (
+                        $doc['vehicleBrandSnapshot']
+                        ?? $metaData['vehicle_brand']
+                        ?? $metaData['vehicleBrand']
+                        ?? ''
+                ));
+                $vehicleModel = trim((string) (
+                        $doc['vehicleModelSnapshot']
+                        ?? $metaData['vehicle_model']
+                        ?? $metaData['vehicleModel']
+                        ?? ''
+                ));
+                $vehicleInfo = trim(implode(' ', array_filter([$vehiclePlate, $vehicleBrand, $vehicleModel], static fn ($v) => trim((string) $v) !== '')));
+                $vehicleBlock = $workshopMultiVehicleEnabled && $vehicleInfo !== ''
+                        ? '<div class="line"><span class="k">VEHICULO:</span><span class="v">' . $this->escapeHtml($vehicleInfo) . '</span></div>'
+                        : '';
+
+                $gravadaTotal = (float) ($doc['gravadaTotal'] ?? 0);
+                $inafectaTotal = (float) ($doc['inafectaTotal'] ?? 0);
+                $exoneradaTotal = (float) ($doc['exoneradaTotal'] ?? 0);
+                $taxTotal = (float) ($doc['taxTotal'] ?? 0);
+                $grandTotal = (float) ($doc['grandTotal'] ?? 0);
+                $totalInWords = $this->escapeHtml($this->amountToSpanishWords($grandTotal, $currencyCode));
+
+                $items = is_array($doc['items'] ?? null) ? $doc['items'] : [];
+                $itemRows = '';
+                foreach ($items as $item) {
+                        $itemMetadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+                        $itemCodeRaw = trim((string) (
+                                $item['productCode']
+                                ?? $item['product_code']
+                                ?? $itemMetadata['product_code']
+                                ?? $itemMetadata['productCode']
+                                ?? $itemMetadata['code']
+                                ?? ''
+                        ));
+                        if ($itemCodeRaw === '' && !empty($item['productId'])) {
+                                $itemCodeRaw = 'ID-' . (int) $item['productId'];
+                        }
+
+                        $unitPrice = (float) ($item['unitPrice'] ?? 0);
+                        $salePrice = (float) ($item['salePrice'] ?? $item['priceWithTax'] ?? $unitPrice);
+                        $discount = (float) ($item['discountTotal'] ?? $item['discount'] ?? 0);
+                        $lineTotal = (float) ($item['lineTotal'] ?? 0);
+
+                        $itemRows .= '<tr>'
+                                . '<td class="c">' . (int) ($item['lineNo'] ?? 0) . '</td>'
+                                . '<td class="c">' . ($itemCodeRaw !== '' ? $this->escapeHtml($itemCodeRaw) : '-') . '</td>'
+                                . '<td class="r">' . $this->formatAmount((float) ($item['qty'] ?? 0)) . '</td>'
+                                . '<td class="c">' . $this->escapeHtml((string) ($item['unitLabel'] ?? 'NIU')) . '</td>'
+                                . '<td class="l">' . $this->escapeHtml((string) ($item['description'] ?? '-')) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($unitPrice) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($salePrice) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($discount) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($lineTotal) . '</td>'
+                                . '</tr>';
+                }
+                if ($itemRows === '') {
+                        $itemRows = '<tr><td colspan="9" class="c">SIN ITEMS</td></tr>';
+                }
+
+                $documentFileName = $this->escapeHtml(trim((string) ($doc['series'] ?? '')) . '-' . trim((string) ($doc['number'] ?? '')) . '.pdf');
+                $companyTitleEsc = $this->escapeHtml($companyTitle !== '' ? $companyTitle : 'SISTEMA FACTURACION');
+                $companyLegalBlock = ($companyLegalName !== '' && $companyLegalName !== $companyTitle)
+                        ? '<div class="company-legal">' . $this->escapeHtml($companyLegalName) . '</div>'
+                        : '';
+                $companyDescriptionBlock = $companyDescription !== ''
+                        ? '<div class="company-meta">' . $this->escapeHtml($companyDescription) . '</div>'
+                        : '';
+                $companyAddressBlock = $companyAddress !== ''
+                        ? '<div class="company-meta">' . $this->escapeHtml($companyAddress) . '</div>'
+                        : '';
+                $companyPhoneBlock = $companyPhone !== ''
+                        ? '<div class="company-meta">Central telefonica: ' . $this->escapeHtml($companyPhone) . '</div>'
+                        : '';
+                $companyEmailBlock = $companyEmail !== ''
+                        ? '<div class="company-meta">' . $this->escapeHtml($companyEmail) . '</div>'
+                        : '';
+                $logoBlock = $logoUrl !== '' ? '<img src="' . $logoUrl . '" alt="Logo" class="logo" />' : '';
+
+                $bankAccounts = is_array($company['bank_accounts'] ?? null)
+                    ? $company['bank_accounts']
+                    : (is_array($company['bankAccounts'] ?? null) ? $company['bankAccounts'] : []);
+                $bankRows = '';
+                foreach ($bankAccounts as $bank) {
+                    if (!is_array($bank)) {
+                        continue;
+                    }
+                    $bankName = $this->escapeHtml((string) ($bank['bank_name'] ?? ''));
+                    $account = $this->escapeHtml((string) ($bank['account_number'] ?? ''));
+                    $cci = $this->escapeHtml((string) ($bank['cci'] ?? ''));
+                    $holder = $this->escapeHtml((string) ($bank['account_holder'] ?? ''));
+
+                    if ($bankName === '' && $account === '' && $cci === '' && $holder === '') {
+                        continue;
+                    }
+
+                    $bankRows .= '<div class="bank-item">';
+                    if ($bankName !== '') {
+                        $bankRows .= '<div><strong>' . $bankName . '</strong></div>';
+                    }
+                    if ($account !== '') {
+                        $bankRows .= '<div>Cuenta: ' . $account . '</div>';
+                    }
+                    if ($cci !== '') {
+                        $bankRows .= '<div>CCI: ' . $cci . '</div>';
+                    }
+                    if ($holder !== '') {
+                        $bankRows .= '<div>Titular: ' . $holder . '</div>';
+                    }
+                    $bankRows .= '</div>';
+                }
+                $banksSection = $bankRows !== ''
+                    ? '<div class="bank-box"><div class="bank-title">BANCOS</div>' . $bankRows . '</div>'
+                    : '';
+
+                $showPaymentBrandsRaw = $company['show_payment_brand_icons'] ?? $company['showPaymentBrandIcons'] ?? true;
+                if ($showPaymentBrandsRaw === null) {
+                    $showPaymentBrands = true;
+                } else {
+                    $showPaymentBrands = filter_var($showPaymentBrandsRaw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                    if ($showPaymentBrands === null) {
+                        $showPaymentBrands = (bool) $showPaymentBrandsRaw;
+                    }
+                }
+
+                $paymentBrandsSection = '';
+                if ($showPaymentBrands) {
+                    $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
+                    $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
+                    $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
+
+                    $paymentBrandsSection = '<div class="pay-logos">'
+                        . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
+                        . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
+                        . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
+                        . '</div>';
+                }
+
+                $electronicSignatureRaw = $this->findFirstMetaStringValue($metaData, [
+                    'sunat_electronic_signature',
+                    'sunat_signature',
+                    'firma_electronica',
+                    'firma',
+                    'signature',
+                    'hash_cpe',
+                    'codigo_hash',
+                    'digest_value',
+                    'digestValue',
+                ]);
+                $electronicSignatureRaw = $this->normalizeElectronicSignatureValue($electronicSignatureRaw);
+                $electronicSignatureBlock = $electronicSignatureRaw !== ''
+                    ? '<div class="sign-box"><strong>Firma electronica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
+                    : '';
+
+                return <<<HTML
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>{$documentFileName}</title>
+    <style>
+        @page { size: A4 portrait; margin: 8mm; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+        .sheet { width: 100%; border: 1px solid #111; min-height: 279mm; padding: 5mm; }
+        .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
+        .top-3 td { vertical-align: top; }
+        .top-logo { width: 19%; padding-right: 3mm; }
+        .top-company { width: 53%; padding-right: 3mm; }
+        .top-voucher { width: 28%; }
+        .logo-wrap { min-height: 82px; display: flex; align-items: center; justify-content: center; }
+        .logo { max-width: 100%; max-height: 86px; display: block; }
+        .company-title { font-size: 18px; font-weight: 700; letter-spacing: 0.25px; text-transform: uppercase; margin-bottom: 3px; }
+        .company-legal { font-size: 12px; margin-bottom: 2px; }
+        .company-meta { font-size: 11px; line-height: 1.25; }
+        .voucher-box { border: 1px solid #111; text-align: center; padding: 12px 8px; min-height: 112px; }
+        .voucher-ruc { font-size: 12px; font-weight: 700; margin-bottom: 11px; letter-spacing: 0.6px; }
+        .voucher-kind { font-size: 12px; font-weight: 700; margin-bottom: 11px; letter-spacing: 0.5px; text-transform: uppercase; }
+        .voucher-no { font-size: 14px; font-weight: 700; letter-spacing: 0.8px; }
+        .legend { text-align: center; font-size: 10px; margin: 5px 0 6px; }
+        .info-box { border: 1px solid #111; margin-bottom: 4px; }
+        .info-grid { width: 100%; border-collapse: collapse; }
+        .info-grid td { width: 50%; vertical-align: top; padding: 4px 8px; }
+        .line { margin: 2px 0; }
+        .k { display: inline-block; width: 126px; font-weight: 700; letter-spacing: 0.3px; }
+        .v { display: inline-block; }
+        .items { width: 100%; border-collapse: collapse; margin-top: 2px; }
+        .items th, .items td { border: 1px solid #111; padding: 4px 5px; }
+        .items th { text-align: center; font-size: 11px; font-weight: 700; }
+        .items td { font-size: 10.5px; }
+        .l { text-align: left; }
+        .c { text-align: center; }
+        .r { text-align: right; }
+        .totals-wrap { margin-top: 5px; display: table; width: 100%; }
+        .words { display: table-cell; width: 64%; vertical-align: top; padding-right: 8px; font-size: 10.8px; }
+        .totals { display: table-cell; width: 36%; vertical-align: top; }
+        .totals table { width: 100%; border-collapse: collapse; }
+        .totals td { border: 1px solid #111; padding: 3px 5px; font-size: 10.8px; }
+        .totals .k2 { font-weight: 700; text-align: right; }
+        .totals .v2 { text-align: right; }
+        .totals .grand td { font-size: 12px; font-weight: 700; }
+        .extras { margin-top: 4px; border-top: 1px solid #111; padding-top: 3px; }
+        .bank-box { font-size: 10px; line-height: 1.2; margin-bottom: 3px; }
+        .bank-title { font-weight: 700; margin-bottom: 2px; }
+        .bank-item { margin-bottom: 2px; }
+        .pay-logos { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+        .paybrand { border: 1px solid #111; border-radius: 2px; padding: 2px 4px; background: #fff; }
+        .paybrand img { height: 20px; width: auto; display: block; }
+        .sign-box { font-size: 10px; line-height: 1.25; margin-bottom: 3px; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <section class="sheet">
+        <table class="top-3">
+            <tr>
+                <td class="top-logo">
+                    <div class="logo-wrap">{$logoBlock}</div>
+                </td>
+                <td class="top-company">
+                    <div class="company-title">{$companyTitleEsc}</div>
+                    {$companyLegalBlock}
+                    {$companyDescriptionBlock}
+                    {$companyAddressBlock}
+                    {$companyPhoneBlock}
+                    {$companyEmailBlock}
+                </td>
+                <td class="top-voucher">
+                    <div class="voucher-box">
+                        <div class="voucher-ruc">R.U.C. {$this->escapeHtml($companyTaxId)}</div>
+                        <div class="voucher-kind">{$this->escapeHtml($docKindLabel)}</div>
+                        <div class="voucher-no">{$series}-{$number}</div>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <div class="legend">Ano del Bicentenario, de la consolidacion de nuestra Independencia, y de la conmemoracion de las heroicas batallas de Junin y Ayacucho</div>
+
+        <section class="info-box">
+            <table class="info-grid">
+                <tr>
+                    <td>
+                        <div class="line"><span class="k">R.U.C:</span><span class="v">{$customerDoc}</span></div>
+                        <div class="line"><span class="k">SENOR(ES):</span><span class="v">{$customer}</span></div>
+                        <div class="line"><span class="k">TELEFONO:</span><span class="v">-</span></div>
+                        <div class="line"><span class="k">DIRECCION:</span><span class="v">{$customerAddress}</span></div>
+                        {$vehicleBlock}
+                    </td>
+                    <td>
+                        <div class="line"><span class="k">FECHA EMISION:</span><span class="v">{$issueDateOnly}</span></div>
+                        <div class="line"><span class="k">FECHA VENCIMIENTO:</span><span class="v">{$this->escapeHtml($dueDate)}</span></div>
+                        <div class="line"><span class="k">TIPO DE MONEDA:</span><span class="v">{$this->escapeHtml($currencyLabel)}</span></div>
+                        <div class="line"><span class="k">CODIGO DE PAIS:</span><span class="v">{$countryCode}</span></div>
+                    </td>
+                </tr>
+            </table>
+        </section>
+
+        <section class="info-box">
+            <table class="info-grid">
+                <tr>
+                    <td>
+                        <div class="line"><span class="k">NRO GUIA:</span><span class="v">{$guideNo}</span></div>
+                        <div class="line"><span class="k">COND. DE PAGO:</span><span class="v">{$paymentMethod}</span></div>
+                        <div class="line"><span class="k">VENDEDOR:</span><span class="v">{$seller}</span></div>
+                    </td>
+                    <td>
+                        <div class="line"><span class="k">ORDEN COMPRA:</span><span class="v">{$orderPurchase}</span></div>
+                        <div class="line"><span class="k">COD. CLIENTE:</span><span class="v">{$customerCode}</span></div>
+                        <div class="line"><span class="k">INCOTERM:</span><span class="v">{$incoterm}</span></div>
+                        <div class="line"><span class="k">AREA.VTA:</span><span class="v">{$areaVta}</span></div>
+                    </td>
+                </tr>
+            </table>
+        </section>
+
+        <table class="items">
+            <thead>
+                <tr>
+                    <th style="width:5%">Item</th>
+                    <th style="width:12%">Codigo</th>
+                    <th style="width:8%">Cant.</th>
+                    <th style="width:8%">Unid.</th>
+                    <th style="width:33%">Descripcion</th>
+                    <th style="width:10%">Valor Unit.</th>
+                    <th style="width:10%">Precio Vta.</th>
+                    <th style="width:7%">Dscto.</th>
+                    <th style="width:7%">Valor Vta.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {$itemRows}
+            </tbody>
+        </table>
+
+        <section class="totals-wrap">
+            <div class="words">
+                <div><strong>SON:</strong> {$totalInWords}</div>
+            </div>
+            <div class="totals">
+                <table>
+                    <tr><td class="k2">OP. GRAVADAS</td><td class="v2">{$currency} {$this->formatAmount($gravadaTotal)}</td></tr>
+                    <tr><td class="k2">OP. INAFECTAS</td><td class="v2">{$currency} {$this->formatAmount($inafectaTotal)}</td></tr>
+                    <tr><td class="k2">OP. EXONERADAS</td><td class="v2">{$currency} {$this->formatAmount($exoneradaTotal)}</td></tr>
+                    <tr><td class="k2">IGV</td><td class="v2">{$currency} {$this->formatAmount($taxTotal)}</td></tr>
+                    <tr class="grand"><td class="k2">TOTAL</td><td class="v2">{$currency} {$this->formatAmount($grandTotal)}</td></tr>
+                </table>
+            </div>
+        </section>
+
+        <section class="extras">
+            {$banksSection}
+            {$paymentBrandsSection}
+            {$electronicSignatureBlock}
+        </section>
+    </section>
+</body>
+</html>
+HTML;
+        }
+
+    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
     {
         $isA4 = $format === 'a4';
+                if ($isA4) {
+                        return $this->renderCommercialDocumentA4LegacyHtml($doc);
+                }
+
         $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
         $companyTradeName = trim((string) ($company['trade_name'] ?? $company['tradeName'] ?? ''));
         $companyLegalName = trim((string) ($company['legal_name'] ?? $company['legalName'] ?? ''));
@@ -3858,25 +4272,6 @@ class SalesController extends Controller
         $addressRow = $address !== '' ? '<div class="meta">' . $address . '</div>' : '';
         $phoneRow = $phone !== '' ? '<div class="meta">TEL: ' . $phone . '</div>' : '';
         $emailRow = $email !== '' ? '<div class="meta">EMAIL: ' . $email . '</div>' : '';
-        $electronicSignatureRaw = $this->findFirstMetaStringValue($docMetadata, [
-            'sunat_electronic_signature',
-            'sunat_signature',
-            'firma_electronica',
-            'firma',
-            'signature',
-            'hash_cpe',
-            'codigo_hash',
-            'digest_value',
-            'digestValue',
-        ]);
-        $electronicSignatureRaw = $this->normalizeElectronicSignatureValue($electronicSignatureRaw);
-        $electronicSignatureHtml = $electronicSignatureRaw !== ''
-            ? '<div class="electronic-signature"><strong>Firma electr&oacute;nica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
-            : '';
-        $footerSignatureHtml = $isA4 ? $electronicSignatureHtml : '';
-        $thankYouHtml = $isA4
-            ? '<div class="thank-you">Gracias por su compra</div>'
-            : '<div>Gracias por su compra</div>';
 
         $items = is_array($doc['items'] ?? null) ? $doc['items'] : [];
         $itemRows = '';
@@ -3979,23 +4374,18 @@ class SalesController extends Controller
                 . '</div>';
         }
 
-        $sheetWidth = $isA4 ? ($forPdf ? '198mm' : '210mm') : '80mm';
+        $sheetWidth = $isA4 ? '210mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
-        $logoMaxWidth = $isA4 ? ($forPdf ? '15mm' : '102px') : '74mm';
-        $logoMaxHeight = $isA4 ? ($forPdf ? '15mm' : '62px') : '40mm';
+        $logoMaxWidth = $isA4 ? '140px' : '74mm';
+        $logoMaxHeight = $isA4 ? '90px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
         $headerCopyClass = $isA4 ? 'header-copy header-copy--a4' : 'header-copy';
         $bodyFontSize = $isA4 ? '10pt' : '13px';
-        $sheetPadding = $isA4 ? ($forPdf ? '3.6mm 3mm 2.6mm' : '4.5mm 4mm 3mm') : '3mm';
+        $sheetPadding = $isA4 ? '6mm' : '3mm';
         $titleFontSize = $isA4 ? '13pt' : '15px';
         $docNoFontSize = $isA4 ? '14pt' : '16px';
         $metaFontSize = $isA4 ? '9pt' : '12px';
-        $infoFontSize = $isA4 ? '8.6pt' : '12px';
-        $headerLogoColWidth = $isA4 ? ($forPdf ? '16mm' : '24mm') : '0';
-        $headerVoucherColWidth = $isA4 ? ($forPdf ? '51mm' : '58mm') : '0';
-        $headerGap = $isA4 ? ($forPdf ? '1mm' : '2.8mm') : '0';
-        $headerMarginBottom = $isA4 ? ($forPdf ? '1.1mm' : '3mm') : '0';
-        $headerPaddingBottom = $isA4 ? ($forPdf ? '1.1mm' : '2.2mm') : '0';
+        $infoFontSize = $isA4 ? '9pt' : '12px';
         $itemCodeFontSize = $isA4 ? '8pt' : '10px';
         $itemDescFontSize = $isA4 ? '9pt' : '12px';
         $itemUnitFontSize = $isA4 ? '9pt' : '12px';
@@ -4010,7 +4400,6 @@ class SalesController extends Controller
             ? '<thead><tr><th style="width:7mm">#</th><th style="width:22mm">CODIGO</th><th style="width:16mm">CANT.</th><th style="width:14mm">UNID.</th><th>DESCRIPCION</th><th style="width:22mm">VALOR U.</th><th style="width:24mm">VALOR TOTAL</th></tr></thead>'
             : '';
         $itemsTableClass = $isA4 ? 'items-a4' : '';
-        $summaryClass = $isA4 ? 'summary summary--a4' : 'summary';
         $a4SummaryRows = $isA4
             ? '<div class="summary-row"><span class="summary-label">Op. Gravadas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($gravadaTotal) . '</span></div>'
                 . '<div class="summary-row"><span class="summary-label">Op. Inafectas</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($inafectaTotal) . '</span></div>'
@@ -4019,59 +4408,6 @@ class SalesController extends Controller
                 . (($itemDiscountTotal > 0.00001)
                     ? '<div class="summary-row"><span class="summary-label">Dscto. item</span><span class="summary-value">-' . $currency . ' ' . $this->formatAmount($itemDiscountTotal) . '</span></div>'
                     : '')
-            : '';
-
-        $printPageMargin = ($isA4 && $forPdf)
-            ? '5mm 3mm 3mm 3mm'
-            : ((!$isA4 && $forPdf) ? '2mm 2mm 3mm 2mm' : '0');
-
-        $pdfA4Css = ($isA4 && $forPdf)
-            ? <<<PDFA4
-    @page { size: A4 portrait; margin: 5mm 4mm 4mm 4mm; }
-    .no-print { display: none !important; }
-    .sheet { width: 190mm !important; max-width: 190mm !important; margin: 0 auto !important; padding: 0 !important; }
-    .header--a4 { display: table !important; width: 100% !important; table-layout: fixed !important; border-bottom: 2px solid #1e3a8a !important; }
-    .logo-col, .brand-col, .voucher-col { display: table-cell !important; vertical-align: top !important; }
-    .logo-col { width: 16mm !important; padding-right: 0.6mm !important; text-align: center !important; border-right: 1px solid #e2e8f0 !important; }
-    .logo-col .header-logo { margin: 0 auto !important; max-width: 15mm !important; max-height: 15mm !important; }
-    .brand-col { width: auto !important; padding-left: 1.1mm !important; }
-    .voucher-col { width: 51mm !important; padding-left: 0.7mm !important; }
-    .voucher-box { width: 100% !important; margin-left: 0 !important; }
-    .info-row { display: table !important; width: 100% !important; }
-    .info-label, .info-value { display: table-cell !important; vertical-align: top !important; }
-    .info-label { width: 24mm !important; }
-    .info-value { text-align: left !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
-    .info-row--doc-date { table-layout: fixed !important; }
-    .info-block { display: table-cell !important; vertical-align: top !important; }
-    .info-block--date { width: 72mm !important; }
-    .info-block--date .info-label { width: 28mm !important; text-align: right !important; padding-right: 1.2mm !important; }
-    .info-block--date .info-value { text-align: left !important; white-space: nowrap !important; }
-    .summary-row, .total-row { display: table !important; width: 100% !important; table-layout: fixed !important; }
-    .summary-label, .summary-value, .total-row span { display: table-cell !important; }
-    .summary--a4 { width: 76mm !important; margin-left: auto !important; }
-    .summary--a4 .summary-label, .summary--a4 .total-row span:first-child { width: 34mm !important; }
-    .summary--a4 .summary-value, .summary--a4 .total-row span:last-child { text-align: right !important; }
-    .company-footer-logos { display: block !important; text-align: left !important; margin-top: 1.6mm !important; }
-    .paybrand { display: inline-block !important; vertical-align: middle !important; margin: 0.8mm 1.2mm 0 0 !important; padding: 0.9mm 1.6mm !important; height: auto !important; }
-    .paybrand img { display: block !important; height: 6.5mm !important; width: auto !important; }
-PDFA4
-            : '';
-
-        $pdfTicketCss = ((!$isA4) && $forPdf)
-            ? <<<PDFTICKET
-    @page { size: 80mm auto; margin: 2mm 2mm 3mm 2mm; }
-    .sheet { width: 76mm !important; max-width: 76mm !important; margin: 0 auto !important; padding: 0 !important; }
-    body { font-size: 12px !important; line-height: 1.24 !important; }
-    .info-row { display: block !important; margin: 0.9mm 0 !important; }
-    .info-label, .info-value { display: block !important; text-align: left !important; }
-    .info-value { word-break: break-word !important; }
-    .item-price-wrap { display: block !important; }
-    .item-price-total { display: block !important; text-align: right !important; margin-top: 0.2mm !important; }
-    .summary { text-align: left !important; }
-    .summary-row { justify-content: space-between !important; gap: 2mm !important; }
-    .summary-label { text-align: left !important; }
-    .summary-value { text-align: right !important; }
-PDFTICKET
             : '';
 
         $a4HeaderHtml = $isA4 ? <<<A4HEAD
@@ -4087,13 +4423,12 @@ PDFTICKET
         {$phoneRow}
         {$emailRow}
     </div>
-        <div class="voucher-col">
-            <div class="voucher-box">
-                    <div class="voucher-ruc">R.U.C. {$taxId}</div>
-            <div class="voucher-type">{$docKind}</div>
-            <div class="voucher-number">{$series}-{$number}</div>
-            </div>
-        </div>
+    <div class="voucher-box">
+        <div class="voucher-ruc">R.U.C. {$taxId}</div>
+    <div class="voucher-type">{$docKind}</div>
+    <div class="voucher-number">{$series}-{$number}</div>
+    <div class="voucher-date">{$issueAt}</div>
+  </div>
 </div>
 A4HEAD
             : <<<TICKETHEAD
@@ -4113,8 +4448,6 @@ A4HEAD
 </div>
 TICKETHEAD;
 
-    $pdfA4TopSpacerHtml = '';
-
         return <<<HTML
 <!doctype html>
 <html>
@@ -4122,31 +4455,28 @@ TICKETHEAD;
   <meta charset="utf-8" />
   <title>{$fileName}</title>
   <style>
-    @media print { @page { size: {$pageSize}; margin: {$printPageMargin}; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
+    @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body { font-family: 'Arial', 'Helvetica', sans-serif; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.3; font-weight: 700; }
     .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
-    /* ── A4 header: 2 cols, left=brand, right=fiscal box ── */
-    /* ── A4 header: 3 cols (logo | company info | fiscal box) ── */
-    .header--a4 { display: grid; grid-template-columns: {$headerLogoColWidth} 1fr {$headerVoucherColWidth}; gap: {$headerGap}; align-items: start; margin-bottom: {$headerMarginBottom}; padding-bottom: {$headerPaddingBottom}; border-bottom: 2px solid #1e3a8a; }
-    .logo-col { display: flex; align-items: flex-start; justify-content: center; padding-right: 0.6mm; border-right: 1px solid #e2e8f0; }
-    .brand-col { display: flex; flex-direction: column; justify-content: flex-start; gap: 0.1mm; min-width: 0; }
+    /* A4 header: 2 cols, left=brand, right=fiscal box */
+    /* A4 header: 3 cols (logo | company info | fiscal box) */
+    .header--a4 { display: grid; grid-template-columns: auto 1fr 58mm; gap: 4mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
+    .logo-col { display: flex; align-items: center; justify-content: center; padding-right: 2mm; border-right: 1px solid #e2e8f0; }
+    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.4mm; }
     .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; }
-    .brand-name { font-size: 12pt; line-height: 1.05; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.1mm; }
-    .brand-legal { font-size: 7.7pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.25mm; line-height: 1.15; }
-    .company-description { font-size: 7.6pt; font-weight: 700; color: #374151; line-height: 1.16; }
-    .brand-col .meta { font-size: 7.3pt; margin: 0.08mm 0; line-height: 1.13; }
-    .brand-col, .brand-col * { word-break: break-word; overflow-wrap: anywhere; }
-    /* ── Fiscal box (right) ── */
+    .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.3mm; }
+    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.8mm; }
+    .company-description { font-size: 8.5pt; font-weight: 700; color: #374151; }
+    /* Fiscal box (right) */
     .voucher-box { border: 2px solid #1e3a8a; border-radius: 4px; overflow: hidden; text-align: center; }
-    .voucher-col { display: flex; flex-direction: column; align-items: stretch; }
-    .voucher-ruc { padding: 1.4mm 2mm; font-size: 8pt; font-weight: 900; color: #1e3a8a; background: #fff; }
-    .voucher-type { padding: 1.8mm; background: #1e3a8a; color: #fff; font-size: 7.8pt; font-weight: 900; text-transform: uppercase; line-height: 1.18; }
-    .voucher-number { padding: 2mm 1.8mm; font-size: 11.5pt; font-weight: 900; color: #dc2626; letter-spacing: 0.2px; background: #fff; }
-    /* ── Ticket header ── */
+    .voucher-ruc { padding: 2.5mm 3mm; font-size: 9.5pt; font-weight: 900; color: #1e3a8a; background: #fff; }
+    .voucher-type { padding: 3mm; background: #1e3a8a; color: #fff; font-size: 9pt; font-weight: 900; text-transform: uppercase; line-height: 1.3; }
+    .voucher-number { padding: 3mm; font-size: 15pt; font-weight: 900; color: #dc2626; letter-spacing: 0.5px; background: #fff; }
+    .voucher-date { font-size: 8pt; color: #374151; padding: 1.5mm 3mm; background: #f8fafc; border-top: 1px solid #bfdbfe; }
+    /* Ticket header */
     .header { text-align: center; margin-bottom: 2mm; }
-    .header .header-logo { margin-left: auto; margin-right: auto; }
     .header-copy--a4 { text-align: left; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
@@ -4155,11 +4485,6 @@ TICKETHEAD;
     .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.5mm 0; }
     .info-label { font-weight: 900; flex-shrink: 0; }
     .info-value { font-weight: 800; text-align: right; flex: 1; }
-    .info-row--doc-date { justify-content: space-between; gap: 4mm; }
-    .info-block { display: flex; align-items: flex-start; gap: 1.4mm; min-width: 0; flex: 1; }
-    .info-block--date { flex: 0 0 72mm; justify-content: flex-end; }
-    .info-block--date .info-label { flex-basis: 28mm; text-align: right; }
-    .info-block--date .info-value { flex: 0 0 auto; white-space: nowrap; }
     table { width: 100%; border-collapse: collapse; }
     .items-a4 { border: 1px solid #cbd5e1; overflow: hidden; }
     .items-a4 thead th { background: #1e3a8a; color: #fff; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.2px; padding: 1.5mm 2mm; border-bottom: 1px solid #1e3a8a; font-weight: 700; }
@@ -4175,23 +4500,12 @@ TICKETHEAD;
     .item-price-wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
     .item-price-unit { font-size: {$itemUnitFontSize}; font-weight: 900; }
     .item-price-total { font-size: {$itemTotalFontSize}; font-weight: 900; white-space: nowrap; }
-    .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; text-align: left; }
-    .summary--a4 { width: 76mm; margin-left: auto; }
-    .summary-row { display: flex; justify-content: space-between; align-items: baseline; gap: 3mm; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
+    .summary { border-top: 2px solid #1e3a8a; margin-top: 2mm; padding-top: 1.5mm; }
+    .summary-row { display: flex; justify-content: space-between; font-size: {$summaryFontSize}; margin: 0.6mm 0; }
     .summary-label, .summary-value { font-weight: 900; }
-    .summary-label { text-align: left; }
-    .summary-value { text-align: right; }
-    .summary--a4 .summary-row { gap: 1.6mm; }
-    .summary--a4 .summary-label { flex: 0 0 34mm; }
-    .summary--a4 .summary-value { flex: 1; }
     .total-row { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 1mm; padding-top: 1mm; font-size: {$totalFontSize}; font-weight: 900; background: #f0f4ff; padding-left: 2mm; padding-right: 2mm; border-radius: 4px; }
-    .summary--a4 .total-row { padding-left: 0; padding-right: 0; border-radius: 0; background: transparent; }
-    .summary--a4 .total-row span:first-child { flex: 0 0 34mm; }
-    .summary--a4 .total-row span:last-child { flex: 1; text-align: right; }
     .summary-words { margin-top: 0.8mm; font-size: {$summaryFontSize}; font-weight: 900; line-height: 1.25; word-break: break-word; }
     .footer { margin-top: 2mm; border-top: 1px dashed #000; padding-top: 1.5mm; font-size: 9pt; font-weight: 700; }
-    .electronic-signature { margin-top: 1.2mm; margin-bottom: 1mm; font-size: 8.5pt; line-height: 1.25; word-break: break-word; }
-    .thank-you { text-align: center; margin-top: 1.6mm; padding: 0.9mm 0; font-weight: 800; }
     .company-footer-title { text-transform: uppercase; margin-bottom: 0.8mm; font-size: 9pt; font-weight: 900; }
     .company-footer-bank { margin: 0.5mm 0; font-size: 9pt; font-weight: 700; }
     .company-footer-logos { display: flex; align-items: center; justify-content: center; gap: 1.4mm; margin-top: 1mm; flex-wrap: wrap; }
@@ -4200,13 +4514,10 @@ TICKETHEAD;
     .paybrand img { height: 7mm; width: auto; display: block; }
     .company-footer-logos--ticket .paybrand { height: 9mm; padding: 0.8mm 1.5mm; }
     .company-footer-logos--ticket .paybrand img { height: 6mm; }
-{$pdfA4Css}
-{$pdfTicketCss}
   </style>
 </head>
 <body>
   <div class="sheet">
-        {$pdfA4TopSpacerHtml}
     {$a4HeaderHtml}
 
     <div class="divider"></div>
@@ -4223,19 +4534,18 @@ TICKETHEAD;
 <tbody>
 {$itemRows}    </tbody></table>
 
-    <div class="{$summaryClass}">
+    <div class="summary">
             {$a4SummaryRows}
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
             <div class="summary-words">SON: {$totalInWords}</div>
         <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
     </div>
 
-        <div class="footer">
-            {$banksSection}
-                        {$paymentBrandsSection}
-            {$footerSignatureHtml}
-            {$thankYouHtml}
-        </div>
+    <div class="footer">
+      {$banksSection}
+            {$paymentBrandsSection}
+      <div>Gracias por su compra</div>
+    </div>
   </div>
 </body>
 </html>
@@ -4294,6 +4604,84 @@ HTML;
         }
 
         return $normalizedPath;
+    }
+
+    private function resolvePaymentBrandImageSource(string $fileName): string
+    {
+        $safeName = basename(trim($fileName));
+        if ($safeName === '') {
+            return '';
+        }
+
+        $relativePath = '/assets/payment-logos/' . $safeName;
+        if (!function_exists('imagecreatetruecolor')) {
+            return $this->resolveFrontendAssetUrl($relativePath);
+        }
+
+        $candidates = [
+            public_path('assets/payment-logos/' . $safeName),
+            dirname(base_path()) . DIRECTORY_SEPARATOR . 'facturacion_frontend' . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'payment-logos' . DIRECTORY_SEPARATOR . $safeName,
+        ];
+
+        foreach ($candidates as $path) {
+            if (!is_string($path) || $path === '' || !is_file($path)) {
+                continue;
+            }
+
+            $dataUri = $this->filePathToImageDataUri($path);
+            if ($dataUri !== null) {
+                return $dataUri;
+            }
+        }
+
+        return $this->resolveFrontendAssetUrl($relativePath);
+    }
+
+    private function filePathToImageDataUri(string $path): ?string
+    {
+        try {
+            if (!is_file($path) || !is_readable($path)) {
+                return null;
+            }
+
+            $contents = @file_get_contents($path);
+            if (!is_string($contents) || $contents === '') {
+                return null;
+            }
+
+            $mime = $this->guessImageMimeType($path, $contents);
+            if ($mime === null) {
+                return null;
+            }
+
+            return 'data:' . $mime . ';base64,' . base64_encode($contents);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function guessImageMimeType(string $path, string $contents): ?string
+    {
+        if (function_exists('finfo_open')) {
+            $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $detected = @finfo_buffer($finfo, $contents);
+                @finfo_close($finfo);
+                if (is_string($detected) && str_starts_with($detected, 'image/')) {
+                    return $detected;
+                }
+            }
+        }
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return match ($ext) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            default => null,
+        };
     }
 
     private function normalizeElectronicSignatureValue(string $raw): string
@@ -4684,22 +5072,22 @@ HTML;
     {
         if ($documentKind === 'DEBIT_NOTE') {
             return [
-                ['id' => 1, 'code' => '01', 'description' => 'Interés por mora'],
+                ['id' => 1, 'code' => '01', 'description' => 'InterÃ©s por mora'],
                 ['id' => 2, 'code' => '02', 'description' => 'Aumento en el valor'],
                 ['id' => 3, 'code' => '03', 'description' => 'Penalidades u otros conceptos'],
             ];
         }
 
         return [
-            ['id' => 1, 'code' => '01', 'description' => 'Anulación de la operación'],
-            ['id' => 2, 'code' => '02', 'description' => 'Anulación por error en el RUC'],
-            ['id' => 3, 'code' => '03', 'description' => 'Corrección por error en la descripción'],
+            ['id' => 1, 'code' => '01', 'description' => 'AnulaciÃ³n de la operaciÃ³n'],
+            ['id' => 2, 'code' => '02', 'description' => 'AnulaciÃ³n por error en el RUC'],
+            ['id' => 3, 'code' => '03', 'description' => 'CorrecciÃ³n por error en la descripciÃ³n'],
             ['id' => 4, 'code' => '04', 'description' => 'Descuento global'],
-            ['id' => 5, 'code' => '05', 'description' => 'Descuento por ítem'],
-            ['id' => 6, 'code' => '06', 'description' => 'Devolución total'],
-            ['id' => 7, 'code' => '07', 'description' => 'Devolución por ítem'],
-            ['id' => 8, 'code' => '08', 'description' => 'Bonificación'],
-            ['id' => 9, 'code' => '09', 'description' => 'Disminución en el valor'],
+            ['id' => 5, 'code' => '05', 'description' => 'Descuento por Ã­tem'],
+            ['id' => 6, 'code' => '06', 'description' => 'DevoluciÃ³n total'],
+            ['id' => 7, 'code' => '07', 'description' => 'DevoluciÃ³n por Ã­tem'],
+            ['id' => 8, 'code' => '08', 'description' => 'BonificaciÃ³n'],
+            ['id' => 9, 'code' => '09', 'description' => 'DisminuciÃ³n en el valor'],
             ['id' => 10, 'code' => '10', 'description' => 'Otros conceptos'],
         ];
     }
@@ -6205,7 +6593,7 @@ HTML;
     }
 
     /**
-     * Endpoint para reintentar envío tributario de un documento.
+     * Endpoint para reintentar envÃ­o tributario de un documento.
      * Permite reenviar documentos que tuvieron rechazo o error a SUNAT.
      * 
      * Route: PUT /api/sales/commercial-documents/{id}/retry-tax-bridge
@@ -6432,7 +6820,8 @@ HTML;
         }
 
         if (preg_match('/^https?:\/\//i', $raw) === 1) {
-            return $raw;
+            $resolved = $this->rewriteLocalAbsoluteUrlToRequestHost($raw);
+            return $this->appendLocalLogoVersion($resolved, null);
         }
 
         $normalized = str_replace('\\', '/', $raw);
@@ -6450,15 +6839,89 @@ HTML;
             return null;
         }
 
+        $resolved = url('/storage/' . $normalized);
         try {
             if (\Storage::disk('public')->exists($normalized)) {
-                return url('/storage/' . $normalized);
+                $resolved = url('/storage/' . $normalized);
             }
         } catch (\Throwable $e) {
             // Ignorar para evitar ocultar logo por una validacion temporal del storage.
         }
 
-        return url('/storage/' . $normalized);
+        $resolved = $this->rewriteLocalAbsoluteUrlToRequestHost($resolved);
+        return $this->appendLocalLogoVersion($resolved, $normalized);
+    }
+
+    private function rewriteLocalAbsoluteUrlToRequestHost(string $url): string
+    {
+        if (!$this->isLocalEnvironment()) {
+            return $url;
+        }
+
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        if (!in_array($host, ['127.0.0.1', 'localhost', '0.0.0.0'], true)) {
+            return $url;
+        }
+
+        $request = request();
+        if (!$request) {
+            return $url;
+        }
+
+        $requestHost = trim((string) $request->getHost());
+        if ($requestHost === '') {
+            return $url;
+        }
+
+        $scheme = (string) (parse_url($url, PHP_URL_SCHEME) ?? $request->getScheme());
+        $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+        $query = (string) (parse_url($url, PHP_URL_QUERY) ?? '');
+        $port = parse_url($url, PHP_URL_PORT);
+        if ($port === null) {
+            $port = $request->getPort();
+        }
+
+        $portSuffix = '';
+        if (is_int($port) && !(($scheme === 'http' && $port === 80) || ($scheme === 'https' && $port === 443))) {
+            $portSuffix = ':' . $port;
+        }
+
+        $rebuilt = $scheme . '://' . $requestHost . $portSuffix . $path;
+        if ($query !== '') {
+            $rebuilt .= '?' . $query;
+        }
+
+        return $rebuilt;
+    }
+
+    private function appendLocalLogoVersion(string $url, ?string $normalizedPath): string
+    {
+        if (!$this->isLocalEnvironment() || $normalizedPath === null || trim($normalizedPath) === '') {
+            return $url;
+        }
+
+        try {
+            $absolutePath = storage_path('app/public/' . ltrim($normalizedPath, '/'));
+            if (!is_file($absolutePath)) {
+                return $url;
+            }
+
+            $version = (string) @filemtime($absolutePath);
+            if ($version === '' || $version === '0') {
+                return $url;
+            }
+
+            return strpos($url, '?') === false
+                ? $url . '?v=' . $version
+                : $url . '&v=' . $version;
+        } catch (\Throwable $e) {
+            return $url;
+        }
+    }
+
+    private function isLocalEnvironment(): bool
+    {
+        return strtolower((string) env('APP_ENV', 'production')) === 'local';
     }
 
     private function normalizeCompanyLogoStoragePath($logoPath): ?string
@@ -6535,4 +6998,5 @@ HTML;
         }
     }
 }
+
 

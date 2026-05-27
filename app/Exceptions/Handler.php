@@ -63,6 +63,7 @@ class Handler extends ExceptionHandler
             $message = $status >= 500
                 ? (config('app.debug') ? $exception->getMessage() : 'Server Error')
                 : ($response->statusText() ?: 'Request failed');
+            $message = $this->ensureUtf8((string) $message);
 
             return response()->json([
                 'message' => $message,
@@ -70,5 +71,16 @@ class Handler extends ExceptionHandler
         }
 
         return $response;
+    }
+
+    private function ensureUtf8(string $value): string
+    {
+        if ($value === '' || preg_match('//u', $value) === 1) {
+            return $value;
+        }
+
+        $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+
+        return is_string($converted) && $converted !== '' ? $converted : 'Server Error';
     }
 }

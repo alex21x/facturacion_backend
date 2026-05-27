@@ -142,6 +142,38 @@ class TaxBridgeService
         $metadata = is_array($metadata) ? $metadata : [];
         $sunatStatus = strtoupper(trim((string) ($metadata['sunat_status'] ?? '')));
 
+        if ($sunatStatus === 'ACCEPTED') {
+            throw new TaxBridgeException('Documento ya aceptado por SUNAT', 422);
+        }
+
+        if ($sunatStatus === 'SENDING') {
+            $staleMinutes = max(1, min(180, (int) env('SUNAT_SENDING_STALE_MINUTES', 10)));
+            $updatedAtRaw = trim((string) ($document->updated_at ?? ''));
+            $isStaleSending = true;
+
+            if ($updatedAtRaw !== '') {
+                try {
+                    $updatedAt = \Carbon\Carbon::parse($updatedAtRaw);
+                    $isStaleSending = $updatedAt->addMinutes($staleMinutes)->lessThanOrEqualTo(now());
+                } catch (\Throwable $e) {
+                    $isStaleSending = true;
+                }
+            }
+
+            if (!$isStaleSending) {
+                throw new TaxBridgeException('Documento en envio SUNAT. Espere unos minutos antes de reenviar.', 422);
+            }
+
+            $this->updateDocumentTaxStatus($companyId, $documentId, [
+                'sunat_status' => 'PENDING_CONFIRMATION',
+                'sunat_status_label' => 'Pendiente confirmacion SUNAT',
+                'sunat_reconcile_next_at' => null,
+                'sunat_bridge_note' => 'Se detecto estado Enviando estatico. Reintento manual habilitado.',
+            ]);
+
+            $sunatStatus = 'PENDING_CONFIRMATION';
+        }
+
         if ($sunatStatus === 'PENDING_CONFIRMATION') {
             $nextAtRaw = (string) ($metadata['sunat_reconcile_next_at'] ?? '');
             if ($nextAtRaw !== '') {
@@ -165,6 +197,79 @@ class TaxBridgeService
         }
 
         return $this->performDispatch($companyId, $documentId, $config, true);
+    }
+
+    public function recoverStuckSendingDocuments(
+        ?int $companyId = null,
+        ?string $companyAccessSlug = null,
+        int $olderThanMinutes = 10,
+        int $limit = 500,
+        bool $dryRun = false
+    ): array {
+        $resolvedCompanyId = $companyId;
+
+        $normalizedSlug = strtolower(trim((string) $companyAccessSlug));
+        if ($normalizedSlug !== '') {
+            $resolvedCompanyId = $this->resolveCompanyIdByAccessSlug($normalizedSlug);
+            if ($resolvedCompanyId === null) {
+                throw new TaxBridgeException('No se encontro empresa para el access slug indicado', 404);
+            }
+        }
+
+        $minutes = max(1, min(180, $olderThanMinutes));
+        $maxRows = max(1, min(5000, $limit));
+
+        $query = DB::table('sales.commercial_documents')
+            ->select('id', 'company_id', 'series', 'number', 'updated_at')
+            ->where('status', 'ISSUED')
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) = 'SENDING'")
+            ->whereRaw('EXTRACT(EPOCH FROM (NOW() - updated_at)) >= ?', [$minutes * 60]);
+
+        if ($resolvedCompanyId !== null) {
+            $query->where('company_id', $resolvedCompanyId);
+        }
+
+        $rows = $query
+            ->orderBy('updated_at')
+            ->limit($maxRows)
+            ->get();
+
+        $affected = 0;
+        $items = [];
+
+        foreach ($rows as $row) {
+            $items[] = [
+                'document_id' => (int) $row->id,
+                'company_id' => (int) $row->company_id,
+                'series' => (string) ($row->series ?? ''),
+                'number' => (string) ($row->number ?? ''),
+                'updated_at' => (string) ($row->updated_at ?? ''),
+            ];
+
+            if ($dryRun) {
+                continue;
+            }
+
+            $this->updateDocumentTaxStatus((int) $row->company_id, (int) $row->id, [
+                'sunat_status' => 'PENDING_CONFIRMATION',
+                'sunat_status_label' => 'Pendiente confirmacion SUNAT',
+                'sunat_reconcile_next_at' => null,
+                'sunat_bridge_note' => 'Recuperado automaticamente desde estado Enviando estatico.',
+            ]);
+
+            $affected++;
+        }
+
+        return [
+            'company_id' => $resolvedCompanyId,
+            'company_access_slug' => $normalizedSlug !== '' ? $normalizedSlug : null,
+            'older_than_minutes' => $minutes,
+            'limit' => $maxRows,
+            'dry_run' => $dryRun,
+            'found' => $rows->count(),
+            'affected' => $affected,
+            'documents' => $items,
+        ];
     }
 
     public function preview(int $companyId, int $documentId): array
@@ -711,10 +816,7 @@ class TaxBridgeService
         $status = 'PENDING_CONFIRMATION';
         $label = 'Ticket en proceso';
 
-        if (!$response->successful()) {
-            $status = 'ERROR';
-            $label = 'Error HTTP en consulta de ticket';
-        } elseif ($finalBridgeCode !== null) {
+        if ($finalBridgeCode !== null) {
             if ($finalBridgeCode === 0 || $finalBridgeCode >= 4000) {
                 $status = 'ACCEPTED';
                 $label = 'Ticket aceptado por SUNAT';
@@ -740,6 +842,9 @@ class TaxBridgeService
         } elseif ($bridgeTicket !== null) {
             $status = 'PENDING_CONFIRMATION';
             $label = 'Ticket pendiente de confirmacion';
+        } elseif (!$response->successful()) {
+            $status = 'ERROR';
+            $label = 'Error HTTP en consulta de ticket';
         }
 
         $responseData = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)];
@@ -902,13 +1007,11 @@ class TaxBridgeService
             $bridgeLink = $this->extractBridgeConstancyLink($decoded);
             $bridgeSignature = $this->extractBridgeElectronicSignature($decoded);
             $finalBridgeCode = $this->extractBridgeFinalCdrCode($decoded, $bridgeMessage . ' ' . $raw);
+            $nullLikeBridgeResponse = $this->isBridgeNullLikeResponse($decoded, $raw);
             $status = 'SENT';
             $label = 'Enviado';
 
-            if (!$response->successful()) {
-                $status = 'PENDING_CONFIRMATION';
-                $label = 'Pendiente confirmacion SUNAT';
-            } elseif ($finalBridgeCode !== null) {
+            if ($finalBridgeCode !== null) {
                 if ($finalBridgeCode === 0 || $finalBridgeCode >= 4000) {
                     $status = 'ACCEPTED';
                     $label = 'Aceptado';
@@ -934,9 +1037,20 @@ class TaxBridgeService
             } elseif (in_array($bridgeState, ['ACEPTADO', 'ACCEPTED', 'OK'], true) && $bridgeTicket === null) {
                 $status = 'ACCEPTED';
                 $label = 'Aceptado';
+            } elseif (!$response->successful()) {
+                $status = 'PENDING_CONFIRMATION';
+                $label = 'Pendiente confirmacion SUNAT';
+            } elseif ($nullLikeBridgeResponse) {
+                $status = 'PENDING_CONFIRMATION';
+                $label = 'Pendiente confirmacion SUNAT';
             }
 
-            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, $status === 'PENDING_CONFIRMATION', $isRetry, !$response->successful() ? 'HTTP_ERROR' : null);
+            $httpErrorKind = (!$response->successful() && $status === 'PENDING_CONFIRMATION') ? 'HTTP_ERROR' : null;
+            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, $status === 'PENDING_CONFIRMATION', $isRetry, $httpErrorKind);
+            if ($nullLikeBridgeResponse && $status === 'PENDING_CONFIRMATION') {
+                $attemptMeta['last_error_kind'] = 'BRIDGE_NULL_RESPONSE';
+                $attemptMeta['note'] = 'Respuesta del puente vacia/null. Reintento automatico programado.';
+            }
             $responseTimeMs = round((microtime(true) - $requestStartedAt) * 1000, 2);
 
             $this->updateDocumentTaxStatus($companyId, $documentId, [
@@ -981,7 +1095,7 @@ class TaxBridgeService
                 ],
                 [
                     'sunat_status' => $status,
-                    'error_kind' => !$response->successful() ? 'HTTP_ERROR' : null,
+                    'error_kind' => $httpErrorKind,
                     'attempt_number' => (int) ($attemptMeta['attempts'] ?? 1),
                     'is_retry' => $isRetry,
                     'is_manual' => $isRetry,
@@ -2081,6 +2195,38 @@ class TaxBridgeService
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+    }
+
+    private function isBridgeNullLikeResponse($decoded, string $raw): bool
+    {
+        if ($decoded === null) {
+            return true;
+        }
+
+        $trimmedRaw = strtolower(trim($raw));
+        if ($trimmedRaw === 'null' || $trimmedRaw === '"null"') {
+            return true;
+        }
+
+        if (is_array($decoded) && empty($decoded) && $trimmedRaw === '') {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function resolveCompanyIdByAccessSlug(string $slug): ?int
+    {
+        if ($slug === '' || !$this->tableExists('appcfg', 'company_access_links')) {
+            return null;
+        }
+
+        $row = DB::table('appcfg.company_access_links')
+            ->whereRaw('LOWER(access_slug) = ?', [$slug])
+            ->select('company_id')
+            ->first();
+
+        return $row && isset($row->company_id) ? (int) $row->company_id : null;
     }
 
     private function isOutsideSunatIssueWindow($issueAt): bool

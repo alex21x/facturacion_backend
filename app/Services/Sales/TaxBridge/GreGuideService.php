@@ -584,6 +584,7 @@ class GreGuideService
 
             $status = $response->successful() ? self::STATUS_SENT : self::STATUS_ERROR;
             $label = $response->successful() ? 'Guia enviada' : 'Error de envio';
+            $nullLikeBridgeResponse = $this->isBridgeNullLikeResponse($decoded, $raw);
 
             $bridgeRes = is_array($decoded) && isset($decoded['res']) ? (int) $decoded['res'] : null;
             $ticket = $this->extractBridgeTicket($decoded, $raw);
@@ -592,13 +593,7 @@ class GreGuideService
 
             $resolvedBridgeStatus = $this->resolveGreOutcomeStatus($cdrCode, $cdrDesc);
 
-            if ($response->successful() && $bridgeRes === 0 && $ticket === null) {
-                $status = self::STATUS_ERROR;
-                $label = 'Error de envio';
-            } elseif ($response->successful() && $ticket !== null && $ticket !== '') {
-                $status = self::STATUS_SENT;
-                $label = 'Ticket generado';
-            } elseif ($response->successful() && $resolvedBridgeStatus !== null) {
+            if ($resolvedBridgeStatus !== null) {
                 if ($resolvedBridgeStatus === self::STATUS_ACCEPTED) {
                     $status = self::STATUS_ACCEPTED;
                     $label = 'Guia aceptada';
@@ -606,6 +601,18 @@ class GreGuideService
                     $status = self::STATUS_REJECTED;
                     $label = 'Guia rechazada';
                 }
+            } elseif ($response->successful() && $nullLikeBridgeResponse) {
+                $status = self::STATUS_ERROR;
+                $label = 'Respuesta vacia del puente';
+                if ($cdrDesc === null) {
+                    $cdrDesc = 'El puente no devolvio respuesta valida; requiere reenvio manual.';
+                }
+            } elseif ($response->successful() && $bridgeRes === 0 && $ticket === null) {
+                $status = self::STATUS_ERROR;
+                $label = 'Error de envio';
+            } elseif ($response->successful() && $ticket !== null && $ticket !== '') {
+                $status = self::STATUS_SENT;
+                $label = 'Ticket generado';
             } elseif ($response->successful() && $ticket === null) {
                 $status = self::STATUS_ERROR;
                 $label = 'Envio sin ticket';
@@ -732,6 +739,24 @@ class GreGuideService
 
         $ticket = trim((string) ($row->sunat_ticket ?? ''));
         if ($ticket === '') {
+            $status = strtoupper(trim((string) ($row->status ?? '')));
+            if (in_array($status, [self::STATUS_SENT, self::STATUS_SENDING], true)) {
+                $this->updateGuideState($companyId, $guideId, self::STATUS_ERROR, [
+                    'sunat_cdr_desc' => 'Envio sin ticket SUNAT; se habilito reenvio manual.',
+                ]);
+
+                return [
+                    'status' => self::STATUS_ERROR,
+                    'label' => 'Envio sin ticket',
+                    'bridge_http_code' => null,
+                    'sunat_ticket' => null,
+                    'sunat_cdr_code' => null,
+                    'sunat_cdr_desc' => 'Envio sin ticket SUNAT; se habilito reenvio manual.',
+                    'response' => ['message' => 'No existe ticket SUNAT para consultar. Reenviar guia.'],
+                    'debug' => null,
+                ];
+            }
+
             throw new TaxBridgeException('La guia no tiene ticket SUNAT para consultar', 422);
         }
 
@@ -795,6 +820,12 @@ class GreGuideService
                 $status = self::STATUS_REJECTED;
                 $label = 'Guia rechazada';
             }
+        }
+
+        $currentStatus = strtoupper(trim((string) ($row->status ?? '')));
+        if ($currentStatus === self::STATUS_ACCEPTED && $status !== self::STATUS_ACCEPTED) {
+            $status = self::STATUS_ACCEPTED;
+            $label = 'Guia aceptada';
         }
 
         $this->updateGuideState($companyId, $guideId, $status, [
@@ -903,21 +934,104 @@ class GreGuideService
     {
         $ticket = $this->extractBridgeField($decoded, ['ticket', 'Ticket', 'nroTicket', 'idTicket']);
         if ($ticket !== null) {
-            return $ticket;
+            return $this->normalizeSunatTicketValue($ticket);
         }
 
         if ($raw !== '' && preg_match('/\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b/i', $raw, $m) === 1) {
-            return trim((string) $m[1]);
+            return $this->normalizeSunatTicketValue((string) $m[1]);
         }
 
         if (is_array($decoded)) {
             $msg = $this->extractBridgeMessage($decoded) ?? '';
             if ($msg !== '' && preg_match('/ticket[^A-Za-z0-9]*([A-Za-z0-9\-]{10,})/i', $msg, $m) === 1) {
-                return trim((string) $m[1]);
+                return $this->normalizeSunatTicketValue((string) $m[1]);
             }
         }
 
         return null;
+    }
+
+    public function recoverStuckSendingGuides(?int $companyId = null, int $olderThanMinutes = 10, int $limit = 500, bool $dryRun = false): array
+    {
+        $olderThanMinutes = max(1, min(180, $olderThanMinutes));
+        $limit = max(1, min(5000, $limit));
+
+        $threshold = now()->subMinutes($olderThanMinutes);
+        $query = DB::table('sales.gre_guides')
+            ->whereRaw("UPPER(COALESCE(status, '')) = ?", [self::STATUS_SENDING])
+            ->where('updated_at', '<=', $threshold)
+            ->orderBy('updated_at')
+            ->limit($limit);
+
+        if ($companyId !== null) {
+            $query->where('company_id', $companyId);
+        }
+
+        $rows = $query
+            ->get(['id', 'company_id', 'identifier', 'updated_at'])
+            ->map(static function ($row): array {
+                return [
+                    'guide_id' => (int) $row->id,
+                    'company_id' => (int) $row->company_id,
+                    'identifier' => (string) ($row->identifier ?? ''),
+                    'updated_at' => (string) ($row->updated_at ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $affected = 0;
+        if (!$dryRun && !empty($rows)) {
+            $ids = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['guide_id'], $rows)));
+            $affected = DB::table('sales.gre_guides')
+                ->whereIn('id', $ids)
+                ->update([
+                    'status' => self::STATUS_ERROR,
+                    'sunat_cdr_desc' => 'SENDING estatico reparado automaticamente; requiere reenvio manual.',
+                    'updated_at' => now(),
+                ]);
+        }
+
+        return [
+            'found' => count($rows),
+            'affected' => (int) $affected,
+            'dry_run' => $dryRun,
+            'company_id' => $companyId,
+            'guides' => $rows,
+        ];
+    }
+
+    private function normalizeSunatTicketValue($value): ?string
+    {
+        $ticket = trim((string) ($value ?? ''));
+        if ($ticket === '') {
+            return null;
+        }
+
+        $normalized = strtoupper($ticket);
+        if (in_array($normalized, ['NULL', 'NONE', 'N/A', 'NA', '-', 'S/T', 'SIN TICKET'], true)) {
+            return null;
+        }
+
+        return $ticket;
+    }
+
+    private function isBridgeNullLikeResponse($decoded, string $raw): bool
+    {
+        if ($decoded === null) {
+            return true;
+        }
+
+        $trimmedRaw = strtolower(trim($raw));
+        if ($trimmedRaw === 'null' || $trimmedRaw === '"null"') {
+            return true;
+        }
+
+        if (is_array($decoded) && empty($decoded) && $trimmedRaw === '') {
+            return true;
+        }
+
+        return false;
     }
 
     private function extractBridgeCode($decoded): ?string

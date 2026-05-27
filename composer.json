@@ -8,8 +8,8 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
-        "barryvdh/laravel-dompdf": "^2.2",
+        "php": "^8.1",
+        "barryvdh/laravel-dompdf": "2.2",
         "guzzlehttp/guzzle": "^7.9",
         "laravel/framework": "^10.48",
         "laravel/tinker": "^2.8"
@@ -34,7 +34,11 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/"
-        }
+        },
+        "classmap": [
+            "database/seeds",
+            "database/factories"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

@@ -119,7 +119,7 @@ class TaxBridgeService
         ]);
     }
 
-    public function retry(int $companyId, int $documentId): array
+    public function retry(int $companyId, int $documentId, bool $isAutomatedRetry = false): array
     {
         $document = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
@@ -196,7 +196,7 @@ class TaxBridgeService
             throw new TaxBridgeException('Tax bridge is not enabled in AppCfg', 422);
         }
 
-        return $this->performDispatch($companyId, $documentId, $config, true);
+        return $this->performDispatch($companyId, $documentId, $config, true, $isAutomatedRetry);
     }
 
     public function recoverStuckSendingDocuments(
@@ -873,7 +873,7 @@ class TaxBridgeService
         ];
     }
 
-    private function performDispatch(int $companyId, int $documentId, array $config, bool $isRetry): array
+    private function performDispatch(int $companyId, int $documentId, array $config, bool $isRetry, bool $isAutomatedRetry = false): array
     {
         $document = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
@@ -955,7 +955,7 @@ class TaxBridgeService
         }
         $debugPayload = $this->sanitizePayloadForDebug($payload);
 
-        $this->updateDocumentTaxStatus($companyId, $documentId, [
+        $sendingPayload = [
             'sunat_status' => 'SENDING',
             'sunat_status_label' => $isRetry ? 'Enviando (reintento)' : 'Enviando',
             'sunat_bridge_mode' => $config['bridge_mode'],
@@ -970,7 +970,15 @@ class TaxBridgeService
                 'payload_preview' => substr($payloadJson, 0, 5000),
             ],
             'sunat_retry_at' => $isRetry ? now()->toDateTimeString() : null,
-        ]);
+        ];
+
+        if ($isRetry && $isAutomatedRetry) {
+            // Keep the document in pending state while the background reconcile retries,
+            // to avoid visible oscillation back to "Enviando" on list refreshes.
+            unset($sendingPayload['sunat_status'], $sendingPayload['sunat_status_label']);
+        }
+
+        $this->updateDocumentTaxStatus($companyId, $documentId, $sendingPayload);
 
         try {
             $requestStartedAt = microtime(true);
@@ -1180,6 +1188,7 @@ class TaxBridgeService
     public function reconcilePendingDocuments(int $limit = 30): array
     {
         $limit = max(1, min(200, $limit));
+        $staleMinutes = max(1, min(180, (int) env('SUNAT_SENDING_STALE_MINUTES', 10)));
         $processed = 0;
         $accepted = 0;
         $rejected = 0;
@@ -1195,7 +1204,13 @@ class TaxBridgeService
 
         $query = DB::table('sales.commercial_documents')
             ->where('status', 'ISSUED')
-            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+            ->where(function ($q) use ($staleMinutes) {
+                $q->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+                  ->orWhere(function ($sending) use ($staleMinutes) {
+                      $sending->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) = 'SENDING'")
+                          ->whereRaw("updated_at <= (NOW() - (? * INTERVAL '1 minute'))", [$staleMinutes]);
+                  });
+            })
             ->where(function ($q) {
                 $q->whereRaw("(metadata->>'sunat_reconcile_auto_enabled') IS NULL")
                   ->orWhereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'");
@@ -1234,7 +1249,7 @@ class TaxBridgeService
             $processed++;
             $processedByCompany[$companyId] = ($processedByCompany[$companyId] ?? 0) + 1;
             try {
-                $res = $this->retry($companyId, (int) $row->id);
+                $res = $this->retry($companyId, (int) $row->id, true);
                 $status = strtoupper((string) ($res['status'] ?? ''));
 
                 if ($status === 'ACCEPTED') {
@@ -1266,11 +1281,18 @@ class TaxBridgeService
     public function getReconcileStats(int $companyId): array
     {
         $config = $this->resolveConfig($companyId, null);
+        $staleMinutes = max(1, min(180, (int) env('SUNAT_SENDING_STALE_MINUTES', 10)));
 
         $pendingQuery = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->where('status', 'ISSUED')
-            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')");
+            ->where(function ($q) use ($staleMinutes) {
+                $q->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+                  ->orWhere(function ($sending) use ($staleMinutes) {
+                      $sending->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) = 'SENDING'")
+                          ->whereRaw("updated_at <= (NOW() - (? * INTERVAL '1 minute'))", [$staleMinutes]);
+                  });
+            });
         $this->applyTributaryDocumentKindFilter($pendingQuery, 'document_kind');
         $pendingCount = $pendingQuery->count();
 
@@ -1284,7 +1306,7 @@ class TaxBridgeService
         $nextAt = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
             ->where('status', 'ISSUED')
-            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR')")
+            ->whereRaw("UPPER(COALESCE(metadata->>'sunat_status','')) IN ('PENDING_CONFIRMATION', 'HTTP_ERROR', 'NETWORK_ERROR', 'SENDING')")
             ->whereRaw("(metadata->>'sunat_reconcile_next_at') IS NOT NULL")
             ->whereRaw("LOWER(COALESCE(metadata->>'sunat_reconcile_auto_enabled','true')) = 'true'");
         $this->applyTributaryDocumentKindFilter($nextAt, 'document_kind');

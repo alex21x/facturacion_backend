@@ -4233,6 +4233,13 @@ HTML;
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
         $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
         $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
+        $companyId = (int) ($company['company_id'] ?? $company['id'] ?? 0);
+        $branchId = isset($doc['branchId']) && $doc['branchId'] !== null
+            ? (int) $doc['branchId']
+            : null;
+        $workshopMultiVehicleEnabled = $companyId > 0
+            ? $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
+            : false;
         $vehiclePlate = trim((string) (
             $doc['vehiclePlateSnapshot']
             ?? $docMetadata['vehicle_plate']
@@ -4253,7 +4260,7 @@ HTML;
         ));
         $vehicleParts = array_values(array_filter([$vehiclePlate, $vehicleBrand, $vehicleModel], static fn ($v) => trim((string) $v) !== ''));
         $vehicleLabel = implode(' ', $vehicleParts);
-        $vehicleRow = $vehicleLabel !== ''
+        $vehicleRow = $workshopMultiVehicleEnabled && $vehicleLabel !== ''
             ? '<div class="info-row"><div class="info-label">VEHICULO:</div><div class="info-value">' . $this->escapeHtml($vehicleLabel) . '</div></div>'
             : '';
         $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
@@ -4477,6 +4484,7 @@ TICKETHEAD;
     .voucher-date { font-size: 8pt; color: #374151; padding: 1.5mm 3mm; background: #f8fafc; border-top: 1px solid #bfdbfe; }
     /* Ticket header */
     .header { text-align: center; margin-bottom: 2mm; }
+    .header .header-logo { margin-left: auto; margin-right: auto; }
     .header-copy--a4 { text-align: left; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }

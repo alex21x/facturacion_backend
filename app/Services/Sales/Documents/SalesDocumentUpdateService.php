@@ -11,6 +11,7 @@ use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentPaymentRepositoryInterface;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SalesDocumentUpdateService
 {
@@ -316,6 +317,7 @@ class SalesDocumentUpdateService
 
                     $this->documentRepository->deleteItemsAndPayments($documentId);
 
+                    $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument($documentKind);
                     $lineNo = 1;
                     foreach ($processedItems as $processedItem) {
                         $item = $processedItem['raw'];
@@ -477,6 +479,14 @@ class SalesDocumentUpdateService
             });
         } catch (\RuntimeException $e) {
             throw new SalesDocumentException($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            Log::error('sales.document.update_draft.unexpected_error', [
+                'company_id' => $companyId,
+                'document_id' => $documentId,
+                'message' => $e->getMessage(),
+            ]);
+
+            throw new SalesDocumentException('No se pudo actualizar el comprobante por un error interno.', 422);
         }
     }
 

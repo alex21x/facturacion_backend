@@ -3762,27 +3762,69 @@ class SalesController extends Controller
         $options->set('defaultMediaType', 'print');
         $options->set('dpi', 96);
 
-        $dompdf = new Dompdf($options);
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
-        $dompdf->loadHtml($html, 'UTF-8');
+        $buildPdfOutput = function (array $pdfDoc) use ($options, $format): string {
+            $dompdf = new Dompdf($options);
+            $html = $this->renderCommercialDocumentTicketHtml($pdfDoc, $format);
+            $dompdf->loadHtml($html, 'UTF-8');
 
-        if ($format === 'ticket') {
-            // 80mm width in points: 80 / 25.4 * 72 = 226.77
-            // Height is intentionally tall to avoid clipping long tickets.
-            $dompdf->setPaper([0, 0, 226.77, 1800], 'portrait');
-        } else {
-            $dompdf->setPaper('A4', 'portrait');
+            if ($format === 'ticket') {
+                // 80mm width in points: 80 / 25.4 * 72 = 226.77
+                // Height is intentionally tall to avoid clipping long tickets.
+                $dompdf->setPaper([0, 0, 226.77, 1800], 'portrait');
+            } else {
+                $dompdf->setPaper('A4', 'portrait');
+            }
+
+            $dompdf->render();
+
+            return $dompdf->output();
+        };
+
+        try {
+            $pdfBinary = $buildPdfOutput($doc);
+        } catch (\Throwable $e) {
+            if (!$this->isDompdfGdImageFailure($e)) {
+                throw $e;
+            }
+
+            Log::warning('PDF render fallback without logo due GD/image failure', [
+                'document_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            $fallbackDoc = $doc;
+            $company = is_array($fallbackDoc['company'] ?? null) ? $fallbackDoc['company'] : [];
+            $company['logo_data_uri'] = null;
+            $company['logoDataUri'] = null;
+            $company['logo_url'] = null;
+            $company['logoUrl'] = null;
+            $fallbackDoc['company'] = $company;
+
+            $pdfBinary = $buildPdfOutput($fallbackDoc);
         }
 
-        $dompdf->render();
-
-        return response($dompdf->output(), 200, [
+        return response($pdfBinary, 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
             'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
             'Pragma' => 'no-cache',
             'Expires' => '0',
         ]);
+    }
+
+    private function isDompdfGdImageFailure(\Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        if (str_contains($message, 'gd extension is required')) {
+            return true;
+        }
+
+        if (str_contains($message, 'addpngfromfile') || str_contains($message, 'png')) {
+            return true;
+        }
+
+        return false;
     }
 
         private function renderCommercialDocumentA4LegacyHtml(array $doc): string

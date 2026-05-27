@@ -331,10 +331,10 @@ class AuthController extends Controller
 
     private function resolveAccessTtlMinutes(): int
     {
-        $configured = (int) env('ACCESS_TOKEN_TTL_MINUTES', 60);
+        $configured = (int) env('ACCESS_TOKEN_TTL_MINUTES', 240);
 
-        // Guarantee at least 1 hour to avoid overly short sessions.
-        return max(60, $configured);
+        // Guarantee at least 4 hours to avoid overly short sessions in operations.
+        return max(240, $configured);
     }
 
     private function resolvePrimaryRoleContext(int $userId, int $companyId): array

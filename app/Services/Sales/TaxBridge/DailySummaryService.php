@@ -631,11 +631,20 @@ class DailySummaryService
                 }
             }
 
-            [$status, $label, $ticket, $cdrCode, $cdrDesc] = $this->interpretBridgeResponse(
-                $response->successful(),
-                $decoded,
-                $raw
-            );
+            $nullLikeBridgeResponse = $this->isBridgeNullLikeResponse($decoded, $raw);
+            if ($response->successful() && $nullLikeBridgeResponse) {
+                $status = self::STATUS_ERROR;
+                $label = 'Respuesta vacia del puente';
+                $ticket = null;
+                $cdrCode = null;
+                $cdrDesc = 'El puente no devolvio respuesta valida; requiere reenvio manual.';
+            } else {
+                [$status, $label, $ticket, $cdrCode, $cdrDesc] = $this->interpretBridgeResponse(
+                    $response->successful(),
+                    $decoded,
+                    $raw
+                );
+            }
             $responseTimeMs = $responseStartAt !== null ? round((microtime(true) - $responseStartAt) * 1000, 2) : null;
             $diagnostic = $this->summarizeSummaryDiagnostic($decoded, (string) ($cdrCode ?? ''), (string) ($cdrDesc ?? ''));
 
@@ -1019,10 +1028,6 @@ class DailySummaryService
             $ticket = $this->normalizeSunatTicketValue($ticketMatch[1]);
         }
 
-        if (!$httpSuccess) {
-            return [self::STATUS_ERROR, 'Error HTTP', $ticket, $cdrCode, $cdrDesc];
-        }
-
         $finalCdrCode = $this->resolveSummaryCdrCode($cdrCode, $message . ' ' . $raw);
         if ($finalCdrCode !== null) {
             if ($finalCdrCode === 0 || $finalCdrCode === 2223 || $finalCdrCode === 2323 || $finalCdrCode === 2324 || $finalCdrCode >= 4000) {
@@ -1098,6 +1103,10 @@ class DailySummaryService
             return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
         }
 
+        if (!$httpSuccess) {
+            return [self::STATUS_ERROR, 'Error HTTP', $ticket, $cdrCode, $cdrDesc];
+        }
+
         return [self::STATUS_SENT, 'Resumen enviado', $ticket, $cdrCode, $cdrDesc];
     }
 
@@ -1149,6 +1158,31 @@ class DailySummaryService
 
         $ticket = $this->normalizeSunatTicketValue($summary->sunat_ticket ?? null);
         if ($ticket === null) {
+            $summaryStatus = strtoupper(trim((string) ($summary->status ?? '')));
+            if (in_array($summaryStatus, [self::STATUS_SENT, self::STATUS_SENDING], true)) {
+                DB::table('sales.daily_summaries')
+                    ->where('id', $summaryId)
+                    ->where('company_id', $companyId)
+                    ->update([
+                        'status' => self::STATUS_ERROR,
+                        'sunat_cdr_desc' => 'Envio sin ticket SUNAT; se habilito reenvio manual.',
+                        'updated_at' => now(),
+                    ]);
+
+                return [
+                    'status' => self::STATUS_ERROR,
+                    'label' => 'Envio sin ticket',
+                    'bridge_http_code' => null,
+                    'sunat_ticket' => null,
+                    'sunat_cdr_code' => null,
+                    'sunat_cdr_desc' => 'Envio sin ticket SUNAT; se habilito reenvio manual.',
+                    'sunat_error_code' => null,
+                    'sunat_error_message' => 'No existe ticket SUNAT para consultar.',
+                    'response' => ['message' => 'No existe ticket SUNAT para consultar. Reenviar resumen.'],
+                    'debug' => null,
+                ];
+            }
+
             throw new TaxBridgeException('Daily summary has no SUNAT ticket to consult', 422);
         }
 
@@ -1168,6 +1202,13 @@ class DailySummaryService
 
         $result = $this->taxBridgeService->queryAsyncTicketStatus($companyId, $branchId, $bridgeMethod, $payload);
         $responseData = is_array($result['response'] ?? null) ? $result['response'] : ['raw' => null];
+        $resolvedStatus = strtoupper((string) ($result['status'] ?? self::STATUS_SENT));
+        $currentStatus = strtoupper(trim((string) ($summary->status ?? '')));
+
+        if ($currentStatus === self::STATUS_ACCEPTED && $resolvedStatus !== self::STATUS_ACCEPTED) {
+            $resolvedStatus = self::STATUS_ACCEPTED;
+            $result['label'] = 'Resumen aceptado por SUNAT';
+        }
 
         DB::table('sales.daily_summaries')
             ->where('id', $summaryId)
@@ -1181,12 +1222,12 @@ class DailySummaryService
                 'updated_at' => now(),
             ]);
 
-        if (($result['status'] ?? '') === self::STATUS_ACCEPTED || ($result['status'] ?? '') === self::STATUS_REJECTED) {
+        if ($resolvedStatus === self::STATUS_ACCEPTED || $resolvedStatus === self::STATUS_REJECTED) {
             DB::table('sales.daily_summaries')
                 ->where('id', $summaryId)
                 ->where('company_id', $companyId)
                 ->update([
-                    'status' => $result['status'],
+                    'status' => $resolvedStatus,
                     'updated_at' => now(),
                 ]);
 
@@ -1194,7 +1235,7 @@ class DailySummaryService
                 $companyId,
                 $summaryId,
                 $summaryType,
-                (string) $result['status'],
+                $resolvedStatus,
                 $result['sunat_ticket'] ?? $ticket,
                 $result['sunat_cdr_code'] ?? null,
                 $result['sunat_cdr_desc'] ?? null
@@ -1225,8 +1266,8 @@ class DailySummaryService
                 'message' => $result['sunat_cdr_desc'] ?? null,
             ],
             [
-                'sunat_status' => $result['status'] ?? 'PENDING_CONFIRMATION',
-                'error_kind' => ($result['status'] ?? '') === self::STATUS_ERROR ? 'HTTP_ERROR' : null,
+                'sunat_status' => $resolvedStatus,
+                'error_kind' => $resolvedStatus === self::STATUS_ERROR ? 'HTTP_ERROR' : null,
                 'attempt_number' => 1,
                 'is_retry' => true,
                 'is_manual' => true,
@@ -1236,7 +1277,7 @@ class DailySummaryService
         );
 
         return [
-            'status' => $result['status'] ?? self::STATUS_SENT,
+            'status' => $resolvedStatus,
             'label' => $result['label'] ?? 'Ticket en proceso',
             'bridge_http_code' => $result['bridge_http_code'] ?? null,
             'sunat_ticket' => $result['sunat_ticket'] ?? $ticket,
@@ -1246,6 +1287,56 @@ class DailySummaryService
             'sunat_error_message' => $result['sunat_error_message'] ?? null,
             'response' => $responseData,
             'debug' => $result['debug'] ?? null,
+        ];
+    }
+
+    public function recoverStuckSendingSummaries(?int $companyId = null, int $olderThanMinutes = 10, int $limit = 500, bool $dryRun = false): array
+    {
+        $olderThanMinutes = max(1, min(180, $olderThanMinutes));
+        $limit = max(1, min(5000, $limit));
+
+        $threshold = now()->subMinutes($olderThanMinutes);
+        $query = DB::table('sales.daily_summaries')
+            ->whereRaw("UPPER(COALESCE(status, '')) = ?", [self::STATUS_SENDING])
+            ->where('updated_at', '<=', $threshold)
+            ->orderBy('updated_at')
+            ->limit($limit);
+
+        if ($companyId !== null) {
+            $query->where('company_id', $companyId);
+        }
+
+        $rows = $query
+            ->get(['id', 'company_id', 'identifier', 'updated_at'])
+            ->map(static function ($row): array {
+                return [
+                    'summary_id' => (int) $row->id,
+                    'company_id' => (int) $row->company_id,
+                    'identifier' => (string) ($row->identifier ?? ''),
+                    'updated_at' => (string) ($row->updated_at ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $affected = 0;
+        if (!$dryRun && !empty($rows)) {
+            $ids = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['summary_id'], $rows)));
+            $affected = DB::table('sales.daily_summaries')
+                ->whereIn('id', $ids)
+                ->update([
+                    'status' => self::STATUS_ERROR,
+                    'sunat_cdr_desc' => 'SENDING estatico reparado automaticamente; requiere reenvio manual.',
+                    'updated_at' => now(),
+                ]);
+        }
+
+        return [
+            'found' => count($rows),
+            'affected' => (int) $affected,
+            'dry_run' => $dryRun,
+            'company_id' => $companyId,
+            'summaries' => $rows,
         ];
     }
 
@@ -1262,6 +1353,24 @@ class DailySummaryService
         }
 
         return $ticket;
+    }
+
+    private function isBridgeNullLikeResponse($decoded, string $raw): bool
+    {
+        if ($decoded === null) {
+            return true;
+        }
+
+        $trimmedRaw = strtolower(trim($raw));
+        if ($trimmedRaw === 'null' || $trimmedRaw === '"null"') {
+            return true;
+        }
+
+        if (is_array($decoded) && empty($decoded) && $trimmedRaw === '') {
+            return true;
+        }
+
+        return false;
     }
 
     private function buildCompanyStatusAuthBlock(int $companyId, array $config): array

@@ -3,16 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\Ops\OpsLatencyService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OpsLatencyController extends Controller
 {
-    public function __construct(
-        private OpsLatencyService $opsLatencyService
-    ) {
-    }
-
     public function summary(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
@@ -27,7 +22,24 @@ class OpsLatencyController extends Controller
         $windowMinutes = max(5, min(1440, (int) $request->query('window_minutes', 60)));
         $limit = max(1, min(100, (int) $request->query('limit', 30)));
 
-                $rows = $this->opsLatencyService->summaryByCompanyWindow($companyId, $windowMinutes, $limit);
+        $rows = DB::select(
+            "SELECT
+                endpoint_key,
+                COUNT(*)::int AS samples,
+                ROUND((PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ms))::numeric, 2) AS p50_ms,
+                ROUND((PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms))::numeric, 2) AS p95_ms,
+                ROUND((PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms))::numeric, 2) AS p99_ms,
+                ROUND(AVG(duration_ms)::numeric, 2) AS avg_ms,
+                ROUND(MAX(duration_ms)::numeric, 2) AS max_ms,
+                ROUND(MIN(duration_ms)::numeric, 2) AS min_ms
+             FROM ops.http_endpoint_latency_samples
+             WHERE company_id = ?
+               AND requested_at >= (NOW() - (? * INTERVAL '1 minute'))
+             GROUP BY endpoint_key
+             ORDER BY p95_ms DESC
+             LIMIT ?",
+            [$companyId, $windowMinutes, $limit]
+        );
 
         return response()->json([
             'window_minutes' => $windowMinutes,

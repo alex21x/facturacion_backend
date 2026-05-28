@@ -2,10 +2,15 @@
 
 namespace App\Services\Sales\Documents;
 
-use Illuminate\Support\Facades\DB;
+use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
 
 class SalesDocumentNoteValidationService
 {
+    public function __construct(
+        private CommercialDocumentRepositoryInterface $commercialDocumentRepository
+    ) {
+    }
+
     public function validateSourceAndAvailableAmount(
         array $payload,
         array $metadata,
@@ -21,17 +26,13 @@ class SalesDocumentNoteValidationService
             throw new SalesDocumentException('Documento afectado invalido para nota.');
         }
 
-        $sourceTotal = (float) (DB::table('sales.commercial_documents')
-            ->where('company_id', $companyId)
-            ->where('id', $sourceDocumentId)
-            ->value('total') ?? 0);
+        $sourceTotal = $this->commercialDocumentRepository->getDocumentTotalById($companyId, $sourceDocumentId);
 
-        $alreadyApplied = (float) (DB::table('sales.commercial_documents as d')
-            ->where('d.company_id', $companyId)
-            ->where('d.document_kind', $payload['document_kind'])
-            ->whereNotIn('d.status', ['VOID', 'CANCELED'])
-            ->whereRaw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) = ?", [$sourceDocumentId])
-            ->sum('d.total'));
+        $alreadyApplied = $this->commercialDocumentRepository->getAppliedNoteTotalForSource(
+            $companyId,
+            $sourceDocumentId,
+            (string) $payload['document_kind']
+        );
 
         $remainingAmount = $sourceTotal - $alreadyApplied;
 

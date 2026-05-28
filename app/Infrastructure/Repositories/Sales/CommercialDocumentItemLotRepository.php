@@ -20,4 +20,16 @@ class CommercialDocumentItemLotRepository implements CommercialDocumentItemLotRe
                 ->delete();
         }
     }
+
+    public function getGroupedByDocumentItemIds(array $documentItemIds)
+    {
+        if (empty($documentItemIds)) {
+            return collect();
+        }
+
+        return DB::table('sales.commercial_document_item_lots')
+            ->whereIn('document_item_id', $documentItemIds)
+            ->get()
+            ->groupBy('document_item_id');
+    }
 }

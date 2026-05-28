@@ -7,9 +7,9 @@ use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Restaurant\RestaurantComandaGateway;
 use App\Services\Restaurant\RestaurantOrderService;
 use App\Services\Restaurant\RestaurantRecipeService;
-use App\Services\Sales\SalesLookupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class RestaurantController extends Controller
@@ -18,8 +18,7 @@ class RestaurantController extends Controller
         private RestaurantComandaGateway $gateway,
         private RestaurantOrderService $orderService,
         private RestaurantRecipeService $recipeService,
-        private CompanyIgvRateService $companyIgvRateService,
-        private SalesLookupService $salesLookupService
+        private CompanyIgvRateService $companyIgvRateService
     ) {
     }
 
@@ -45,7 +44,11 @@ class RestaurantController extends Controller
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
-            $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -69,35 +72,75 @@ class RestaurantController extends Controller
         );
 
         $payload = Cache::remember($cacheKey, now()->addSeconds(20), function () use ($companyId, $branchId, $warehouseId, $mode) {
-            $currencies = $this->salesLookupService->listActiveCurrencies();
-            $paymentMethods = $this->salesLookupService->listActivePaymentTypes();
+            $currencies = DB::table('core.currencies')
+                ->select('id', 'code', 'name', 'symbol', 'is_default')
+                ->where('status', 1)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get();
+
+            $paymentMethods = DB::table('master.payment_types')
+                ->select([
+                    'id',
+                    DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
+                    'name',
+                ])
+                ->where(function ($query) {
+                    $query->where('is_active', 1)
+                        ->orWhereIn('status', [1, 2]);
+                })
+                ->orderBy('name')
+                ->get();
 
             $allowedKinds = $mode === 'orders_minimal'
                 ? ['SALES_ORDER']
                 : ['SALES_ORDER', 'INVOICE', 'RECEIPT'];
-            $documentKindIdsByCode = $this->salesLookupService->resolveDocumentKindIdMapByCodes($allowedKinds);
-            $allowedKindIds = $this->salesLookupService->resolveDocumentKindIdsByCodes($allowedKinds);
-            $allowedKindAliases = $this->salesLookupService->resolveDocumentKindAliasesByCodes($allowedKinds);
-            $seriesNumbers = $this->salesLookupService
-                ->listSeriesNumbers($companyId, $branchId, $warehouseId, true, null, null)
-                ->filter(function ($row) use ($allowedKindIds, $allowedKindAliases) {
-                    $documentKindId = isset($row->document_kind_id) && $row->document_kind_id !== null
-                        ? (int) $row->document_kind_id
-                        : null;
+            $documentKindIdsByCode = $this->resolveDocumentKindIdMapByCodes($allowedKinds);
+            $allowedKindIds = $this->resolveDocumentKindIdsByCodes($allowedKinds);
+            $allowedKindAliases = $this->resolveDocumentKindAliasesByCodes($allowedKinds);
 
-                    if ($documentKindId !== null && in_array($documentKindId, $allowedKindIds, true)) {
-                        return true;
+            $seriesQuery = DB::table('sales.series_numbers as sn')
+                ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+                ->select([
+                    'sn.id',
+                    'sn.document_kind_id',
+                    DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
+                    'sn.series',
+                    'sn.current_number',
+                    'sn.is_enabled',
+                ])
+                ->where('sn.company_id', $companyId)
+                ->where(function ($query) use ($allowedKinds, $allowedKindIds, $allowedKindAliases) {
+                    if (!empty($allowedKindIds)) {
+                        $query->whereIn('sn.document_kind_id', $allowedKindIds)
+                            ->orWhere(function ($legacy) use ($allowedKindAliases) {
+                                $legacy->whereNull('sn.document_kind_id')
+                                    ->whereIn(DB::raw("UPPER(TRIM(COALESCE(sn.document_kind, '')))") , $allowedKindAliases);
+                            });
+
+                        return;
                     }
 
-                    $documentKindAlias = strtoupper(trim((string) ($row->document_kind ?? '')));
-                    return in_array($documentKindAlias, $allowedKindAliases, true);
+                    $query->whereIn(DB::raw('UPPER(TRIM(COALESCE(dk.code, sn.document_kind)))'), $allowedKindAliases);
                 })
-                ->map(function ($row) {
+                ->where('sn.is_enabled', true)
+                ->orderBy('document_kind')
+                ->orderBy('sn.series');
+
+            if ($branchId !== null) {
+                $seriesQuery->where('sn.branch_id', $branchId);
+            }
+
+            if ($warehouseId !== null) {
+                $seriesQuery->where('sn.warehouse_id', $warehouseId);
+            }
+
+            $seriesNumbers = $seriesQuery->get()->map(function ($row) {
                 $documentKindId = isset($row->document_kind_id) && $row->document_kind_id !== null
                     ? (int) $row->document_kind_id
                     : null;
 
-                $normalizedCode = $this->salesLookupService->resolveCanonicalDocumentKindCode(
+                $normalizedCode = $this->resolveCanonicalDocumentKindCode(
                     (string) ($row->document_kind ?? ''),
                     $documentKindId
                 );
@@ -109,27 +152,55 @@ class RestaurantController extends Controller
                 return $row;
             })->values();
 
-            $companyToggles = $this->salesLookupService->loadCompanyFeatureToggles($companyId)->pluck('is_enabled', 'feature_code');
-            $branchToggles = $branchId !== null
-                ? $this->salesLookupService->loadBranchFeatureToggles($companyId, $branchId)->pluck('is_enabled', 'feature_code')
-                : collect();
+            $companyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                ->value('is_enabled');
 
-            $companyToggle = $companyToggles->get('RESTAURANT_MENU_IGV_INCLUDED');
-            $branchToggle = $branchToggles->get('RESTAURANT_MENU_IGV_INCLUDED');
+            $branchToggle = null;
+            if ($branchId !== null) {
+                $branchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_MENU_IGV_INCLUDED')
+                    ->value('is_enabled');
+            }
 
             $restaurantPriceIncludesIgv = $branchToggle !== null
                 ? (bool) $branchToggle
                 : ($companyToggle !== null ? (bool) $companyToggle : true);
 
-            $recipesCompanyToggle = $companyToggles->get('RESTAURANT_RECIPES_ENABLED');
-            $recipesBranchToggle = $branchToggles->get('RESTAURANT_RECIPES_ENABLED');
+            $recipesCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                ->value('is_enabled');
+
+            $recipesBranchToggle = null;
+            if ($branchId !== null) {
+                $recipesBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'RESTAURANT_RECIPES_ENABLED')
+                    ->value('is_enabled');
+            }
 
             $restaurantRecipesEnabled = $recipesBranchToggle !== null
                 ? (bool) $recipesBranchToggle
                 : ($recipesCompanyToggle !== null ? (bool) $recipesCompanyToggle : false);
 
-            $sellerToCashierCompanyToggle = $companyToggles->get('SALES_SELLER_TO_CASHIER');
-            $sellerToCashierBranchToggle = $branchToggles->get('SALES_SELLER_TO_CASHIER');
+            $sellerToCashierCompanyToggle = DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                ->value('is_enabled');
+
+            $sellerToCashierBranchToggle = null;
+            if ($branchId !== null) {
+                $sellerToCashierBranchToggle = DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', 'SALES_SELLER_TO_CASHIER')
+                    ->value('is_enabled');
+            }
 
             $sellerToCashierEnabled = $sellerToCashierBranchToggle !== null
                 ? (bool) $sellerToCashierBranchToggle
@@ -245,14 +316,26 @@ class RestaurantController extends Controller
         $branchId  = (int) $payload['branch_id'];
         $warehouseId = isset($payload['warehouse_id']) ? (int) $payload['warehouse_id'] : null;
 
-        $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
+        $branchExists = DB::table('core.branches')
+            ->where('id', $branchId)
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->exists();
 
         if (!$branchExists) {
             return response()->json(['message' => 'Invalid branch scope'], 422);
         }
 
         if ($warehouseId !== null) {
-            $warehouseExists = $this->salesLookupService->activeWarehouseExistsInBranchScope($companyId, $warehouseId, $branchId);
+            $warehouseExists = DB::table('inventory.warehouses')
+                ->where('id', $warehouseId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->where(function ($query) use ($branchId) {
+                    $query->where('branch_id', $branchId)
+                        ->orWhereNull('branch_id');
+                })
+                ->exists();
 
             if (!$warehouseExists) {
                 return response()->json(['message' => 'Invalid warehouse scope'], 422);
@@ -345,7 +428,11 @@ class RestaurantController extends Controller
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
-            $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -504,7 +591,11 @@ class RestaurantController extends Controller
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
-            $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
+            $branchExists = DB::table('core.branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->exists();
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -555,7 +646,11 @@ class RestaurantController extends Controller
         $payload = $validator->validated();
         $branchId = (int) $payload['branch_id'];
 
-        $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
+        $branchExists = DB::table('core.branches')
+            ->where('id', $branchId)
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->exists();
 
         if (!$branchExists) {
             return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -632,26 +727,123 @@ class RestaurantController extends Controller
 
     private function resolveDocumentKindIdsByCodes(array $codes): array
     {
-        return $this->salesLookupService->resolveDocumentKindIdsByCodes($codes);
+        $normalized = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        return DB::table('sales.document_kinds')
+            ->whereIn(DB::raw('UPPER(code)'), $normalized)
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     private function resolveDefaultWarehouseId(int $companyId, int $branchId): ?int
     {
-        return $this->salesLookupService->resolveDefaultWarehouseIdByBranchScope($companyId, $branchId);
+        $warehouse = DB::table('inventory.warehouses')
+            ->select('id')
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->where(function ($query) use ($branchId) {
+                $query->where('branch_id', $branchId)
+                    ->orWhereNull('branch_id');
+            })
+            ->orderByRaw('CASE WHEN branch_id = ? THEN 0 ELSE 1 END', [$branchId])
+            ->orderBy('name')
+            ->first();
+
+        return $warehouse ? (int) $warehouse->id : null;
     }
 
     private function resolveDocumentKindAliasesByCodes(array $codes): array
     {
-        return $this->salesLookupService->resolveDocumentKindAliasesByCodes($codes);
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $aliases = $normalizedCodes;
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        foreach ($rows as $row) {
+            $aliases[] = strtoupper(trim((string) ($row->code ?? '')));
+            $aliases[] = strtoupper(trim((string) ($row->label ?? '')));
+        }
+
+        return array_values(array_unique(array_filter($aliases, static fn ($value) => $value !== '')));
     }
 
     private function resolveDocumentKindIdMapByCodes(array $codes): array
     {
-        return $this->salesLookupService->resolveDocumentKindIdMapByCodes($codes);
+        $normalizedCodes = array_values(array_filter(array_map(
+            static fn ($code) => strtoupper(trim((string) $code)),
+            $codes
+        )));
+
+        if ($normalizedCodes === []) {
+            return [];
+        }
+
+        $rows = DB::table('sales.document_kinds')
+            ->select('id', 'code')
+            ->whereIn(DB::raw('UPPER(code)'), $normalizedCodes)
+            ->get();
+
+        $map = [];
+        foreach ($rows as $row) {
+            $code = strtoupper(trim((string) ($row->code ?? '')));
+            if ($code === '') {
+                continue;
+            }
+            $map[$code] = (int) $row->id;
+        }
+
+        return $map;
     }
 
     private function resolveCanonicalDocumentKindCode(string $documentKindValue, ?int $documentKindId = null): ?string
     {
-        return $this->salesLookupService->resolveCanonicalDocumentKindCode($documentKindValue, $documentKindId);
+        if ($documentKindId !== null) {
+            $codeById = DB::table('sales.document_kinds')
+                ->where('id', $documentKindId)
+                ->value('code');
+
+            if ($codeById !== null && trim((string) $codeById) !== '') {
+                return strtoupper(trim((string) $codeById));
+            }
+        }
+
+        $normalizedValue = strtoupper(trim($documentKindValue));
+        if ($normalizedValue === '') {
+            return null;
+        }
+
+        $row = DB::table('sales.document_kinds')
+            ->select('code', 'label')
+            ->where(function ($query) use ($normalizedValue) {
+                $query->whereRaw('UPPER(TRIM(code)) = ?', [$normalizedValue])
+                    ->orWhereRaw('UPPER(TRIM(label)) = ?', [$normalizedValue]);
+            })
+            ->first();
+
+        if ($row && isset($row->code) && trim((string) $row->code) !== '') {
+            return strtoupper(trim((string) $row->code));
+        }
+
+        return $normalizedValue;
     }
 }

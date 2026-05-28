@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TaxBridgeAuditController extends Controller
 {
@@ -26,7 +27,10 @@ class TaxBridgeAuditController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $document = $this->auditService->findCommercialDocumentScope($documentId);
+        $document = DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->select('id', 'company_id', 'branch_id')
+            ->first();
 
         if (!$document) {
             return response()->json(['message' => 'Document not found'], 404);
@@ -186,7 +190,10 @@ class TaxBridgeAuditController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $scope = $this->auditService->findAuditLogScope($logId);
+        $scope = DB::table('sales.tax_bridge_audit_logs')
+            ->where('id', $logId)
+            ->select('company_id', 'branch_id')
+            ->first();
 
         if (!$scope) {
             return response()->json(['message' => 'Log not found'], 404);
@@ -218,7 +225,32 @@ class TaxBridgeAuditController extends Controller
     {
         $featureCode = 'SALES_TAX_BRIDGE_DEBUG_VIEW';
 
-        if (!$this->auditService->isFeatureEnabledForContext($companyId, $branchId, $featureCode)) {
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->select('is_enabled')
+                ->first();
+
+            if ($branchRow && isset($branchRow->is_enabled)) {
+                if (!(bool) $branchRow->is_enabled) {
+                    return response()->json([
+                        'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
+                    ], 403);
+                }
+
+                return null;
+            }
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->select('is_enabled')
+            ->first();
+
+        if (!$companyRow || !(bool) ($companyRow->is_enabled ?? false)) {
             return response()->json([
                 'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
             ], 403);

@@ -11,11 +11,10 @@ use App\Application\UseCases\Purchases\GetPurchasesLookupsUseCase;
 use App\Application\UseCases\Purchases\ListPurchasesStockEntriesUseCase;
 use App\Services\AppConfig\CommerceFeatureToggleService;
 use App\Services\AppConfig\CompanyIgvRateService;
-use App\Services\Purchases\PurchasesPersistenceService;
-use App\Services\Purchases\SupplierManagementService;
-use App\Services\Purchases\SupplierQueryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 
 class PurchasesController
@@ -29,10 +28,7 @@ class PurchasesController
         private GetPurchasesLookupsUseCase $getPurchasesLookupsUseCase,
         private ListPurchasesStockEntriesUseCase $listPurchasesStockEntriesUseCase,
         private ExportPurchasesStockEntriesUseCase $exportPurchasesStockEntriesUseCase,
-        private CreateInventoryStockEntryUseCase $createInventoryStockEntryUseCase,
-        private PurchasesPersistenceService $purchasesPersistenceService,
-        private SupplierQueryService $supplierQueryService,
-        private SupplierManagementService $supplierManagementService
+        private CreateInventoryStockEntryUseCase $createInventoryStockEntryUseCase
     )
     {
     }
@@ -67,7 +63,11 @@ class PurchasesController
 
         $payload = $validator->validated();
 
-        $source = $this->purchasesPersistenceService->findPurchaseOrderSource($id, $companyId);
+        $source = DB::table('inventory.stock_entries')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->where('entry_type', 'PURCHASE_ORDER')
+            ->first();
 
         if (!$source) {
             return response()->json(['message' => 'Orden de compra no encontrada'], 404);
@@ -77,7 +77,10 @@ class PurchasesController
             return response()->json(['message' => 'La orden de compra ya no puede recepcionarse'], 422);
         }
 
-        $sourceItems = $this->purchasesPersistenceService->listStockEntryItems((int) $source->id);
+        $sourceItems = DB::table('inventory.stock_entry_items')
+            ->where('entry_id', (int) $source->id)
+            ->orderBy('id')
+            ->get();
 
         if ($sourceItems->isEmpty()) {
             return response()->json(['message' => 'La orden de compra no tiene items para recepcion'], 422);
@@ -89,8 +92,19 @@ class PurchasesController
             $orderedByProduct[$productId] = ($orderedByProduct[$productId] ?? 0.0) + (float) $item->qty;
         }
 
-        $receivedByProduct = $this->purchasesPersistenceService
-            ->receivedByProductForPurchaseOrder($companyId, (int) $source->id);
+        $receivedByProduct = DB::table('inventory.stock_entries as se')
+            ->join('inventory.stock_entry_items as sei', 'sei.entry_id', '=', 'se.id')
+            ->where('se.company_id', $companyId)
+            ->where('se.entry_type', 'PURCHASE')
+            ->where('se.status', 'APPLIED')
+            ->whereRaw("COALESCE((se.metadata->>'source_purchase_order_id')::BIGINT, 0) = ?", [(int) $source->id])
+            ->groupBy('sei.product_id')
+            ->selectRaw('sei.product_id, COALESCE(SUM(sei.qty), 0) as received_qty')
+            ->get()
+            ->reduce(function ($carry, $row) {
+                $carry[(int) $row->product_id] = (float) $row->received_qty;
+                return $carry;
+            }, []);
 
         $remainingByProduct = [];
         foreach ($orderedByProduct as $productId => $orderedQty) {
@@ -253,7 +267,10 @@ class PurchasesController
             'remaining_by_product' => $remainingAfter,
         ]);
 
-        $this->purchasesPersistenceService->updateStockEntryStatusAndMetadata((int) $source->id, $companyId, [
+        DB::table('inventory.stock_entries')
+            ->where('id', (int) $source->id)
+            ->where('company_id', $companyId)
+            ->update([
                 'status' => $nextStatus,
                 'metadata' => json_encode($updatedMetadata),
                 'updated_by' => $authUser->id,
@@ -312,7 +329,10 @@ class PurchasesController
 
         $payload = $validator->validated();
 
-        $entry = $this->purchasesPersistenceService->findStockEntry($id, $companyId);
+        $entry = DB::table('inventory.stock_entries')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->first();
 
         if (!$entry) {
             return response()->json(['message' => 'Ingreso no encontrado'], 404);
@@ -352,7 +372,13 @@ class PurchasesController
             ->unique()
             ->values();
 
-        $products = $this->purchasesPersistenceService->findProductsByCompanyAndIds($companyId, $productIds->all());
+        $products = DB::table('inventory.products')
+            ->select('id', 'status', 'is_stockable', 'lot_tracking')
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds->all())
+            ->whereNull('deleted_at')
+            ->get()
+            ->keyBy('id');
 
         if ($products->count() !== $productIds->count()) {
             return response()->json(['message' => 'Uno o mas productos no existen o no estan disponibles.'], 422);
@@ -391,7 +417,7 @@ class PurchasesController
         }
 
         try {
-            $this->purchasesPersistenceService->runInTransaction(function () use (
+            DB::transaction(function () use (
                 $entry,
                 $entryType,
                 $payload,
@@ -423,7 +449,9 @@ class PurchasesController
                     );
                 }
 
-                $this->purchasesPersistenceService->deleteStockEntryItems((int) $entry->id);
+                DB::table('inventory.stock_entry_items')
+                    ->where('entry_id', (int) $entry->id)
+                    ->delete();
 
                 foreach ($payload['items'] as $index => $item) {
                     $productId = (int) $item['product_id'];
@@ -455,7 +483,7 @@ class PurchasesController
                         && (bool) ($inventorySettings['enable_lot_tracking'] ?? false);
 
                     if ($appliesStock && $lotTrackingEnabled && (bool) $product->lot_tracking && !$lotId && $lotCode !== '') {
-                        $lotId = $this->purchasesPersistenceService->createProductLot([
+                        $lotId = (int) DB::table('inventory.product_lots')->insertGetId([
                             'company_id' => $companyId,
                             'warehouse_id' => (int) $entry->warehouse_id,
                             'product_id' => $productId,
@@ -470,12 +498,13 @@ class PurchasesController
                     }
 
                     if ($appliesStock && $lotId) {
-                        $lotExists = $this->purchasesPersistenceService->productLotExists(
-                            $lotId,
-                            $companyId,
-                            (int) $entry->warehouse_id,
-                            $productId
-                        );
+                        $lotExists = DB::table('inventory.product_lots')
+                            ->where('id', $lotId)
+                            ->where('company_id', $companyId)
+                            ->where('warehouse_id', (int) $entry->warehouse_id)
+                            ->where('product_id', $productId)
+                            ->where('status', 1)
+                            ->exists();
 
                         if (!$lotExists) {
                             throw new \RuntimeException('Lote invalido para la linea ' . ($index + 1));
@@ -505,7 +534,7 @@ class PurchasesController
                         $entryItemInsert['metadata'] = $itemMetadata ? json_encode($itemMetadata) : null;
                     }
 
-                    $this->purchasesPersistenceService->insertStockEntryItem($entryItemInsert);
+                    DB::table('inventory.stock_entry_items')->insert($entryItemInsert);
 
                     if ($appliesStock) {
                         $this->applyStockForEditedEntryLine(
@@ -526,11 +555,12 @@ class PurchasesController
 
                         if ($entryType === 'PURCHASE' && $unitCost > 0) {
                             $commercialUnitCost = $unitCost * (1 + max($taxRate, 0) / 100);
-                            $this->purchasesPersistenceService->updateProductCostPrice(
-                                $companyId,
-                                $productId,
-                                $commercialUnitCost
-                            );
+                            DB::table('inventory.products')
+                                ->where('id', $productId)
+                                ->where('company_id', $companyId)
+                                ->update([
+                                    'cost_price' => $commercialUnitCost,
+                                ]);
                         }
                     }
                 }
@@ -576,11 +606,10 @@ class PurchasesController
                     $entryUpdate['metadata'] = json_encode($nextMetadata);
                 }
 
-                $this->purchasesPersistenceService->updateStockEntryStatusAndMetadata(
-                    (int) $entry->id,
-                    $companyId,
-                    $entryUpdate
-                );
+                DB::table('inventory.stock_entries')
+                    ->where('id', (int) $entry->id)
+                    ->where('company_id', $companyId)
+                    ->update($entryUpdate);
             });
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -790,14 +819,25 @@ class PurchasesController
 
         $taxById = $this->resolveTaxCategories($companyId)->keyBy('id');
 
-        $items = $this->purchasesPersistenceService
-            ->listEntryItemsForAttach(
-                $companyId,
-                $entryIds->all(),
-                $hasTaxCategory,
-                $hasTaxRate,
-                $hasItemMetadata
-            )
+        $items = DB::table('inventory.stock_entry_items as sei')
+            ->leftJoin('inventory.products as p', 'sei.product_id', '=', 'p.id')
+            ->leftJoin('inventory.product_lots as pl', 'sei.lot_id', '=', 'pl.id')
+            ->whereIn('sei.entry_id', $entryIds->all())
+            ->select([
+                'sei.entry_id',
+                'sei.product_id',
+                DB::raw('COALESCE(p.name, CONCAT(\'Producto #\', sei.product_id)) as product_name'),
+                'sei.qty',
+                'sei.unit_cost',
+                $hasTaxCategory ? 'sei.tax_category_id' : DB::raw('NULL as tax_category_id'),
+                $hasTaxRate ? 'sei.tax_rate' : DB::raw('0 as tax_rate'),
+                $hasItemMetadata ? 'sei.metadata' : DB::raw('NULL as metadata'),
+                'sei.notes',
+                'pl.lot_code',
+            ])
+            ->orderBy('sei.entry_id')
+            ->orderBy('p.name')
+            ->orderBy('sei.id')
             ->get()
             ->map(function ($row) use ($taxById) {
                 $itemMetadata = $this->decodeMetadata($row->metadata ?? null);
@@ -922,7 +962,7 @@ class PurchasesController
         $statusColumn = $this->firstExistingColumn($columns, ['status', 'is_enabled', 'enabled', 'active']);
         $companyColumn = $this->firstExistingColumn($columns, ['company_id']);
 
-        $query = app('db')->table($sourceTable);
+        $query = DB::table($sourceTable);
 
         if ($statusColumn) {
             if ($statusColumn === 'status') {
@@ -962,7 +1002,9 @@ class PurchasesController
 
     private function inventorySettingsForCompany(int $companyId): array
     {
-        $row = $this->purchasesPersistenceService->getInventorySettingsRow($companyId);
+        $row = DB::table('inventory.inventory_settings')
+            ->where('company_id', $companyId)
+            ->first();
 
         if (!$row) {
             return [
@@ -999,7 +1041,7 @@ class PurchasesController
     {
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        $row = app('db')->selectOne(
+        $row = DB::selectOne(
             'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
             [$schema, $table]
         );
@@ -1011,7 +1053,7 @@ class PurchasesController
     {
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        $rows = app('db')->select(
+        $rows = DB::select(
             'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
             [$schema, $table]
         );
@@ -1054,12 +1096,18 @@ class PurchasesController
             return false;
         }
 
-        return $this->purchasesPersistenceService->hasDuplicatePurchaseByReference(
-            $companyId,
-            $normalizedReferenceNo,
-            $normalizedSupplierReference,
-            $excludeEntryId
-        );
+        $query = DB::table('inventory.stock_entries')
+            ->where('company_id', $companyId)
+            ->where('entry_type', 'PURCHASE')
+            ->whereRaw("UPPER(COALESCE(status, '')) NOT IN ('VOID', 'CANCELED')")
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(reference_no, '')), '\\s+', ' ', 'g')) = ?", [$normalizedReferenceNo])
+            ->whereRaw("UPPER(REGEXP_REPLACE(TRIM(COALESCE(supplier_reference, '')), '\\s+', ' ', 'g')) = ?", [$normalizedSupplierReference]);
+
+        if ($excludeEntryId !== null && $excludeEntryId > 0) {
+            $query->where('id', '<>', $excludeEntryId);
+        }
+
+        return $query->exists();
     }
 
     private function normalizePurchaseKeyText($value): string
@@ -1119,7 +1167,12 @@ class PurchasesController
         array $settings,
         bool $hasLedgerTaxRateColumn
     ): void {
-        $rows = $this->purchasesPersistenceService->listLedgerByStockEntry($companyId, $entryId);
+        $rows = DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'STOCK_ENTRY')
+            ->where('ref_id', $entryId)
+            ->orderBy('id')
+            ->get();
 
         foreach ($rows as $row) {
             $originalType = strtoupper((string) $row->movement_type);
@@ -1173,13 +1226,17 @@ class PurchasesController
                 $insert['tax_rate'] = round((float) ($row->tax_rate ?? 0), 2);
             }
 
-            $this->purchasesPersistenceService->insertLedgerRow($insert);
+            DB::table('inventory.inventory_ledger')->insert($insert);
         }
     }
 
     private function clearPreviousEditLedgerForEntry(int $companyId, int $entryId): void
     {
-        $this->purchasesPersistenceService->clearEditLedgerForEntry($companyId, $entryId);
+        DB::table('inventory.inventory_ledger')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'STOCK_ENTRY_EDIT')
+            ->where('ref_id', $entryId)
+            ->delete();
     }
 
     private function applyStockForEditedEntryLine(
@@ -1225,7 +1282,7 @@ class PurchasesController
             $insert['tax_rate'] = round($taxRate, 2);
         }
 
-        $this->purchasesPersistenceService->insertLedgerRow($insert);
+        DB::table('inventory.inventory_ledger')->insert($insert);
     }
 
     private function applyCurrentStockDelta(int $companyId, int $warehouseId, int $productId, float $delta, bool $allowNegativeStock): void
@@ -1233,7 +1290,11 @@ class PurchasesController
         $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId;
 
         if (!array_key_exists($projectionKey, $this->stockProjection)) {
-            $row = $this->purchasesPersistenceService->findCurrentStockRow($companyId, $warehouseId, $productId);
+            $row = DB::table('inventory.current_stock')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->first();
 
             $this->stockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
         }
@@ -1253,7 +1314,12 @@ class PurchasesController
         $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId . ':' . $lotId;
 
         if (!array_key_exists($projectionKey, $this->lotStockProjection)) {
-            $row = $this->purchasesPersistenceService->findCurrentStockByLotRow($companyId, $warehouseId, $productId, $lotId);
+            $row = DB::table('inventory.current_stock_by_lot')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->where('lot_id', $lotId)
+                ->first();
 
             $this->lotStockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
         }
@@ -1486,7 +1552,10 @@ class PurchasesController
             return [];
         }
 
-        $row = $this->purchasesPersistenceService->findCompanySettingsBankAccounts($companyId);
+        $row = DB::table('core.company_settings')
+            ->where('company_id', $companyId)
+            ->select('bank_accounts')
+            ->first();
 
         if (!$row || $row->bank_accounts === null) {
             return [];
@@ -1507,10 +1576,17 @@ class PurchasesController
 
     private function resolveFeatureToggleRow(int $companyId, $branchId, string $featureCode)
     {
-        $companyRow = $this->purchasesPersistenceService->findCompanyFeatureToggle($companyId, $featureCode);
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->first();
 
         if ($branchId !== null) {
-            $branchRow = $this->purchasesPersistenceService->findBranchFeatureToggle($companyId, $branchId, $featureCode);
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->first();
 
             if ($branchRow && (bool) ($branchRow->is_enabled ?? false)) {
                 return $branchRow;
@@ -1552,8 +1628,11 @@ class PurchasesController
             return [];
         }
 
-        return $this->purchasesPersistenceService
-            ->listDetractionServiceCodes()
+        return DB::table('master.detraccion_service_codes')
+            ->select('id', 'code', 'name', 'rate_percent')
+            ->where('is_active', 1)
+            ->orderBy('code')
+            ->get()
             ->map(function ($row) {
                 return [
                     'id'           => (int) $row->id,
@@ -1570,15 +1649,50 @@ class PurchasesController
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $search = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 12);
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $this->ensurePurchaseSuppliersTable();
-        $search = trim((string) $request->query('q', ''));
-        $limit = (int) $request->query('limit', 12);
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 30) {
+            $limit = 30;
+        }
 
-        $rows = $this->supplierQueryService->listSuppliers($companyId, $search, $limit, true);
+        $this->ensurePurchaseSuppliersTable();
+
+        $query = DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
+            ->where('company_id', $companyId)
+            ->orderByRaw('COALESCE(last_used_at, updated_at, created_at) DESC')
+            ->limit($limit);
+
+        if ($search !== '') {
+            $like = '%' . $search . '%';
+            $normalizedDoc = preg_replace('/\D+/', '', $search);
+
+            $query->where(function ($nested) use ($like, $normalizedDoc) {
+                $nested->where('doc_number', 'ilike', $like)
+                    ->orWhere('legal_name', 'ilike', $like)
+                    ->orWhere('address', 'ilike', $like)
+                    ->orWhere('phone', 'ilike', $like);
+
+                if ($normalizedDoc !== '') {
+                    $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+            });
+        }
+
+        $rows = $query
+            ->get()
+            ->map(function ($row) {
+                return $this->supplierSuggestionFromRow($row);
+            })
+            ->values();
 
         return response()->json([
             'data' => $rows,
@@ -1589,15 +1703,50 @@ class PurchasesController
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $search = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 5000);
+
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $this->ensurePurchaseSuppliersTable();
-        $search = trim((string) $request->query('q', ''));
-        $limit = (int) $request->query('limit', 5000);
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 10000) {
+            $limit = 10000;
+        }
 
-        $rows = $this->supplierQueryService->listSuppliers($companyId, $search, $limit, false);
+        $this->ensurePurchaseSuppliersTable();
+
+        $query = DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
+            ->where('company_id', $companyId)
+            ->orderBy('legal_name')
+            ->limit($limit);
+
+        if ($search !== '') {
+            $like = '%' . $search . '%';
+            $normalizedDoc = preg_replace('/\D+/', '', $search);
+
+            $query->where(function ($nested) use ($like, $normalizedDoc) {
+                $nested->where('doc_number', 'ilike', $like)
+                    ->orWhere('legal_name', 'ilike', $like)
+                    ->orWhere('address', 'ilike', $like)
+                    ->orWhere('phone', 'ilike', $like);
+
+                if ($normalizedDoc !== '') {
+                    $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
+                }
+            });
+        }
+
+        $rows = $query
+            ->get()
+            ->map(function ($row) {
+                return $this->supplierSuggestionFromRow($row);
+            })
+            ->values();
 
         return response()->json([
             'data' => $rows,
@@ -1629,9 +1778,88 @@ class PurchasesController
 
         $this->ensurePurchaseSuppliersTable();
 
-        $result = $this->supplierManagementService->bulkImportSuppliers($companyId, $validator->validated()['rows']);
+        $rows = $validator->validated()['rows'];
+        $existingDocs = DB::table('inventory.purchase_suppliers')
+            ->where('company_id', $companyId)
+            ->pluck('doc_number')
+            ->map(fn ($value) => (string) $value)
+            ->flip()
+            ->all();
 
-        return response()->json($result);
+        $seenInFile = [];
+        $created = 0;
+        $skipped = 0;
+        $errors = [];
+        $toInsert = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNumber = $index + 2;
+            $docNumber = preg_replace('/\D+/', '', (string) ($row['doc_number'] ?? ''));
+            if (!is_string($docNumber)) {
+                $docNumber = '';
+            }
+            $docNumber = trim($docNumber);
+            $legalName = trim((string) ($row['legal_name'] ?? ''));
+
+            if ($docNumber === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Número de documento es obligatorio.'];
+                continue;
+            }
+
+            if ($legalName === '') {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Nombre del proveedor es obligatorio.'];
+                continue;
+            }
+
+            if (isset($seenInFile[$docNumber])) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Proveedor duplicado dentro del archivo (mismo documento).'];
+                continue;
+            }
+            $seenInFile[$docNumber] = true;
+
+            if (isset($existingDocs[$docNumber])) {
+                $skipped++;
+                $errors[] = ['row' => $rowNumber, 'message' => 'Proveedor ya existe en el catálogo local (mismo documento).'];
+                continue;
+            }
+
+            $docTypeInput = strtoupper(trim((string) ($row['doc_type'] ?? '')));
+            $docType = $this->normalizeSupplierDocType($docTypeInput, $docNumber);
+
+            $toInsert[] = [
+                'company_id' => $companyId,
+                'doc_type' => $docType,
+                'doc_number' => $docNumber,
+                'legal_name' => $legalName,
+                'address' => $this->nullIfBlank((string) ($row['address'] ?? '')),
+                'phone' => $this->nullIfBlank((string) ($row['phone'] ?? '')),
+                'source' => $this->nullIfBlank((string) ($row['source'] ?? 'import')) ?? 'import',
+                'created_at' => now(),
+                'updated_at' => now(),
+                'last_used_at' => now(),
+            ];
+
+            $existingDocs[$docNumber] = true;
+            $created++;
+        }
+
+        foreach (array_chunk($toInsert, 500) as $chunk) {
+            DB::table('inventory.purchase_suppliers')->insert($chunk);
+        }
+
+        return response()->json([
+            'message' => 'Importación de proveedores procesada.',
+            'summary' => [
+                'total' => count($rows),
+                'created' => $created,
+                'skipped' => $skipped,
+                'errors' => count($errors),
+            ],
+            'errors' => array_slice($errors, 0, 300),
+        ]);
     }
 
     public function resolveSupplierByDocument(Request $request)
@@ -1656,15 +1884,97 @@ class PurchasesController
 
         $this->ensurePurchaseSuppliersTable();
 
-        $result = $this->supplierManagementService->resolveSupplierByDocument($companyId, $document);
+        $existing = $this->fetchSupplierRowByDocument($companyId, $document);
+        if ($existing) {
+            return response()->json(array_merge(
+                $this->supplierSuggestionFromRow($existing),
+                ['message' => 'Proveedor encontrado en base local.']
+            ));
+        }
 
-        return response()->json($result['body'], (int) $result['status']);
+        $isDni = strlen($document) === 8;
+        $source = $isDni ? 'reniec' : 'sunat';
+
+        try {
+            if ($isDni) {
+                $response = Http::timeout(10)
+                    ->acceptJson()
+                    ->get('https://mundosoftperu.com/reniec/consulta_reniec.php', ['dni' => $document]);
+
+                if (!$response->ok()) {
+                    return response()->json(['message' => 'No se pudo consultar RENIEC.'], 502);
+                }
+
+                $json = $response->json();
+                if (!is_array($json) || !isset($json[0]) || (string) $json[0] !== $document) {
+                    return response()->json(['message' => 'Numero no existe en RENIEC.'], 404);
+                }
+
+                $fullName = trim(implode(' ', array_filter([
+                    (string) ($json[2] ?? ''),
+                    (string) ($json[3] ?? ''),
+                    (string) ($json[1] ?? ''),
+                ])));
+
+                if ($fullName === '') {
+                    return response()->json(['message' => 'RENIEC no devolvio nombre valido.'], 404);
+                }
+
+                $this->upsertPurchaseSupplier($companyId, [
+                    'doc_type' => 'DNI',
+                    'doc_number' => $document,
+                    'legal_name' => $fullName,
+                    'address' => null,
+                    'source' => $source,
+                ]);
+
+                $saved = $this->fetchSupplierRowByDocument($companyId, $document);
+                return response()->json(array_merge(
+                    $this->supplierSuggestionFromRow($saved),
+                    ['message' => 'Proveedor consultado y registrado correctamente.']
+                ));
+            }
+
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->get('https://mundosoftperu.com/sunat/sunat/consulta.php', ['nruc' => $document]);
+
+            if (!$response->ok()) {
+                return response()->json(['message' => 'No se pudo consultar SUNAT.'], 502);
+            }
+
+            $json = $response->json();
+            $result  = is_array($json) ? ($json['result'] ?? null) : null;
+            $ruc     = is_array($result) ? (string) ($result['RUC'] ?? '') : '';
+            $razon   = is_array($result) ? trim((string) ($result['RazonSocial'] ?? '')) : '';
+            $direccion = is_array($result) ? trim((string) ($result['Direccion'] ?? '')) : '';
+
+            if ($ruc !== $document || $razon === '') {
+                return response()->json(['message' => 'Numero no existe en SUNAT.'], 404);
+            }
+
+            $this->upsertPurchaseSupplier($companyId, [
+                'doc_type' => 'RUC',
+                'doc_number' => $document,
+                'legal_name' => $razon,
+                'address' => $direccion !== '' ? $direccion : null,
+                'source' => $source,
+            ]);
+
+            $saved = $this->fetchSupplierRowByDocument($companyId, $document);
+            return response()->json(array_merge(
+                $this->supplierSuggestionFromRow($saved),
+                ['message' => 'Proveedor consultado y registrado correctamente.']
+            ));
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Error al consultar el padron: ' . $e->getMessage()], 500);
+        }
     }
 
     private function ensurePurchaseSuppliersTable(): void
     {
         if (!$this->tableExists('inventory.purchase_suppliers')) {
-            $this->purchasesPersistenceService->executeStatement(<<<'SQL'
+            DB::statement(<<<'SQL'
                 CREATE TABLE IF NOT EXISTS inventory.purchase_suppliers (
                     id BIGSERIAL PRIMARY KEY,
                     company_id BIGINT NOT NULL,
@@ -1682,19 +1992,37 @@ class PurchasesController
             SQL);
         }
 
-        $this->purchasesPersistenceService->executeStatement('ALTER TABLE inventory.purchase_suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
+        DB::statement('ALTER TABLE inventory.purchase_suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
 
-        $this->purchasesPersistenceService->executeStatement('CREATE INDEX IF NOT EXISTS purchase_suppliers_company_name_idx ON inventory.purchase_suppliers (company_id, legal_name)');
+        DB::statement('CREATE INDEX IF NOT EXISTS purchase_suppliers_company_name_idx ON inventory.purchase_suppliers (company_id, legal_name)');
     }
 
     private function fetchSupplierRowByDocument(int $companyId, string $document)
     {
-        return $this->purchasesPersistenceService->findPurchaseSupplierByDocument($companyId, $document);
+        return DB::table('inventory.purchase_suppliers')
+            ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
+            ->where('company_id', $companyId)
+            ->where('doc_number', $document)
+            ->first();
     }
 
     private function upsertPurchaseSupplier(int $companyId, array $data): void
     {
-        $this->purchasesPersistenceService->upsertPurchaseSupplier($companyId, $data);
+        DB::statement(
+            'INSERT INTO inventory.purchase_suppliers (company_id, doc_type, doc_number, legal_name, address, phone, source, created_at, updated_at, last_used_at) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW()) '
+            . 'ON CONFLICT (company_id, doc_number) DO UPDATE SET '
+            . 'doc_type = EXCLUDED.doc_type, legal_name = EXCLUDED.legal_name, address = EXCLUDED.address, phone = EXCLUDED.phone, source = EXCLUDED.source, updated_at = NOW(), last_used_at = NOW()',
+            [
+                $companyId,
+                (string) ($data['doc_type'] ?? ''),
+                (string) ($data['doc_number'] ?? ''),
+                (string) ($data['legal_name'] ?? ''),
+                $data['address'] ?? null,
+                $data['phone'] ?? null,
+                $data['source'] ?? null,
+            ]
+        );
     }
 
     private function supplierSuggestionFromRow($row): array

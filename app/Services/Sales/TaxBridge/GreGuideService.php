@@ -153,6 +153,29 @@ class GreGuideService
         ];
     }
 
+    public function branchExistsForCompany(int $companyId, int $branchId): bool
+    {
+        return DB::table('core.branches')
+            ->where('id', $branchId)
+            ->where('company_id', $companyId)
+            ->where('status', 1)
+            ->exists();
+    }
+
+    public function findGuideScope(int $guideId): ?object
+    {
+        return DB::table('sales.gre_guides')
+            ->where('id', $guideId)
+            ->select('id', 'company_id', 'branch_id')
+            ->first();
+    }
+
+    public function isFeatureEnabledForContext(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled = false): bool
+    {
+        $resolved = $this->resolveFeatureResolutionForContext($companyId, $branchId, $featureCode, $defaultEnabled);
+        return (bool) ($resolved['is_enabled'] ?? false);
+    }
+
     public function searchUbigeos(string $query, int $limit = 30): array
     {
         $q = trim($query);

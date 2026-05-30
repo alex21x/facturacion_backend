@@ -3,133 +3,157 @@
 namespace App\Infrastructure\Repositories\Inventory;
 
 use App\Domain\Inventory\Repositories\InventoryReadRepositoryInterface;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class InventoryReadRepository implements InventoryReadRepositoryInterface
 {
     public function getCurrentStock(int $companyId, $warehouseId, $productId): array
     {
-        $query = DB::table('inventory.current_stock as cs')
-            ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
-            ->join('inventory.warehouses as w', 'w.id', '=', 'cs.warehouse_id')
-            ->select([
-                'cs.company_id',
-                'cs.warehouse_id',
-                'w.code as warehouse_code',
-                'w.name as warehouse_name',
-                'cs.product_id',
-                'p.sku',
-                'p.name as product_name',
-                'cs.stock',
-            ])
-            ->where('cs.company_id', $companyId)
-            ->orderBy('p.name');
+        $cacheKey = sprintf('inventory_current_stock:%d:%s:%s', $companyId, $warehouseId ?? 'all', $productId ?? 'all');
 
-        if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('cs.warehouse_id', (int) $warehouseId);
-        }
+        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $productId) {
+            $query = DB::table('inventory.current_stock as cs')
+                ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
+                ->join('inventory.warehouses as w', 'w.id', '=', 'cs.warehouse_id')
+                ->select([
+                    'cs.company_id',
+                    'cs.warehouse_id',
+                    'w.code as warehouse_code',
+                    'w.name as warehouse_name',
+                    'cs.product_id',
+                    'p.sku',
+                    'p.name as product_name',
+                    'cs.stock',
+                ])
+                ->where('cs.company_id', $companyId)
+                ->orderBy('p.name');
 
-        if ($productId !== null && $productId !== '') {
-            $query->where('cs.product_id', (int) $productId);
-        }
+            if ($warehouseId !== null && $warehouseId !== '') {
+                $query->where('cs.warehouse_id', (int) $warehouseId);
+            }
 
-        return $query->get()->all();
+            if ($productId !== null && $productId !== '') {
+                $query->where('cs.product_id', (int) $productId);
+            }
+
+            return $query->get()->all();
+        });
     }
 
     public function getLots(int $companyId, $warehouseId, $productId, bool $onlyWithStock): array
     {
-        $query = DB::table('inventory.product_lots as pl')
-            ->join('inventory.products as p', 'p.id', '=', 'pl.product_id')
-            ->join('inventory.warehouses as w', 'w.id', '=', 'pl.warehouse_id')
-            ->leftJoin('inventory.current_stock_by_lot as sl', function ($join) {
-                $join->on('sl.lot_id', '=', 'pl.id')
-                    ->on('sl.product_id', '=', 'pl.product_id')
-                    ->on('sl.warehouse_id', '=', 'pl.warehouse_id')
-                    ->on('sl.company_id', '=', 'pl.company_id');
-            })
-            ->select([
-                'pl.id',
-                'pl.warehouse_id',
-                'w.code as warehouse_code',
-                'w.name as warehouse_name',
-                'pl.product_id',
-                'p.sku',
-                'p.name as product_name',
-                'pl.lot_code',
-                'pl.manufacture_at',
-                'pl.expires_at',
-                'pl.received_at',
-                'pl.status',
-                DB::raw('COALESCE(sl.stock, 0) as stock'),
-            ])
-            ->where('pl.company_id', $companyId)
-            ->orderBy('p.name')
-            ->orderBy('pl.lot_code');
+        $cacheKey = sprintf('inventory_lots:%d:%s:%s:%d', $companyId, $warehouseId ?? 'all', $productId ?? 'all', $onlyWithStock ? 1 : 0);
 
-        if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('pl.warehouse_id', (int) $warehouseId);
-        }
+        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $productId, $onlyWithStock) {
+            $query = DB::table('inventory.product_lots as pl')
+                ->join('inventory.products as p', 'p.id', '=', 'pl.product_id')
+                ->join('inventory.warehouses as w', 'w.id', '=', 'pl.warehouse_id')
+                ->leftJoin('inventory.current_stock_by_lot as sl', function ($join) {
+                    $join->on('sl.lot_id', '=', 'pl.id')
+                        ->on('sl.product_id', '=', 'pl.product_id')
+                        ->on('sl.warehouse_id', '=', 'pl.warehouse_id')
+                        ->on('sl.company_id', '=', 'pl.company_id');
+                })
+                ->select([
+                    'pl.id',
+                    'pl.warehouse_id',
+                    'w.code as warehouse_code',
+                    'w.name as warehouse_name',
+                    'pl.product_id',
+                    'p.sku',
+                    'p.name as product_name',
+                    'pl.lot_code',
+                    'pl.manufacture_at',
+                    'pl.expires_at',
+                    'pl.received_at',
+                    'pl.status',
+                    DB::raw('COALESCE(sl.stock, 0) as stock'),
+                ])
+                ->where('pl.company_id', $companyId)
+                ->orderBy('p.name')
+                ->orderBy('pl.lot_code');
 
-        if ($productId !== null && $productId !== '') {
-            $query->where('pl.product_id', (int) $productId);
-        }
+            if ($warehouseId !== null && $warehouseId !== '') {
+                $query->where('pl.warehouse_id', (int) $warehouseId);
+            }
 
-        if ($onlyWithStock) {
-            $query->whereRaw('COALESCE(sl.stock, 0) > 0');
-        }
+            if ($productId !== null && $productId !== '') {
+                $query->where('pl.product_id', (int) $productId);
+            }
 
-        return $query->get()->all();
+            if ($onlyWithStock) {
+                $query->whereRaw('COALESCE(sl.stock, 0) > 0');
+            }
+
+            return $query->get()->all();
+        });
     }
 
     public function getStockEntries(int $companyId, $warehouseId, $entryType, int $limit): array
     {
         $this->ensureStockEntriesTables();
+        $cacheKey = sprintf('inventory_stock_entries:%d:%s:%s:%d', $companyId, $warehouseId ?? 'all', $entryType ?? 'all', $limit);
 
-        $summarySubquery = DB::table('inventory.stock_entry_items')
-            ->selectRaw('entry_id, COUNT(*) as total_items, COALESCE(SUM(qty), 0) as total_qty, COALESCE(SUM(qty * unit_cost), 0) as total_amount')
-            ->groupBy('entry_id');
+        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $entryType, $limit) {
+            $summarySubquery = DB::table('inventory.stock_entry_items')
+                ->selectRaw('entry_id, COUNT(*) as total_items, COALESCE(SUM(qty), 0) as total_qty, COALESCE(SUM(qty * unit_cost), 0) as total_amount')
+                ->groupBy('entry_id');
 
-        $query = DB::table('inventory.stock_entries as e')
-            ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'e.warehouse_id')
-            ->leftJoinSub($summarySubquery, 's', function ($join) {
-                $join->on('s.entry_id', '=', 'e.id');
-            })
-            ->select([
-                'e.id',
-                'e.company_id',
-                'e.branch_id',
-                'e.warehouse_id',
-                'w.code as warehouse_code',
-                'w.name as warehouse_name',
-                'e.entry_type',
-                'e.reference_no',
-                'e.supplier_reference',
-                'e.issue_at',
-                'e.status',
-                'e.notes',
-                DB::raw('COALESCE(s.total_items, 0) as total_items'),
-                DB::raw('COALESCE(s.total_qty, 0) as total_qty'),
-                DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
-                'e.created_at',
-            ])
-            ->where('e.company_id', $companyId)
-            ->orderByDesc('e.issue_at')
-            ->orderByDesc('e.id')
-            ->limit($limit);
+            $query = DB::table('inventory.stock_entries as e')
+                ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'e.warehouse_id')
+                ->leftJoinSub($summarySubquery, 's', function ($join) {
+                    $join->on('s.entry_id', '=', 'e.id');
+                })
+                ->select([
+                    'e.id',
+                    'e.company_id',
+                    'e.branch_id',
+                    'e.warehouse_id',
+                    'w.code as warehouse_code',
+                    'w.name as warehouse_name',
+                    'e.entry_type',
+                    'e.reference_no',
+                    'e.supplier_reference',
+                    'e.issue_at',
+                    'e.status',
+                    'e.notes',
+                    DB::raw('COALESCE(s.total_items, 0) as total_items'),
+                    DB::raw('COALESCE(s.total_qty, 0) as total_qty'),
+                    DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
+                    'e.created_at',
+                ])
+                ->where('e.company_id', $companyId)
+                ->orderByDesc('e.issue_at')
+                ->orderByDesc('e.id')
+                ->limit($limit);
 
-        if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('e.warehouse_id', (int) $warehouseId);
-        }
+            if ($warehouseId !== null && $warehouseId !== '') {
+                $query->where('e.warehouse_id', (int) $warehouseId);
+            }
 
-        if ($entryType !== null && $entryType !== '') {
-            $query->where('e.entry_type', strtoupper((string) $entryType));
-        }
+            if ($entryType !== null && $entryType !== '') {
+                $query->where('e.entry_type', strtoupper((string) $entryType));
+            }
 
-        return $query->get()->all();
+            return $query->get()->all();
+        });
     }
 
     public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array
     {
+        $cacheKey = sprintf(
+            'inventory_kardex:%d:%s:%s:%s:%s:%d:%d',
+            $companyId,
+            $productId ?? 'all',
+            $warehouseId ?? 'all',
+            $dateFrom ?? 'all',
+            $dateTo ?? 'all',
+            $perPage,
+            $page
+        );
+
+        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $productId, $warehouseId, $dateFrom, $dateTo, $perPage, $page) {
         $baseCostExpr = 'COALESCE(NULLIF(il.unit_cost, 0), NULLIF(pl.unit_cost, 0), NULLIF(p.cost_price, 0), 0)';
 
         $baseQuery = DB::table('inventory.inventory_ledger as il')
@@ -203,6 +227,7 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
                 'total_pages'  => (int) ceil($total / max(1, $perPage)),
             ],
         ];
+        });
     }
 
     private function ensureStockEntriesTables(): void

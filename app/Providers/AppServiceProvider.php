@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Contracts\PadronLookupGateway;
+use App\Infrastructure\External\MundosoftPadronLookupGateway;
 use Throwable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        $this->app->bind(PadronLookupGateway::class, MundosoftPadronLookupGateway::class);
     }
 
     /**

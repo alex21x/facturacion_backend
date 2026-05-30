@@ -3,14 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Auth\AuthSessionService;
 use App\Support\ApiToken;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private AuthSessionService $authSessionService
+    ) {
+    }
+
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -31,26 +36,16 @@ class AuthController extends Controller
         $deviceId = trim((string) $request->input('device_id'));
         $requestedAccessSlug = strtolower(trim((string) $request->input('company_access_slug', '')));
 
-        if ($requestedAccessSlug !== '' && !$this->tableExists('appcfg', 'company_access_links')) {
+        if (!$this->authSessionService->canUseRequestedAccessSlug($requestedAccessSlug)) {
             return response()->json([
                 'message' => 'No fue posible iniciar sesion en este momento. Intenta nuevamente o contacta a soporte.',
             ], 401);
         }
 
-        $userQuery = DB::table('auth.users as u')
-            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
-            ->select('u.id', 'u.company_id', 'u.branch_id', 'u.username', 'u.password_hash', 'u.first_name', 'u.last_name', 'u.email', 'u.status', DB::raw('c.status as company_status'))
-            ->where('u.username', $request->input('username'))
-            ->where('u.status', 1);
-
-        if ($requestedAccessSlug !== '') {
-            $userQuery
-                ->join('appcfg.company_access_links as cal', 'cal.company_id', '=', 'u.company_id')
-                ->whereRaw('LOWER(cal.access_slug) = ?', [$requestedAccessSlug])
-                ->where('cal.is_active', 1);
-        }
-
-        $user = $userQuery->first();
+        $user = $this->authSessionService->findActiveUserForLogin(
+            (string) $request->input('username'),
+            $requestedAccessSlug
+        );
 
         if (!$user || !Hash::check($request->input('password'), $user->password_hash)) {
             return response()->json([
@@ -80,21 +75,15 @@ class AuthController extends Controller
         // Revoke active refresh tokens for this user+device.
         $deviceHashPrefix = ApiToken::deviceHash($deviceId) . '.%';
 
-        DB::table('auth.refresh_tokens')
-            ->where('user_id', $user->id)
-            ->whereNull('revoked_at')
-            ->where('token_hash', 'like', $deviceHashPrefix)
-            ->update([
-                'revoked_at' => now(),
-            ]);
+        $this->authSessionService->revokeActiveRefreshTokensForDevice((int) $user->id, $deviceHashPrefix);
 
-        $sessionId = DB::table('auth.refresh_tokens')->insertGetId($this->buildRefreshTokenInsertPayload(
+        $sessionId = $this->authSessionService->createRefreshSession(
             (int) $user->id,
             $refreshTokenHash,
             $refreshExpiresAt,
             $deviceId,
             $request->input('device_name')
-        ));
+        );
 
         $accessToken = ApiToken::makeAccessToken([
             'uid' => (int) $user->id,
@@ -106,12 +95,7 @@ class AuthController extends Controller
 
         $accessExpiresAt = now()->addMinutes($accessTtlMinutes);
 
-        DB::table('auth.users')
-            ->where('id', $user->id)
-            ->update([
-                'last_login_at' => now(),
-                'updated_at' => now(),
-            ]);
+        $this->authSessionService->touchUserLastLogin((int) $user->id);
 
         return response()->json([
             'token_type' => 'Bearer',
@@ -155,29 +139,7 @@ class AuthController extends Controller
         $refreshToken = trim((string) $request->input('refresh_token'));
         $refreshTokenHash = ApiToken::hashRefreshToken($refreshToken, $deviceId);
 
-        $session = DB::table('auth.refresh_tokens as rt')
-            ->join('auth.users as u', 'u.id', '=', 'rt.user_id')
-            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
-            ->select([
-                'rt.id as session_id',
-                'rt.user_id',
-                'rt.token_hash',
-                'rt.expires_at',
-                'rt.revoked_at',
-                'u.company_id',
-                'u.branch_id',
-                'u.username',
-                'u.first_name',
-                'u.last_name',
-                'u.email',
-                'u.status',
-                DB::raw('c.status as company_status'),
-            ])
-            ->where('rt.token_hash', $refreshTokenHash)
-            ->whereNull('rt.revoked_at')
-            ->where('rt.expires_at', '>', now())
-            ->where('u.status', 1)
-            ->first();
+        $session = $this->authSessionService->findValidRefreshSession($refreshTokenHash);
 
         if (!$session) {
             return response()->json([
@@ -204,24 +166,14 @@ class AuthController extends Controller
         $refreshExpiresAt = now()->addDays((int) env('REFRESH_TOKEN_TTL_DAYS', 30));
         $accessTtlMinutes = $this->resolveAccessTtlMinutes();
 
-        $newSessionId = null;
-
-        DB::transaction(function () use ($session, $newRefreshHash, $refreshExpiresAt, $deviceId, &$newSessionId) {
-            DB::table('auth.refresh_tokens')
-                ->where('id', $session->session_id)
-                ->whereNull('revoked_at')
-                ->update([
-                    'revoked_at' => now(),
-                ]);
-
-            $newSessionId = DB::table('auth.refresh_tokens')->insertGetId($this->buildRefreshTokenInsertPayload(
-                (int) $session->user_id,
-                $newRefreshHash,
-                $refreshExpiresAt,
-                $deviceId,
-                null
-            ));
-        });
+        $newSessionId = $this->authSessionService->rotateRefreshSession(
+            (int) $session->session_id,
+            (int) $session->user_id,
+            $newRefreshHash,
+            $refreshExpiresAt,
+            $deviceId,
+            null
+        );
 
         $accessToken = ApiToken::makeAccessToken([
             'uid' => (int) $session->user_id,
@@ -276,57 +228,7 @@ class AuthController extends Controller
 
     private function resolveUserPermissions(int $userId, int $companyId): array
     {
-        $modules = DB::table('appcfg.modules')
-            ->where('status', 1)
-            ->pluck('id', 'code');
-
-        if ($modules->isEmpty()) {
-            return [];
-        }
-
-        $roleAccess = DB::table('auth.role_module_access as rma')
-            ->join('auth.user_roles as ur', 'ur.role_id', '=', 'rma.role_id')
-            ->where('ur.user_id', $userId)
-            ->whereIn('rma.module_id', $modules->values())
-            ->selectRaw('rma.module_id')
-            ->selectRaw('COALESCE(bool_or(rma.can_view), false) as can_view')
-            ->selectRaw('COALESCE(bool_or(rma.can_create), false) as can_create')
-            ->selectRaw('COALESCE(bool_or(rma.can_update), false) as can_update')
-            ->selectRaw('COALESCE(bool_or(rma.can_delete), false) as can_delete')
-            ->selectRaw('COALESCE(bool_or(rma.can_export), false) as can_export')
-            ->selectRaw('COALESCE(bool_or(rma.can_approve), false) as can_approve')
-            ->groupBy('rma.module_id')
-            ->get()
-            ->keyBy('module_id');
-
-        $overrides = DB::table('auth.user_module_overrides')
-            ->where('user_id', $userId)
-            ->whereIn('module_id', $modules->values())
-            ->get()
-            ->keyBy('module_id');
-
-        $columns = ['can_view', 'can_create', 'can_update', 'can_delete', 'can_export', 'can_approve'];
-        $permissions = [];
-
-        foreach ($modules as $code => $moduleId) {
-            $role     = $roleAccess->get($moduleId);
-            $override = $overrides->get($moduleId);
-            $perm     = [];
-
-            foreach ($columns as $col) {
-                if ($override && $override->{$col} !== null) {
-                    $perm[$col] = (bool) $override->{$col};
-                } elseif ($role && $role->{$col} !== null) {
-                    $perm[$col] = (bool) $role->{$col};
-                } else {
-                    $perm[$col] = false;
-                }
-            }
-
-            $permissions[$code] = $perm;
-        }
-
-        return $permissions;
+        return $this->authSessionService->resolveUserPermissions($userId);
     }
 
     private function resolveAccessTtlMinutes(): int
@@ -339,88 +241,7 @@ class AuthController extends Controller
 
     private function resolvePrimaryRoleContext(int $userId, int $companyId): array
     {
-        $this->ensureCompanyRoleProfilesTable();
-
-        $row = DB::table('auth.user_roles as ur')
-            ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
-            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId) {
-                $join->on('crp.role_id', '=', 'r.id')
-                    ->where('crp.company_id', '=', $companyId);
-            })
-            ->where('ur.user_id', $userId)
-            ->where('r.company_id', $companyId)
-            ->where('r.status', 1)
-            ->orderBy('r.id')
-            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
-            ->first();
-
-        return [
-            'role_code' => $row && $row->role_code !== null ? (string) $row->role_code : null,
-            'role_profile' => $row && $row->role_profile !== null ? (string) $row->role_profile : null,
-        ];
-    }
-
-    private function ensureCompanyRoleProfilesTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
-                company_id BIGINT NOT NULL,
-                role_id BIGINT NOT NULL,
-                functional_profile VARCHAR(20) NULL,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, role_id)
-            )'
-        );
-    }
-
-    private function ensureAdminPortalUsersTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.admin_portal_users (
-                user_id BIGINT PRIMARY KEY,
-                status SMALLINT NOT NULL DEFAULT 1,
-                created_at TIMESTAMP NULL,
-                updated_at TIMESTAMP NULL
-            )'
-        );
-    }
-
-    private function tableExists(string $schema, string $table): bool
-    {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->exists();
-    }
-
-    private function columnExists(string $schema, string $table, string $column): bool
-    {
-        return DB::table('information_schema.columns')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->where('column_name', $column)
-            ->exists();
-    }
-
-    private function buildRefreshTokenInsertPayload(int $userId, string $tokenHash, $expiresAt, string $deviceId, ?string $deviceName): array
-    {
-        $payload = [
-            'user_id' => $userId,
-            'token_hash' => $tokenHash,
-            'expires_at' => $expiresAt,
-            'created_at' => now(),
-        ];
-
-        if ($this->columnExists('auth', 'refresh_tokens', 'device_id')) {
-            $payload['device_id'] = $deviceId;
-        }
-
-        if ($this->columnExists('auth', 'refresh_tokens', 'device_name')) {
-            $payload['device_name'] = $deviceName !== null ? trim((string) $deviceName) : null;
-        }
-
-        return $payload;
+        return $this->authSessionService->resolvePrimaryRoleContext($userId, $companyId);
     }
 
     private function isAdminPortalDevice(string $deviceId): bool
@@ -430,12 +251,7 @@ class AuthController extends Controller
 
     private function isAdminPortalUser(int $userId): bool
     {
-        $this->ensureAdminPortalUsersTable();
-
-        return DB::table('appcfg.admin_portal_users')
-            ->where('user_id', $userId)
-            ->where('status', 1)
-            ->exists();
+        return $this->authSessionService->isAdminPortalUser($userId);
     }
 
     public function logout(Request $request)
@@ -443,12 +259,7 @@ class AuthController extends Controller
         $sessionId = $request->attributes->get('auth_session_id');
 
         if ($sessionId) {
-            DB::table('auth.refresh_tokens')
-                ->where('id', $sessionId)
-                ->whereNull('revoked_at')
-                ->update([
-                    'revoked_at' => now(),
-                ]);
+            $this->authSessionService->revokeRefreshSession((int) $sessionId);
         }
 
         return response()->json([

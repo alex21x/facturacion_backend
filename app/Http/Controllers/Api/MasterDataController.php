@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Application\UseCases\Masters\GetMasterDataOptionsUseCase;
 use App\Http\Controllers\Controller;
+use App\Services\AppConfig\AdminSettingsMatrixService;
+use App\Services\AppConfig\OperationalContextService;
+use App\Services\AppConfig\OperationalLimitsService;
+use App\Services\Inventory\InventoryControllerSupportService;
+use App\Services\Sales\ReferenceDocumentService;
+use App\Services\Sales\SalesLookupService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class MasterDataController extends Controller
@@ -19,7 +24,15 @@ class MasterDataController extends Controller
         ['code' => 'CASHIER', 'label' => 'Cajero', 'sort_order' => 30],
     ];
 
-    public function __construct(private GetMasterDataOptionsUseCase $getMasterDataOptionsUseCase)
+    public function __construct(
+        private GetMasterDataOptionsUseCase $getMasterDataOptionsUseCase,
+        private AdminSettingsMatrixService $adminSettingsMatrixService,
+        private OperationalContextService $operationalContextService,
+        private InventoryControllerSupportService $inventoryControllerSupportService,
+        private OperationalLimitsService $operationalLimitsService,
+        private SalesLookupService $salesLookupService,
+        private ReferenceDocumentService $referenceDocumentService
+    )
     {
     }
 
@@ -38,154 +51,20 @@ class MasterDataController extends Controller
     public function dashboard(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureDocumentKindsTable();
-        $units = $this->companyUnits($companyId);
+        $this->salesLookupService->ensureDocumentKindsTable();
+        $units = collect($this->inventoryControllerSupportService->listCompanyUnits($companyId));
         $options = $this->getMasterDataOptionsUseCase->execute($companyId);
+        $dashboardData = $this->salesLookupService->buildDashboardData($companyId, $this->tableExists('appcfg', 'pos_stations'));
+        $warehouses = $dashboardData['warehouses'];
+        $cashRegisters = $dashboardData['cash_registers'];
+        $stations = $dashboardData['pos_stations'];
+        $paymentMethods = $dashboardData['payment_methods'];
+        $series = $dashboardData['series'];
+        $priceTiers = $dashboardData['price_tiers'];
+        $lots = $dashboardData['lots'];
+        $inventorySettings = $dashboardData['inventory_settings'];
 
-        $warehouses = DB::table('inventory.warehouses')
-            ->select('id', 'company_id', 'branch_id', 'code', 'name', 'address', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('name')
-            ->get();
-
-        $cashRegisters = DB::table('sales.cash_registers')
-            ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('name')
-            ->get();
-
-        $stations = $this->tableExists('appcfg', 'pos_stations')
-            ? DB::table('appcfg.pos_stations as ps')
-                ->join('sales.cash_registers as cr', 'cr.id', '=', 'ps.cash_register_id')
-                ->select([
-                    'ps.id',
-                    'ps.company_id',
-                    'ps.cash_register_id',
-                    'ps.code',
-                    'ps.name',
-                    'ps.device_id',
-                    'ps.device_name',
-                    'ps.status',
-                    'cr.branch_id',
-                    'cr.warehouse_id',
-                    'cr.code as cash_register_code',
-                    'cr.name as cash_register_name',
-                ])
-                ->where('ps.company_id', $companyId)
-                ->orderBy('ps.name')
-                ->get()
-            : collect();
-
-        $paymentMethods = DB::table('master.payment_types')
-            ->select([
-                'id',
-                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
-                'name',
-                DB::raw('CASE WHEN COALESCE(is_active, 0) = 1 OR COALESCE(status, 0) IN (1, 2) THEN 1 ELSE 0 END as status'),
-            ])
-            ->orderBy('name')
-            ->get();
-
-        $series = DB::table('sales.series_numbers')
-            ->select([
-                'id',
-                'company_id',
-                'branch_id',
-                'warehouse_id',
-                'document_kind',
-                'series',
-                'current_number',
-                'number_padding',
-                'reset_policy',
-                'is_enabled',
-            ])
-            ->where('company_id', $companyId)
-            ->orderBy('document_kind')
-            ->orderBy('series')
-            ->get();
-
-        $priceTiers = DB::table('sales.price_tiers')
-            ->select('id', 'company_id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('priority')
-            ->orderBy('min_qty')
-            ->get();
-
-        $lots = DB::table('inventory.product_lots as pl')
-            ->join('inventory.products as p', 'p.id', '=', 'pl.product_id')
-            ->join('inventory.warehouses as w', 'w.id', '=', 'pl.warehouse_id')
-            ->select([
-                'pl.id',
-                'pl.product_id',
-                'p.name as product_name',
-                'pl.warehouse_id',
-                'w.name as warehouse_name',
-                'pl.lot_code',
-                'pl.manufacture_at',
-                'pl.expires_at',
-                'pl.unit_cost',
-                'pl.status',
-            ])
-            ->where('pl.company_id', $companyId)
-            ->orderByDesc('pl.received_at')
-            ->limit(300)
-            ->get();
-
-        $inventorySettings = DB::table('inventory.inventory_settings')
-            ->where('company_id', $companyId)
-            ->first();
-
-        if (!$inventorySettings) {
-            $inventorySettings = [
-                'company_id' => $companyId,
-                'complexity_mode' => 'BASIC',
-                'inventory_mode' => 'KARDEX_SIMPLE',
-                'lot_outflow_strategy' => 'MANUAL',
-                'enable_inventory_pro' => false,
-                'enable_lot_tracking' => false,
-                'enable_expiry_tracking' => false,
-                'enable_advanced_reporting' => false,
-                'enable_graphical_dashboard' => false,
-                'enable_location_control' => false,
-                'allow_negative_stock' => false,
-                'enforce_lot_for_tracked' => false,
-            ];
-        } else {
-            // Cast boolean columns properly from database
-            $inventorySettings = [
-                'company_id' => $inventorySettings->company_id,
-                'complexity_mode' => $inventorySettings->complexity_mode ?? 'BASIC',
-                'inventory_mode' => $inventorySettings->inventory_mode ?? 'KARDEX_SIMPLE',
-                'lot_outflow_strategy' => $inventorySettings->lot_outflow_strategy ?? 'MANUAL',
-                'enable_inventory_pro' => (bool) $inventorySettings->enable_inventory_pro,
-                'enable_lot_tracking' => (bool) $inventorySettings->enable_lot_tracking,
-                'enable_expiry_tracking' => (bool) $inventorySettings->enable_expiry_tracking,
-                'enable_advanced_reporting' => (bool) $inventorySettings->enable_advanced_reporting,
-                'enable_graphical_dashboard' => (bool) $inventorySettings->enable_graphical_dashboard,
-                'enable_location_control' => (bool) $inventorySettings->enable_location_control,
-                'allow_negative_stock' => (bool) $inventorySettings->allow_negative_stock,
-                'enforce_lot_for_tracked' => (bool) $inventorySettings->enforce_lot_for_tracked,
-            ];
-        }
-
-        $toggles = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', $this->documentKindFeatureCodes())
-            ->pluck('is_enabled', 'feature_code');
-
-        $catalog = $this->documentKindCatalog();
-        $documentKinds = $catalog->map(function ($row) use ($toggles) {
-            $featureCode = 'DOC_KIND_' . (string) $row['code'];
-
-            return [
-                'id' => (int) ($row['id'] ?? 0),
-                'code' => (string) $row['code'],
-                'label' => (string) $row['label'],
-                'feature_code' => $featureCode,
-                'is_enabled' => ((bool) ($row['is_enabled'] ?? true))
-                    && ($toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true),
-            ];
-        })->values();
+        $documentKinds = $this->salesLookupService->listDocumentKindsForCompany($companyId);
 
         return response()->json([
             'options' => $options,
@@ -215,121 +94,14 @@ class MasterDataController extends Controller
     public function accessControl(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureCompanyRoleProfilesTable();
-        $functionalProfiles = $this->functionalProfilesCollection($companyId);
-
-        $roleProfiles = DB::table('appcfg.company_role_profiles')
-            ->where('company_id', $companyId)
-            ->pluck('functional_profile', 'role_id');
-
-        $modules = DB::table('appcfg.modules')
-            ->select('id', 'code', 'name')
-            ->where('status', 1)
-            ->orderBy('name')
-            ->get();
-
-        $roles = DB::table('auth.roles')
-            ->select('id', 'company_id', 'code', 'name', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('name')
-            ->get()
-            ->map(function ($role) use ($modules, $roleProfiles) {
-                $permissions = DB::table('auth.role_module_access as rma')
-                    ->join('appcfg.modules as m', 'm.id', '=', 'rma.module_id')
-                    ->where('rma.role_id', $role->id)
-                    ->select([
-                        'm.code as module_code',
-                        'rma.can_view',
-                        'rma.can_create',
-                        'rma.can_update',
-                        'rma.can_delete',
-                        'rma.can_export',
-                        'rma.can_approve',
-                    ])
-                    ->get()
-                    ->keyBy('module_code');
-
-                $modulePermissions = $modules->map(function ($module) use ($permissions) {
-                    $current = $permissions->get($module->code);
-
-                    return [
-                        'module_code' => $module->code,
-                        'can_view' => $current ? (bool) $current->can_view : false,
-                        'can_create' => $current ? (bool) $current->can_create : false,
-                        'can_update' => $current ? (bool) $current->can_update : false,
-                        'can_delete' => $current ? (bool) $current->can_delete : false,
-                        'can_export' => $current ? (bool) $current->can_export : false,
-                        'can_approve' => $current ? (bool) $current->can_approve : false,
-                    ];
-                })->values();
-
-                return [
-                    'id' => (int) $role->id,
-                    'code' => $role->code,
-                    'name' => $role->name,
-                    'status' => (int) $role->status,
-                    'functional_profile' => $this->normalizeFunctionalProfile($roleProfiles->get($role->id) ?? null),
-                    'permissions' => $modulePermissions,
-                ];
-            })
-            ->values();
-
-        $users = DB::table('auth.users as u')
-            ->leftJoin('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
-            ->leftJoin('auth.roles as r', function ($join) use ($companyId) {
-                $join->on('r.id', '=', 'ur.role_id')
-                    ->where('r.company_id', '=', $companyId);
-            })
-            ->select([
-                'u.id',
-                'u.branch_id',
-                'u.username',
-                'u.first_name',
-                'u.last_name',
-                'u.email',
-                'u.phone',
-                'u.status',
-                'u.preferred_warehouse_id',
-                'u.preferred_cash_register_id',
-                DB::raw('MIN(r.id) as role_id'),
-                DB::raw('MIN(r.code) as role_code'),
-            ])
-            ->where('u.company_id', $companyId)
-            ->whereNull('u.deleted_at')
-            ->groupBy('u.id', 'u.branch_id', 'u.username', 'u.first_name', 'u.last_name', 'u.email', 'u.phone', 'u.status', 'u.preferred_warehouse_id', 'u.preferred_cash_register_id')
-            ->orderBy('u.username')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'branch_id' => $row->branch_id !== null ? (int) $row->branch_id : null,
-                    'username' => $row->username,
-                    'first_name' => $row->first_name,
-                    'last_name' => $row->last_name,
-                    'email' => $row->email,
-                    'phone' => $row->phone,
-                    'status' => (int) $row->status,
-                    'preferred_warehouse_id' => $row->preferred_warehouse_id !== null ? (int) $row->preferred_warehouse_id : null,
-                    'preferred_cash_register_id' => $row->preferred_cash_register_id !== null ? (int) $row->preferred_cash_register_id : null,
-                    'role_id' => $row->role_id !== null ? (int) $row->role_id : null,
-                    'role_code' => $row->role_code,
-                ];
-            })
-            ->values();
-
-        return response()->json([
-            'modules' => $modules,
-            'roles' => $roles,
-            'users' => $users,
-            'functional_profiles' => $functionalProfiles,
-        ]);
+        return response()->json($this->salesLookupService->buildAccessControlData($companyId));
     }
 
     public function functionalProfiles(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
         return response()->json([
-            'functional_profiles' => $this->functionalProfilesCollection($companyId),
+            'functional_profiles' => $this->salesLookupService->listCompanyFunctionalProfiles($companyId),
         ]);
     }
 
@@ -337,7 +109,6 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureCompanyFunctionalProfilesTable();
 
         $validator = Validator::make($request->all(), [
             'code' => 'required|string|max:40',
@@ -356,24 +127,20 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Functional profile code is required'], 422);
         }
 
-        $exists = DB::table('appcfg.company_functional_profiles')
-            ->where('company_id', $companyId)
-            ->where('code', $code)
-            ->exists();
+        $exists = $this->salesLookupService->listCompanyFunctionalProfiles($companyId)
+            ->contains(function ($row) use ($code) {
+                return strtoupper(trim((string) ($row['code'] ?? ''))) === $code;
+            });
 
         if ($exists) {
             return response()->json(['message' => 'Functional profile already exists'], 422);
         }
 
-        DB::table('appcfg.company_functional_profiles')->insert([
-            'company_id' => $companyId,
+        $this->salesLookupService->createCompanyFunctionalProfile($companyId, (int) ($authUser->id ?? 0), [
             'code' => $code,
             'label' => trim((string) $payload['label']),
             'status' => (int) ($payload['status'] ?? 1),
             'sort_order' => (int) ($payload['sort_order'] ?? 100),
-            'updated_by' => $authUser->id ?? null,
-            'updated_at' => now(),
-            'created_at' => now(),
         ]);
 
         return response()->json(['message' => 'Functional profile created'], 201);
@@ -383,7 +150,6 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureCompanyFunctionalProfilesTable();
 
         $validator = Validator::make($request->all(), [
             'label' => 'nullable|string|max:120',
@@ -400,10 +166,10 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Functional profile not found'], 404);
         }
 
-        $exists = DB::table('appcfg.company_functional_profiles')
-            ->where('company_id', $companyId)
-            ->where('code', $normalizedCode)
-            ->exists();
+        $exists = $this->salesLookupService->listCompanyFunctionalProfiles($companyId)
+            ->contains(function ($row) use ($normalizedCode) {
+                return strtoupper(trim((string) ($row['code'] ?? ''))) === $normalizedCode;
+            });
 
         if (!$exists) {
             return response()->json(['message' => 'Functional profile not found'], 404);
@@ -418,10 +184,7 @@ class MasterDataController extends Controller
             }
         }
 
-        DB::table('appcfg.company_functional_profiles')
-            ->where('company_id', $companyId)
-            ->where('code', $normalizedCode)
-            ->update($updates);
+        $this->salesLookupService->updateCompanyFunctionalProfile($companyId, $normalizedCode, $updates, $authUser->id ?? null);
 
         return response()->json(['message' => 'Functional profile updated']);
     }
@@ -452,22 +215,22 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
         $code = strtoupper(trim($payload['code']));
-        $functionalProfileCodes = $this->functionalProfileCodes($companyId);
-        $normalizedFunctionalProfile = $this->normalizeFunctionalProfile($payload['functional_profile'] ?? null, $functionalProfileCodes);
+        $functionalProfileCodes = $this->salesLookupService->functionalProfileCodes($companyId);
+        $normalizedFunctionalProfile = $this->salesLookupService->normalizeFunctionalProfile($payload['functional_profile'] ?? null, $functionalProfileCodes);
 
         if (array_key_exists('functional_profile', $payload) && $payload['functional_profile'] !== null && $normalizedFunctionalProfile === null) {
             return response()->json(['message' => 'Invalid functional profile'], 422);
         }
 
-        $roleId = DB::table('auth.roles')->insertGetId([
-            'company_id' => $companyId,
-            'code' => $code,
-            'name' => trim($payload['name']),
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
+        $roleId = $this->salesLookupService->createRole(
+            $companyId,
+            $code,
+            trim($payload['name']),
+            (int) ($payload['status'] ?? 1)
+        );
 
-        $this->syncRolePermissions((int) $roleId, $payload['permissions']);
-        $this->syncRoleFunctionalProfile($companyId, (int) $roleId, $normalizedFunctionalProfile, $authUser->id ?? null);
+        $this->salesLookupService->syncRolePermissions((int) $roleId, $payload['permissions']);
+        $this->salesLookupService->syncRoleFunctionalProfile($companyId, (int) $roleId, $normalizedFunctionalProfile, $authUser->id ?? null);
 
         return response()->json(['message' => 'Role created', 'id' => (int) $roleId], 201);
     }
@@ -495,10 +258,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('auth.roles')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
+        $exists = $this->salesLookupService->roleExists($companyId, $id);
 
         if (!$exists) {
             return response()->json(['message' => 'Role not found'], 404);
@@ -515,22 +275,22 @@ class MasterDataController extends Controller
         }
 
         if (!empty($updates)) {
-            DB::table('auth.roles')->where('id', $id)->update($updates);
+            $this->salesLookupService->updateRole($companyId, $id, $updates);
         }
 
         if (array_key_exists('permissions', $payload)) {
-            $this->syncRolePermissions($id, $payload['permissions']);
+            $this->salesLookupService->syncRolePermissions($id, $payload['permissions']);
         }
 
         if (array_key_exists('functional_profile', $payload)) {
-            $functionalProfileCodes = $this->functionalProfileCodes($companyId);
-            $normalizedFunctionalProfile = $this->normalizeFunctionalProfile($payload['functional_profile'], $functionalProfileCodes);
+            $functionalProfileCodes = $this->salesLookupService->functionalProfileCodes($companyId);
+            $normalizedFunctionalProfile = $this->salesLookupService->normalizeFunctionalProfile($payload['functional_profile'], $functionalProfileCodes);
 
             if ($payload['functional_profile'] !== null && $normalizedFunctionalProfile === null) {
                 return response()->json(['message' => 'Invalid functional profile'], 422);
             }
 
-            $this->syncRoleFunctionalProfile($companyId, $id, $normalizedFunctionalProfile, $authUser->id ?? null);
+            $this->salesLookupService->syncRoleFunctionalProfile($companyId, $id, $normalizedFunctionalProfile, $authUser->id ?? null);
         }
 
         return response()->json(['message' => 'Role updated']);
@@ -538,7 +298,6 @@ class MasterDataController extends Controller
 
     public function createUser(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
 
         $validator = Validator::make($request->all(), [
@@ -560,202 +319,12 @@ class MasterDataController extends Controller
         }
 
         $payload = $validator->validated();
-
-        if (!empty($payload['branch_id'])) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', (int) $payload['branch_id'])
-                ->where('company_id', $companyId)
-                ->exists();
-
-            if (!$branchExists) {
-                return response()->json(['message' => 'Invalid branch scope'], 422);
-            }
-        }
-
-        $roleExists = DB::table('auth.roles')
-            ->where('id', (int) $payload['role_id'])
-            ->where('company_id', $companyId)
-            ->exists();
-
-        if (!$roleExists) {
-            return response()->json(['message' => 'Invalid role scope'], 422);
-        }
-
-        $branchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null ? (int) $payload['branch_id'] : null;
-        $preferredWarehouseId = array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null
-            ? (int) $payload['preferred_warehouse_id']
-            : null;
-        $preferredCashRegisterId = array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null
-            ? (int) $payload['preferred_cash_register_id']
-            : null;
-
-        $operationalScopeError = $this->validateOperationalContextSelection(
-            $companyId,
-            $branchId,
-            $preferredWarehouseId,
-            $preferredCashRegisterId
-        );
-
-        if ($operationalScopeError) {
-            return $operationalScopeError;
-        }
-
-        $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $branchId);
-
-        // If warehouse/caja are sent as null (not selected in form), fall back to the company default.
-        // array_key_exists check alone is insufficient because the frontend always sends the key, even when null.
-        $resolvedNewWarehouseId = (array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null)
-            ? (int) $payload['preferred_warehouse_id']
-            : $defaultOperationalContext['warehouse_id'];
-        $resolvedNewCashRegisterId = (array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null)
-            ? (int) $payload['preferred_cash_register_id']
-            : $defaultOperationalContext['cash_register_id'];
-
-        $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
-        $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
-        $hasUserRolesCreatedAtColumn = $this->tableColumnExists('auth', 'user_roles', 'created_at');
-        $hasUserRolesUpdatedAtColumn = $this->tableColumnExists('auth', 'user_roles', 'updated_at');
-        $username = trim((string) $payload['username']);
-        $email = array_key_exists('email', $payload) && $payload['email'] !== null
-            ? trim(strtolower((string) $payload['email']))
-            : null;
-
-        $restorableUserId = null;
-
-        $existingByUsername = DB::table('auth.users')
-            ->select(['id', 'company_id', 'deleted_at'])
-            ->whereRaw('LOWER(username) = ?', [strtolower($username)])
-            ->first();
-
-        if ($existingByUsername) {
-            $sameCompany = (int) $existingByUsername->company_id === $companyId;
-            $isSoftDeleted = $existingByUsername->deleted_at !== null;
-
-            if ($sameCompany && $isSoftDeleted) {
-                $restorableUserId = (int) $existingByUsername->id;
-            } else {
-                return response()->json([
-                    'message' => 'El usuario ya existe.',
-                ], 422);
-            }
-        }
-
-        if ($email !== null && $email !== '') {
-            $existingByEmail = DB::table('auth.users')
-                ->select(['id', 'company_id', 'deleted_at'])
-                ->whereRaw('LOWER(email) = ?', [$email])
-                ->first();
-
-            if ($existingByEmail) {
-                $sameCompany = (int) $existingByEmail->company_id === $companyId;
-                $isSoftDeleted = $existingByEmail->deleted_at !== null;
-                $sameCandidate = $restorableUserId !== null && $restorableUserId === (int) $existingByEmail->id;
-
-                if (!$sameCandidate) {
-                    if ($sameCompany && $isSoftDeleted && $restorableUserId === null) {
-                        $restorableUserId = (int) $existingByEmail->id;
-                    } else {
-                        return response()->json([
-                            'message' => 'El correo ya existe.',
-                        ], 422);
-                    }
-                }
-            }
-        }
-
-        $userInsert = [
-            'company_id' => $companyId,
-            'branch_id' => $payload['branch_id'] ?? null,
-            'username' => $username,
-            'password_hash' => Hash::make($payload['password']),
-            'first_name' => trim($payload['first_name']),
-            'last_name' => $payload['last_name'] ?? null,
-            'email' => $email,
-            'phone' => $payload['phone'] ?? null,
-            'status' => (int) ($payload['status'] ?? 1),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ];
-
-        if ($hasPreferredWarehouseColumn) {
-            $userInsert['preferred_warehouse_id'] = $resolvedNewWarehouseId;
-        }
-
-        if ($hasPreferredCashRegisterColumn) {
-            $userInsert['preferred_cash_register_id'] = $resolvedNewCashRegisterId;
-        }
-
         try {
-            $userId = DB::transaction(function () use (
-                $userInsert,
-                $payload,
-                $restorableUserId,
-                $hasUserRolesCreatedAtColumn,
-                $hasUserRolesUpdatedAtColumn
-            ) {
-                $roleInsert = [
-                    'user_id' => 0,
-                    'role_id' => (int) $payload['role_id'],
-                ];
-
-                if ($hasUserRolesCreatedAtColumn) {
-                    $roleInsert['created_at'] = now();
-                }
-
-                if ($hasUserRolesUpdatedAtColumn) {
-                    $roleInsert['updated_at'] = now();
-                }
-
-                if ($restorableUserId !== null) {
-                    $userUpdate = $userInsert;
-                    unset($userUpdate['created_at']);
-                    $userUpdate['deleted_at'] = null;
-
-                    DB::table('auth.users')
-                        ->where('id', $restorableUserId)
-                        ->update($userUpdate);
-
-                    DB::table('auth.user_roles')
-                        ->where('user_id', $restorableUserId)
-                        ->delete();
-
-                    $roleInsert['user_id'] = (int) $restorableUserId;
-                    DB::table('auth.user_roles')->insert($roleInsert);
-
-                    return (int) $restorableUserId;
-                }
-
-                $userId = DB::table('auth.users')->insertGetId($userInsert);
-                $roleInsert['user_id'] = (int) $userId;
-                DB::table('auth.user_roles')->insert($roleInsert);
-
-                return (int) $userId;
-            });
+            $userId = $this->salesLookupService->createCompanyUser($companyId, $payload);
         } catch (QueryException $e) {
-            $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
-            $driverMessage = strtolower((string) ($e->errorInfo[2] ?? ''));
-
-            if ($sqlState === '23505') {
-                if (str_contains($driverMessage, 'users_username_key') || str_contains($driverMessage, 'username')) {
-                    return response()->json([
-                        'message' => 'El usuario ya existe.',
-                    ], 422);
-                }
-
-                if (str_contains($driverMessage, 'email')) {
-                    return response()->json([
-                        'message' => 'El correo ya existe.',
-                    ], 422);
-                }
-
-                return response()->json([
-                    'message' => 'No se pudo crear el usuario por conflicto de datos. Verifica rol y contexto operacional.',
-                ], 422);
-            }
-
-            return response()->json([
-                'message' => 'No se pudo crear el usuario. Verifica datos y configuracion operacional.',
-            ], 422);
+            return response()->json(['message' => 'No se pudo crear el usuario. Verifica datos y configuracion operacional.'], 422);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json(['message' => 'User created', 'id' => (int) $userId], 201);
@@ -782,10 +351,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('auth.users')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
+        $exists = $this->salesLookupService->companyUserExists($companyId, $id);
 
         if (!$exists) {
             return response()->json(['message' => 'User not found'], 404);
@@ -793,224 +359,19 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
 
-        if (array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', (int) $payload['branch_id'])
-                ->where('company_id', $companyId)
-                ->exists();
-
-            if (!$branchExists) {
-                return response()->json(['message' => 'Invalid branch scope'], 422);
-            }
-        }
-
-        $branchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null ? (int) $payload['branch_id'] : null;
-        $preferredWarehouseId = array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] !== null
-            ? (int) $payload['preferred_warehouse_id']
-            : null;
-        $preferredCashRegisterId = array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] !== null
-            ? (int) $payload['preferred_cash_register_id']
-            : null;
-
-        $operationalScopeError = $this->validateOperationalContextSelection(
-            $companyId,
-            $branchId,
-            array_key_exists('preferred_warehouse_id', $payload) ? $preferredWarehouseId : null,
-            array_key_exists('preferred_cash_register_id', $payload) ? $preferredCashRegisterId : null
-        );
-
-        if ($operationalScopeError) {
-            return $operationalScopeError;
-        }
-
-        $updates = ['updated_at' => now()];
-        $hasPreferredWarehouseColumn = $this->tableColumnExists('auth', 'users', 'preferred_warehouse_id');
-        $hasPreferredCashRegisterColumn = $this->tableColumnExists('auth', 'users', 'preferred_cash_register_id');
-
-        foreach (['branch_id', 'first_name', 'last_name', 'email', 'phone', 'status'] as $field) {
-            if (array_key_exists($field, $payload)) {
-                $updates[$field] = $payload[$field];
-            }
-        }
-
-        // For warehouse/caja: if sent as null (not selected), resolve the company default
-        // instead of blindly storing null. The frontend always sends the key even when blank.
-        $effectiveBranchId = array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null
-            ? (int) $payload['branch_id']
-            : null;
-
-        if (array_key_exists('preferred_warehouse_id', $payload) || array_key_exists('preferred_cash_register_id', $payload)) {
-            $needsDefault = (array_key_exists('preferred_warehouse_id', $payload) && $payload['preferred_warehouse_id'] === null)
-                || (array_key_exists('preferred_cash_register_id', $payload) && $payload['preferred_cash_register_id'] === null);
-
-            if ($needsDefault) {
-                $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
-            }
-
-            if ($hasPreferredWarehouseColumn && array_key_exists('preferred_warehouse_id', $payload)) {
-                $updates['preferred_warehouse_id'] = $payload['preferred_warehouse_id'] !== null
-                    ? (int) $payload['preferred_warehouse_id']
-                    : ($defaultOperationalContext['warehouse_id'] ?? null);
-            }
-            if ($hasPreferredCashRegisterColumn && array_key_exists('preferred_cash_register_id', $payload)) {
-                $updates['preferred_cash_register_id'] = $payload['preferred_cash_register_id'] !== null
-                    ? (int) $payload['preferred_cash_register_id']
-                    : ($defaultOperationalContext['cash_register_id'] ?? null);
-            }
-        } elseif (array_key_exists('branch_id', $payload) && ($hasPreferredWarehouseColumn || $hasPreferredCashRegisterColumn)) {
-            // Branch changed without explicit warehouse/caja → reassign defaults for the new branch
-            $defaultOperationalContext = $this->resolveDefaultOperationalContext($companyId, $effectiveBranchId);
-            if ($hasPreferredWarehouseColumn) {
-                $updates['preferred_warehouse_id'] = $defaultOperationalContext['warehouse_id'];
-            }
-            if ($hasPreferredCashRegisterColumn) {
-                $updates['preferred_cash_register_id'] = $defaultOperationalContext['cash_register_id'];
-            }
-        }
-
-        if (!empty($payload['password'])) {
-            $updates['password_hash'] = Hash::make($payload['password']);
-        }
-
-        DB::table('auth.users')
-            ->where('id', $id)
-            ->update($updates);
-
-        if (array_key_exists('role_id', $payload)) {
-            $roleExists = DB::table('auth.roles')
-                ->where('id', (int) $payload['role_id'])
-                ->where('company_id', $companyId)
-                ->exists();
-
-            if (!$roleExists) {
-                return response()->json(['message' => 'Invalid role scope'], 422);
-            }
-
-            DB::table('auth.user_roles')->where('user_id', $id)->delete();
-            DB::table('auth.user_roles')->insert([
-                'user_id' => $id,
-                'role_id' => (int) $payload['role_id'],
-            ]);
+        try {
+            $this->salesLookupService->updateCompanyUser($companyId, $id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json(['message' => 'User updated']);
     }
 
-    private function validateOperationalContextSelection(
-        int $companyId,
-        ?int $branchId,
-        ?int $preferredWarehouseId,
-        ?int $preferredCashRegisterId
-    ) {
-        if ($preferredWarehouseId !== null) {
-            $warehouseExists = DB::table('inventory.warehouses')
-                ->where('company_id', $companyId)
-                ->where('id', $preferredWarehouseId)
-                ->when($branchId !== null, function ($query) use ($branchId) {
-                    $query->where(function ($nested) use ($branchId) {
-                        $nested->where('branch_id', $branchId)
-                            ->orWhereNull('branch_id');
-                    });
-                })
-                ->exists();
-
-            if (!$warehouseExists) {
-                return response()->json(['message' => 'Invalid warehouse scope'], 422);
-            }
-        }
-
-        if ($preferredCashRegisterId !== null) {
-            $cashRegisterExists = DB::table('sales.cash_registers')
-                ->where('company_id', $companyId)
-                ->where('id', $preferredCashRegisterId)
-                ->when($branchId !== null, function ($query) use ($branchId) {
-                    $query->where(function ($nested) use ($branchId) {
-                        $nested->where('branch_id', $branchId)
-                            ->orWhereNull('branch_id');
-                    });
-                })
-                ->when($preferredWarehouseId !== null, function ($query) use ($preferredWarehouseId) {
-                    $query->where(function ($nested) use ($preferredWarehouseId) {
-                        $nested->where('warehouse_id', $preferredWarehouseId)
-                            ->orWhereNull('warehouse_id');
-                    });
-                })
-                ->exists();
-
-            if (!$cashRegisterExists) {
-                return response()->json(['message' => 'Invalid cash register scope'], 422);
-            }
-        }
-
-        return null;
-    }
-
-    private function resolveDefaultOperationalContext(int $companyId, ?int $branchId): array
-    {
-        $warehouseId = DB::table('inventory.warehouses')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->when($branchId !== null, function ($query) use ($branchId) {
-                $query->where(function ($nested) use ($branchId) {
-                    $nested->where('branch_id', $branchId)
-                        ->orWhereNull('branch_id');
-                });
-            })
-            ->orderByRaw($branchId !== null ? 'CASE WHEN branch_id = ? THEN 0 ELSE 1 END' : 'CASE WHEN branch_id IS NULL THEN 0 ELSE 1 END', $branchId !== null ? [$branchId] : [])
-            ->orderBy('name')
-            ->value('id');
-
-        $cashRegisterId = DB::table('sales.cash_registers')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->when($branchId !== null, function ($query) use ($branchId) {
-                $query->where(function ($nested) use ($branchId) {
-                    $nested->where('branch_id', $branchId)
-                        ->orWhereNull('branch_id');
-                });
-            })
-            ->when($warehouseId !== null, function ($query) use ($warehouseId) {
-                $query->where(function ($nested) use ($warehouseId) {
-                    $nested->where('warehouse_id', (int) $warehouseId)
-                        ->orWhereNull('warehouse_id');
-                });
-            })
-            ->orderByRaw($warehouseId !== null ? 'CASE WHEN warehouse_id = ? THEN 0 ELSE 1 END' : 'CASE WHEN warehouse_id IS NULL THEN 0 ELSE 1 END', $warehouseId !== null ? [(int) $warehouseId] : [])
-            ->orderBy('name')
-            ->value('id');
-
-        return [
-            'warehouse_id' => $warehouseId !== null ? (int) $warehouseId : null,
-            'cash_register_id' => $cashRegisterId !== null ? (int) $cashRegisterId : null,
-        ];
-    }
-
-    public function units(Request $request)
-    {
-        $companyId = $this->resolveCompanyId($request);
-
-        return response()->json([
-            'data' => $this->companyUnits($companyId),
-        ]);
-    }
-
-    public function warehouses(Request $request)
-    {
-        $companyId = $this->resolveCompanyId($request);
-
-        $rows = DB::table('inventory.warehouses')
-            ->select('id', 'company_id', 'branch_id', 'code', 'name', 'address', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('name')
-            ->get();
-
-        return response()->json(['data' => $rows]);
-    }
-
     public function createWarehouse(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $limits = $this->resolveCompanyOperationalLimits($companyId);
+        $limits = $this->operationalLimitsService->resolveLimits($companyId);
 
         $validator = Validator::make($request->all(), [
             'branch_id' => 'nullable|integer|min:1',
@@ -1027,20 +388,14 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
 
         if (!empty($payload['branch_id'])) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', (int) $payload['branch_id'])
-                ->where('company_id', $companyId)
-                ->exists();
+            $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
             }
         }
 
-        $enabledWarehouses = (int) DB::table('inventory.warehouses')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->count();
+        $enabledWarehouses = $this->salesLookupService->countEnabledWarehouses($companyId);
 
         if ($enabledWarehouses >= $limits['max_warehouses_enabled']) {
             return response()->json([
@@ -1049,14 +404,7 @@ class MasterDataController extends Controller
             ], 422);
         }
 
-        $id = DB::table('inventory.warehouses')->insertGetId([
-            'company_id' => $companyId,
-            'branch_id' => $payload['branch_id'] ?? null,
-            'code' => strtoupper(trim($payload['code'])),
-            'name' => trim($payload['name']),
-            'address' => $payload['address'] ?? null,
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
+        $id = $this->salesLookupService->createWarehouse($companyId, $payload);
 
         return response()->json(['message' => 'Warehouse created', 'id' => (int) $id], 201);
     }
@@ -1077,10 +425,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('inventory.warehouses')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
+        $exists = $this->salesLookupService->warehouseExists($companyId, $id);
 
         if (!$exists) {
             return response()->json(['message' => 'Warehouse not found'], 404);
@@ -1088,10 +433,7 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
         if (array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', (int) $payload['branch_id'])
-                ->where('company_id', $companyId)
-                ->exists();
+            $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -1116,7 +458,7 @@ class MasterDataController extends Controller
         }
 
         if (!empty($updates)) {
-            DB::table('inventory.warehouses')->where('id', $id)->update($updates);
+            $this->salesLookupService->updateWarehouse($companyId, $id, $updates);
         }
 
         return response()->json(['message' => 'Warehouse updated']);
@@ -1126,11 +468,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $rows = DB::table('sales.cash_registers')
-            ->select('id', 'company_id', 'branch_id', 'warehouse_id', 'code', 'name', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('name')
-            ->get();
+        $rows = $this->salesLookupService->listCashRegistersForCompany($companyId);
 
         return response()->json(['data' => $rows]);
     }
@@ -1139,29 +477,11 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        if (!$this->tableExists('appcfg', 'pos_stations')) {
+        if (!$this->salesLookupService->posStationsTableExists()) {
             return response()->json(['data' => []]);
         }
 
-        $rows = DB::table('appcfg.pos_stations as ps')
-            ->join('sales.cash_registers as cr', 'cr.id', '=', 'ps.cash_register_id')
-            ->select([
-                'ps.id',
-                'ps.company_id',
-                'ps.cash_register_id',
-                'ps.code',
-                'ps.name',
-                'ps.device_id',
-                'ps.device_name',
-                'ps.status',
-                'cr.branch_id',
-                'cr.warehouse_id',
-                'cr.code as cash_register_code',
-                'cr.name as cash_register_name',
-            ])
-            ->where('ps.company_id', $companyId)
-            ->orderBy('ps.name')
-            ->get();
+        $rows = $this->salesLookupService->listPosStationsForCompany($companyId);
 
         return response()->json(['data' => $rows]);
     }
@@ -1186,10 +506,7 @@ class MasterDataController extends Controller
         $payload = $validator->validated();
 
         if (!empty($payload['branch_id'])) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', (int) $payload['branch_id'])
-                ->where('company_id', $companyId)
-                ->exists();
+            $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -1197,21 +514,14 @@ class MasterDataController extends Controller
         }
 
         if (!empty($payload['warehouse_id'])) {
-            $warehouseExists = DB::table('inventory.warehouses')
-                ->where('id', (int) $payload['warehouse_id'])
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->exists();
+            $warehouseExists = $this->salesLookupService->activeWarehouseExists($companyId, (int) $payload['warehouse_id']);
 
             if (!$warehouseExists) {
                 return response()->json(['message' => 'Invalid warehouse scope'], 422);
             }
         }
 
-        $enabledCashRegisters = (int) DB::table('sales.cash_registers')
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->count();
+        $enabledCashRegisters = $this->salesLookupService->countEnabledCashRegisters($companyId);
 
         if ($enabledCashRegisters >= $limits['max_cash_registers_enabled']) {
             return response()->json([
@@ -1225,11 +535,7 @@ class MasterDataController extends Controller
             : null;
 
         if ($warehouseId !== null) {
-            $enabledCashRegistersForWarehouse = (int) DB::table('sales.cash_registers')
-                ->where('company_id', $companyId)
-                ->where('warehouse_id', $warehouseId)
-                ->where('status', 1)
-                ->count();
+            $enabledCashRegistersForWarehouse = $this->salesLookupService->countEnabledCashRegistersForWarehouse($companyId, $warehouseId);
 
             if ($enabledCashRegistersForWarehouse >= $limits['max_cash_registers_per_warehouse']) {
                 return response()->json([
@@ -1243,15 +549,7 @@ class MasterDataController extends Controller
             ], 422);
         }
 
-        $id = DB::table('sales.cash_registers')->insertGetId([
-            'company_id' => $companyId,
-            'branch_id' => $payload['branch_id'] ?? null,
-            'warehouse_id' => $warehouseId,
-            'code' => strtoupper(trim($payload['code'])),
-            'name' => trim($payload['name']),
-            'status' => (int) ($payload['status'] ?? 1),
-            'created_at' => now(),
-        ]);
+        $id = $this->salesLookupService->createCashRegister($companyId, $payload, $warehouseId);
 
         return response()->json(['message' => 'Cash register created', 'id' => (int) $id], 201);
     }
@@ -1272,10 +570,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('sales.cash_registers')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
+        $exists = $this->salesLookupService->cashRegisterExists($companyId, $id);
 
         if (!$exists) {
             return response()->json(['message' => 'Cash register not found'], 404);
@@ -1285,11 +580,7 @@ class MasterDataController extends Controller
         $updates = [];
 
         if (array_key_exists('warehouse_id', $payload) && $payload['warehouse_id'] !== null) {
-            $warehouseExists = DB::table('inventory.warehouses')
-                ->where('id', (int) $payload['warehouse_id'])
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->exists();
+            $warehouseExists = $this->salesLookupService->activeWarehouseExists($companyId, (int) $payload['warehouse_id']);
 
             if (!$warehouseExists) {
                 return response()->json(['message' => 'Invalid warehouse scope'], 422);
@@ -1313,7 +604,7 @@ class MasterDataController extends Controller
         }
 
         if (!empty($updates)) {
-            DB::table('sales.cash_registers')->where('id', $id)->update($updates);
+            $this->salesLookupService->updateCashRegister($companyId, $id, $updates);
         }
 
         return response()->json(['message' => 'Cash register updated']);
@@ -1323,7 +614,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        if (!$this->tableExists('appcfg', 'pos_stations')) {
+        if (!$this->salesLookupService->posStationsTableExists()) {
             return response()->json(['message' => 'POS stations table not available'], 503);
         }
 
@@ -1351,30 +642,19 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Device ID is required'], 422);
         }
 
-        $cashRegisterExists = DB::table('sales.cash_registers')
-            ->where('id', $cashRegisterId)
-            ->where('company_id', $companyId)
-            ->where('status', 1)
-            ->exists();
+        $cashRegisterExists = $this->salesLookupService->activeCashRegisterExists($companyId, $cashRegisterId);
 
         if (!$cashRegisterExists) {
             return response()->json(['message' => 'Invalid cash register scope'], 422);
         }
 
-        $codeExists = DB::table('appcfg.pos_stations')
-            ->where('company_id', $companyId)
-            ->whereRaw('UPPER(code) = ?', [$normalizedCode])
-            ->exists();
+        $codeExists = $this->salesLookupService->posStationCodeExists($companyId, $normalizedCode);
 
         if ($codeExists) {
             return response()->json(['message' => 'Station code already exists for this company'], 422);
         }
 
-        $deviceConflict = DB::table('appcfg.pos_stations')
-            ->select(['id', 'company_id', 'code'])
-            ->where('company_id', $companyId)
-            ->whereRaw('LOWER(TRIM(device_id)) = ?', [strtolower($normalizedDeviceId)])
-            ->first();
+        $deviceConflict = $this->salesLookupService->findPosStationDeviceConflict($companyId, $normalizedDeviceId);
 
         if ($deviceConflict) {
             return response()->json([
@@ -1387,17 +667,7 @@ class MasterDataController extends Controller
             ], 422);
         }
 
-        $id = DB::table('appcfg.pos_stations')->insertGetId([
-            'company_id' => $companyId,
-            'cash_register_id' => $cashRegisterId,
-            'code' => $normalizedCode,
-            'name' => trim($payload['name']),
-            'device_id' => $normalizedDeviceId,
-            'device_name' => !empty($payload['device_name']) ? trim($payload['device_name']) : null,
-            'status' => (int) ($payload['status'] ?? 1),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $id = $this->salesLookupService->createPosStation($companyId, $cashRegisterId, $payload, $normalizedCode, $normalizedDeviceId);
 
         return response()->json(['message' => 'POS station created', 'id' => (int) $id], 201);
     }
@@ -1406,7 +676,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        if (!$this->tableExists('appcfg', 'pos_stations')) {
+        if (!$this->salesLookupService->posStationsTableExists()) {
             return response()->json(['message' => 'POS stations table not available'], 503);
         }
 
@@ -1425,10 +695,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('appcfg.pos_stations')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
+        $exists = $this->salesLookupService->posStationExists($companyId, $id);
 
         if (!$exists) {
             return response()->json(['message' => 'POS station not found'], 404);
@@ -1438,11 +705,7 @@ class MasterDataController extends Controller
         $updates = [];
 
         if (array_key_exists('cash_register_id', $payload) && $payload['cash_register_id'] !== null) {
-            $cashRegisterExists = DB::table('sales.cash_registers')
-                ->where('id', (int) $payload['cash_register_id'])
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->exists();
+            $cashRegisterExists = $this->salesLookupService->activeCashRegisterExists($companyId, (int) $payload['cash_register_id']);
 
             if (!$cashRegisterExists) {
                 return response()->json(['message' => 'Invalid cash register scope'], 422);
@@ -1453,11 +716,7 @@ class MasterDataController extends Controller
 
         if (!empty($payload['code'])) {
             $normalizedCode = strtoupper(trim($payload['code']));
-            $codeExists = DB::table('appcfg.pos_stations')
-                ->where('company_id', $companyId)
-                ->where('id', '<>', $id)
-                ->whereRaw('UPPER(code) = ?', [$normalizedCode])
-                ->exists();
+            $codeExists = $this->salesLookupService->posStationCodeExists($companyId, $normalizedCode, $id);
 
             if ($codeExists) {
                 return response()->json(['message' => 'Station code already exists for this company'], 422);
@@ -1476,12 +735,7 @@ class MasterDataController extends Controller
                 return response()->json(['message' => 'Device ID is required'], 422);
             }
 
-            $deviceConflict = DB::table('appcfg.pos_stations')
-                ->select(['id', 'company_id', 'code'])
-                ->where('company_id', $companyId)
-                ->where('id', '<>', $id)
-                ->whereRaw('LOWER(TRIM(device_id)) = ?', [strtolower($normalizedDeviceId)])
-                ->first();
+            $deviceConflict = $this->salesLookupService->findPosStationDeviceConflict($companyId, $normalizedDeviceId, $id);
 
             if ($deviceConflict) {
                 return response()->json([
@@ -1507,7 +761,7 @@ class MasterDataController extends Controller
 
         if (!empty($updates)) {
             $updates['updated_at'] = now();
-            DB::table('appcfg.pos_stations')->where('id', $id)->update($updates);
+            $this->salesLookupService->updatePosStation($companyId, $id, $updates);
         }
 
         return response()->json(['message' => 'POS station updated']);
@@ -1515,15 +769,7 @@ class MasterDataController extends Controller
 
     public function paymentMethods()
     {
-        $rows = DB::table('master.payment_types')
-            ->select([
-                'id',
-                DB::raw("COALESCE(NULLIF(TRIM(comment), ''), CONCAT('PM', id::text)) as code"),
-                'name',
-                DB::raw('CASE WHEN COALESCE(is_active, 0) = 1 OR COALESCE(status, 0) IN (1, 2) THEN 1 ELSE 0 END as status'),
-            ])
-            ->orderBy('name')
-            ->get();
+        $rows = $this->salesLookupService->listPaymentMethodsForMasterData();
 
         return response()->json(['data' => $rows]);
     }
@@ -1541,21 +787,7 @@ class MasterDataController extends Controller
         }
 
         $payload = $validator->validated();
-
-        $id = DB::transaction(function () use ($payload) {
-            $nextId = (int) DB::table('master.payment_types')->lockForUpdate()->max('id') + 1;
-            $normalizedStatus = (int) ($payload['status'] ?? 1);
-
-            DB::table('master.payment_types')->insert([
-                'id' => $nextId,
-                'name' => trim($payload['name']),
-                'comment' => strtoupper(trim($payload['code'])),
-                'is_active' => $normalizedStatus === 1 ? 1 : 0,
-                'status' => $normalizedStatus,
-            ]);
-
-            return $nextId;
-        });
+        $id = $this->salesLookupService->createPaymentMethod($payload);
 
         return response()->json(['message' => 'Payment method created', 'id' => (int) $id], 201);
     }
@@ -1572,7 +804,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('master.payment_types')->where('id', $id)->exists();
+        $exists = $this->salesLookupService->paymentMethodExists($id);
         if (!$exists) {
             return response()->json(['message' => 'Payment method not found'], 404);
         }
@@ -1592,7 +824,7 @@ class MasterDataController extends Controller
         }
 
         if (!empty($updates)) {
-            DB::table('master.payment_types')->where('id', $id)->update($updates);
+            $this->salesLookupService->updatePaymentMethod($id, $updates);
         }
 
         return response()->json(['message' => 'Payment method updated']);
@@ -1602,25 +834,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $rows = DB::table('sales.series_numbers as sn')
-            ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
-            ->select([
-                'sn.id',
-                'sn.company_id',
-                'sn.branch_id',
-                'sn.warehouse_id',
-                'sn.document_kind_id',
-                DB::raw("COALESCE(dk.code, sn.document_kind) as document_kind"),
-                'sn.series',
-                'sn.current_number',
-                'sn.number_padding',
-                'sn.reset_policy',
-                'sn.is_enabled',
-            ])
-            ->where('sn.company_id', $companyId)
-            ->orderBy('document_kind')
-            ->orderBy('sn.series')
-            ->get();
+        $rows = $this->salesLookupService->listSeriesNumbers($companyId, null, null, false, null, null);
 
         return response()->json(['data' => $rows]);
     }
@@ -1629,12 +843,7 @@ class MasterDataController extends Controller
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $rows = DB::table('sales.price_tiers')
-            ->select('id', 'company_id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
-            ->where('company_id', $companyId)
-            ->orderBy('priority')
-            ->orderBy('min_qty')
-            ->get();
+        $rows = $this->salesLookupService->listPriceTiersForCompany($companyId);
 
         return response()->json(['data' => $rows]);
     }
@@ -1661,26 +870,11 @@ class MasterDataController extends Controller
         }
 
         $payload = $validator->validated();
-        $documentKindCode = strtoupper(trim((string) $payload['document_kind']));
-        $documentKindId = $this->resolveDocumentKindIdByCode($documentKindCode);
-        if ($documentKindId === null) {
-            return response()->json(['message' => 'Document kind not found'], 422);
+        try {
+            $id = $this->salesLookupService->createSeries($companyId, (int) $authUser->id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        $id = DB::table('sales.series_numbers')->insertGetId([
-            'company_id' => $companyId,
-            'branch_id' => $payload['branch_id'] ?? null,
-            'warehouse_id' => $payload['warehouse_id'] ?? null,
-            'document_kind' => $documentKindCode,
-            'document_kind_id' => $documentKindId,
-            'series' => strtoupper(trim($payload['series'])),
-            'current_number' => (int) ($payload['current_number'] ?? 0),
-            'number_padding' => (int) ($payload['number_padding'] ?? 8),
-            'reset_policy' => $payload['reset_policy'] ?? 'NONE',
-            'is_enabled' => array_key_exists('is_enabled', $payload) ? (bool) $payload['is_enabled'] : true,
-            'updated_by' => $authUser->id,
-            'updated_at' => now(),
-        ]);
 
         return response()->json(['message' => 'Series created', 'id' => (int) $id], 201);
     }
@@ -1706,44 +900,12 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('sales.series_numbers')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
-
-        if (!$exists) {
-            return response()->json(['message' => 'Series not found'], 404);
-        }
-
         $payload = $validator->validated();
-        $updates = ['updated_by' => $authUser->id, 'updated_at' => now()];
-
-        foreach (['branch_id', 'warehouse_id', 'current_number', 'number_padding', 'reset_policy'] as $field) {
-            if (array_key_exists($field, $payload)) {
-                $updates[$field] = $payload[$field];
-            }
+        try {
+            $this->salesLookupService->updateSeries($companyId, (int) $authUser->id, $id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], str_contains($e->getMessage(), 'not found') ? 404 : 422);
         }
-
-        if (array_key_exists('document_kind', $payload)) {
-            $documentKindCode = strtoupper(trim((string) $payload['document_kind']));
-            $documentKindId = $this->resolveDocumentKindIdByCode($documentKindCode);
-            if ($documentKindId === null) {
-                return response()->json(['message' => 'Document kind not found'], 422);
-            }
-
-            $updates['document_kind'] = $documentKindCode;
-            $updates['document_kind_id'] = $documentKindId;
-        }
-
-        if (!empty($payload['series'])) {
-            $updates['series'] = strtoupper(trim($payload['series']));
-        }
-
-        if (array_key_exists('is_enabled', $payload)) {
-            $updates['is_enabled'] = (bool) $payload['is_enabled'];
-        }
-
-        DB::table('sales.series_numbers')->where('id', $id)->update($updates);
 
         return response()->json(['message' => 'Series updated']);
     }
@@ -1773,25 +935,11 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Max qty must be greater than or equal to min qty'], 422);
         }
 
-        $code = strtoupper(trim($payload['code']));
-        $existsCode = DB::table('sales.price_tiers')
-            ->where('company_id', $companyId)
-            ->where('code', $code)
-            ->exists();
-
-        if ($existsCode) {
-            return response()->json(['message' => 'Price tier code already exists'], 422);
+        try {
+            $id = $this->referenceDocumentService->createPriceTier($companyId, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        $id = DB::table('sales.price_tiers')->insertGetId([
-            'company_id' => $companyId,
-            'code' => $code,
-            'name' => trim($payload['name']),
-            'min_qty' => $minQty,
-            'max_qty' => $maxQty,
-            'priority' => (int) ($payload['priority'] ?? 1),
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
 
         return response()->json(['message' => 'Price tier created', 'id' => (int) $id], 201);
     }
@@ -1813,64 +961,11 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $exists = DB::table('sales.price_tiers')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->exists();
-
-        if (!$exists) {
-            return response()->json(['message' => 'Price tier not found'], 404);
-        }
-
         $payload = $validator->validated();
-
-        $current = DB::table('sales.price_tiers')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->first();
-
-        $minQty = array_key_exists('min_qty', $payload) ? (float) $payload['min_qty'] : (float) ($current->min_qty ?? 0);
-        $maxQty = array_key_exists('max_qty', $payload)
-            ? ($payload['max_qty'] !== null ? (float) $payload['max_qty'] : null)
-            : ($current->max_qty !== null ? (float) $current->max_qty : null);
-
-        if ($maxQty !== null && $maxQty < $minQty) {
-            return response()->json(['message' => 'Max qty must be greater than or equal to min qty'], 422);
-        }
-
-        $updates = [];
-        if (array_key_exists('code', $payload) && trim((string) $payload['code']) !== '') {
-            $nextCode = strtoupper(trim((string) $payload['code']));
-            $existsCode = DB::table('sales.price_tiers')
-                ->where('company_id', $companyId)
-                ->where('code', $nextCode)
-                ->where('id', '!=', $id)
-                ->exists();
-
-            if ($existsCode) {
-                return response()->json(['message' => 'Price tier code already exists'], 422);
-            }
-
-            $updates['code'] = $nextCode;
-        }
-        if (array_key_exists('name', $payload) && trim((string) $payload['name']) !== '') {
-            $updates['name'] = trim((string) $payload['name']);
-        }
-        if (array_key_exists('min_qty', $payload)) {
-            $updates['min_qty'] = (float) $payload['min_qty'];
-        }
-        if (array_key_exists('max_qty', $payload)) {
-            $updates['max_qty'] = $payload['max_qty'] !== null ? (float) $payload['max_qty'] : null;
-        }
-        if (array_key_exists('priority', $payload)) {
-            $updates['priority'] = (int) $payload['priority'];
-        }
-        if (array_key_exists('status', $payload)) {
-            $updates['status'] = (int) $payload['status'];
-        }
-
-        if (!empty($updates)) {
-            DB::table('sales.price_tiers')->where('id', $id)->update($updates);
+        try {
+            $this->referenceDocumentService->updatePriceTier($companyId, $id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], str_contains($e->getMessage(), 'not found') ? 404 : 422);
         }
 
         return response()->json(['message' => 'Price tier updated']);
@@ -1879,11 +974,9 @@ class MasterDataController extends Controller
     public function inventorySettings(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureInventorySettingsSchema();
 
-        $row = DB::table('inventory.inventory_settings')
-            ->where('company_id', $companyId)
-            ->first();
+        $this->adminSettingsMatrixService->ensureInventorySettingsSchema();
+        $row = $this->adminSettingsMatrixService->getInventorySettingsByCompany()->get($companyId);
 
         if (!$row) {
             $row = [
@@ -1901,7 +994,6 @@ class MasterDataController extends Controller
                 'enforce_lot_for_tracked' => false,
             ];
         } else {
-            // Cast boolean columns properly from database
             $row = [
                 'company_id' => $row->company_id,
                 'complexity_mode' => $row->complexity_mode ?? 'BASIC',
@@ -1924,7 +1016,7 @@ class MasterDataController extends Controller
     public function updateInventorySettings(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureInventorySettingsSchema();
+        $this->adminSettingsMatrixService->ensureInventorySettingsSchema();
 
         $validator = Validator::make($request->all(), [
             'complexity_mode' => 'nullable|string|in:BASIC,ADVANCED',
@@ -1990,24 +1082,9 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Expiry tracking requires lot tracking'], 422);
         }
 
-        DB::table('inventory.inventory_settings')->updateOrInsert(
-            ['company_id' => $companyId],
-            $updates
-        );
+        $this->adminSettingsMatrixService->upsertInventorySettings($companyId, $updates);
 
         return response()->json(['message' => 'Inventory settings updated']);
-    }
-
-    private function ensureInventorySettingsSchema(): void
-    {
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.inventory_settings (company_id BIGINT PRIMARY KEY, inventory_mode VARCHAR(30) NOT NULL DEFAULT \'KARDEX_SIMPLE\', lot_outflow_strategy VARCHAR(20) NOT NULL DEFAULT \'MANUAL\', allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE, enforce_lot_for_tracked BOOLEAN NOT NULL DEFAULT FALSE, updated_at TIMESTAMPTZ NULL)');
-        DB::statement("ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS complexity_mode VARCHAR(20) NOT NULL DEFAULT 'BASIC'");
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_inventory_pro BOOLEAN NOT NULL DEFAULT FALSE');
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_lot_tracking BOOLEAN NOT NULL DEFAULT FALSE');
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_expiry_tracking BOOLEAN NOT NULL DEFAULT FALSE');
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_advanced_reporting BOOLEAN NOT NULL DEFAULT FALSE');
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_graphical_dashboard BOOLEAN NOT NULL DEFAULT FALSE');
-        DB::statement('ALTER TABLE inventory.inventory_settings ADD COLUMN IF NOT EXISTS enable_location_control BOOLEAN NOT NULL DEFAULT FALSE');
     }
 
     public function lots(Request $request)
@@ -2016,33 +1093,12 @@ class MasterDataController extends Controller
         $productId = $request->query('product_id');
         $warehouseId = $request->query('warehouse_id');
 
-        $query = DB::table('inventory.product_lots as pl')
-            ->join('inventory.products as p', 'p.id', '=', 'pl.product_id')
-            ->join('inventory.warehouses as w', 'w.id', '=', 'pl.warehouse_id')
-            ->select([
-                'pl.id',
-                'pl.product_id',
-                'p.name as product_name',
-                'pl.warehouse_id',
-                'w.name as warehouse_name',
-                'pl.lot_code',
-                'pl.manufacture_at',
-                'pl.expires_at',
-                'pl.unit_cost',
-                'pl.status',
-            ])
-            ->where('pl.company_id', $companyId)
-            ->orderByDesc('pl.received_at');
+        $resolvedProductId = ($productId !== null && $productId !== '') ? (int) $productId : null;
+        $resolvedWarehouseId = ($warehouseId !== null && $warehouseId !== '') ? (int) $warehouseId : null;
 
-        if ($productId !== null && $productId !== '') {
-            $query->where('pl.product_id', (int) $productId);
-        }
-
-        if ($warehouseId !== null && $warehouseId !== '') {
-            $query->where('pl.warehouse_id', (int) $warehouseId);
-        }
-
-        return response()->json(['data' => $query->limit(300)->get()]);
+        return response()->json([
+            'data' => $this->salesLookupService->listLotsForCompany($companyId, $resolvedProductId, $resolvedWarehouseId, 300),
+        ]);
     }
 
     public function createLot(Request $request)
@@ -2067,33 +1123,14 @@ class MasterDataController extends Controller
 
         $payload = $validator->validated();
 
-        $productExists = DB::table('inventory.products')
-            ->where('id', (int) $payload['product_id'])
-            ->where('company_id', $companyId)
-            ->exists();
-
-        $warehouseExists = DB::table('inventory.warehouses')
-            ->where('id', (int) $payload['warehouse_id'])
-            ->where('company_id', $companyId)
-            ->exists();
+        $productExists = $this->salesLookupService->companyProductExists($companyId, (int) $payload['product_id']);
+        $warehouseExists = $this->salesLookupService->companyWarehouseExists($companyId, (int) $payload['warehouse_id']);
 
         if (!$productExists || !$warehouseExists) {
             return response()->json(['message' => 'Invalid product or warehouse scope'], 422);
         }
 
-        $id = DB::table('inventory.product_lots')->insertGetId([
-            'company_id' => $companyId,
-            'warehouse_id' => (int) $payload['warehouse_id'],
-            'product_id' => (int) $payload['product_id'],
-            'lot_code' => strtoupper(trim($payload['lot_code'])),
-            'manufacture_at' => $payload['manufacture_at'] ?? null,
-            'expires_at' => $payload['expires_at'] ?? null,
-            'unit_cost' => $payload['unit_cost'] ?? null,
-            'supplier_reference' => $payload['supplier_reference'] ?? null,
-            'status' => (int) ($payload['status'] ?? 1),
-            'created_by' => $authUser->id,
-            'created_at' => now(),
-        ]);
+        $id = $this->salesLookupService->createLot($companyId, (int) $authUser->id, $payload);
 
         return response()->json(['message' => 'Lot created', 'id' => (int) $id], 201);
     }
@@ -2101,34 +1138,15 @@ class MasterDataController extends Controller
     public function documentKinds(Request $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureDocumentKindsTable();
 
-        $toggles = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereIn('feature_code', $this->documentKindFeatureCodes())
-            ->pluck('is_enabled', 'feature_code');
-
-        $rows = $this->documentKindCatalog()->map(function ($row) use ($toggles) {
-            $featureCode = 'DOC_KIND_' . (string) $row['code'];
-
-            return [
-                'id' => (int) ($row['id'] ?? 0),
-                'code' => (string) $row['code'],
-                'label' => (string) $row['label'],
-                'feature_code' => $featureCode,
-                'is_enabled' => ((bool) ($row['is_enabled'] ?? true))
-                    && ($toggles->has($featureCode) ? (bool) $toggles->get($featureCode) : true),
-            ];
-        })->values();
-
-        return response()->json(['data' => $rows]);
+        return response()->json(['data' => $this->salesLookupService->listDocumentKindsForCompany($companyId)]);
     }
 
     public function updateDocumentKinds(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureDocumentKindsTable();
+        $this->salesLookupService->ensureDocumentKindsTable();
 
         $validator = Validator::make($request->all(), [
             'kinds' => 'required|array|min:1',
@@ -2144,74 +1162,10 @@ class MasterDataController extends Controller
 
         $items = $validator->validated()['kinds'];
 
-        foreach ($items as $item) {
-            $sourceCode = strtoupper(trim((string) ($item['original_code'] ?? $item['code'])));
-            $targetCode = strtoupper(trim((string) $item['code']));
-
-            $sourceExists = DB::table('sales.document_kinds')->where('code', $sourceCode)->exists();
-            if (!$sourceExists) {
-                return response()->json(['message' => 'Document kind code not found: ' . $sourceCode], 422);
-            }
-
-            if ($sourceCode !== $targetCode) {
-                $targetExists = DB::table('sales.document_kinds')->where('code', $targetCode)->exists();
-                if ($targetExists) {
-                    return response()->json(['message' => 'Document kind code already exists: ' . $targetCode], 422);
-                }
-
-                DB::table('sales.document_kinds')
-                    ->where('code', $sourceCode)
-                    ->update([
-                        'code' => $targetCode,
-                        'updated_at' => now(),
-                    ]);
-
-                if (DB::table('information_schema.tables')->where('table_schema', 'sales')->where('table_name', 'document_sequences')->exists()) {
-                    DB::table('sales.document_sequences')
-                        ->where('document_kind', $sourceCode)
-                        ->update(['document_kind' => $targetCode]);
-                }
-
-                if (DB::table('information_schema.tables')->where('table_schema', 'sales')->where('table_name', 'commercial_documents')->exists()) {
-                    DB::table('sales.commercial_documents')
-                        ->where('document_kind', $sourceCode)
-                        ->update(['document_kind' => $targetCode]);
-                }
-
-                DB::table('appcfg.company_feature_toggles')
-                    ->where('feature_code', 'DOC_KIND_' . $sourceCode)
-                    ->update(['feature_code' => 'DOC_KIND_' . $targetCode]);
-            }
-
-            if (array_key_exists('label', $item) && trim((string) $item['label']) !== '') {
-                DB::table('sales.document_kinds')
-                    ->where('code', $targetCode)
-                    ->update([
-                        'label' => trim((string) $item['label']),
-                        'is_enabled' => (bool) $item['is_enabled'],
-                        'updated_at' => now(),
-                    ]);
-            } else {
-                DB::table('sales.document_kinds')
-                    ->where('code', $targetCode)
-                    ->update([
-                        'is_enabled' => (bool) $item['is_enabled'],
-                        'updated_at' => now(),
-                    ]);
-            }
-
-            DB::table('appcfg.company_feature_toggles')->updateOrInsert(
-                [
-                    'company_id' => $companyId,
-                    'feature_code' => 'DOC_KIND_' . $targetCode,
-                ],
-                [
-                    'is_enabled' => (bool) $item['is_enabled'],
-                    'config' => json_encode(['managed_by' => 'masters']),
-                    'updated_by' => $authUser->id,
-                    'updated_at' => now(),
-                ]
-            );
+        try {
+            $this->salesLookupService->updateDocumentKindsBulk($companyId, (int) $authUser->id, $items);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json(['message' => 'Document kinds updated']);
@@ -2234,101 +1188,12 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
-        $kind = DB::table('sales.document_kinds')->where('id', $id)->first(['id', 'code']);
-        if (!$kind) {
-            return response()->json(['message' => 'Document kind not found'], 404);
-        }
-
         $payload = $validator->validated();
-        $sourceCode = strtoupper(trim((string) $kind->code));
-        $targetCode = array_key_exists('code', $payload)
-            ? strtoupper(trim((string) $payload['code']))
-            : $sourceCode;
-
-        if ($targetCode !== $sourceCode) {
-            $targetExists = DB::table('sales.document_kinds')
-                ->where('code', $targetCode)
-                ->where('id', '<>', $id)
-                ->exists();
-
-            if ($targetExists) {
-                return response()->json(['message' => 'Document kind code already exists: ' . $targetCode], 422);
-            }
-
-            DB::table('sales.series_numbers')
-                ->where('document_kind_id', $id)
-                ->update(['document_kind' => $targetCode]);
-
-            DB::table('sales.series_numbers')
-                ->whereNull('document_kind_id')
-                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
-                ->update([
-                    'document_kind' => $targetCode,
-                    'document_kind_id' => $id,
-                ]);
-
-            DB::table('sales.document_sequences')
-                ->where('document_kind_id', $id)
-                ->update(['document_kind' => $targetCode]);
-
-            DB::table('sales.document_sequences')
-                ->whereNull('document_kind_id')
-                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
-                ->update([
-                    'document_kind' => $targetCode,
-                    'document_kind_id' => $id,
-                ]);
-
-            DB::table('sales.commercial_documents')
-                ->where('document_kind_id', $id)
-                ->update(['document_kind' => $targetCode]);
-
-            DB::table('sales.commercial_documents')
-                ->whereNull('document_kind_id')
-                ->whereRaw("UPPER(TRIM(COALESCE(document_kind, ''))) = ?", [$sourceCode])
-                ->update([
-                    'document_kind' => $targetCode,
-                    'document_kind_id' => $id,
-                ]);
-
-            if (DB::table('information_schema.tables')->where('table_schema', 'billing')->where('table_name', 'documents')->exists()) {
-                DB::table('billing.documents')
-                    ->whereRaw("UPPER(TRIM(COALESCE(doc_type, ''))) = ?", [$sourceCode])
-                    ->update(['doc_type' => $targetCode]);
-            }
-
-            DB::table('appcfg.company_feature_toggles')
-                ->where('feature_code', 'DOC_KIND_' . $sourceCode)
-                ->update(['feature_code' => 'DOC_KIND_' . $targetCode]);
+        try {
+            $this->salesLookupService->updateDocumentKind($companyId, (int) $authUser->id, $id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], str_contains($e->getMessage(), 'not found') ? 404 : 422);
         }
-
-        $updates = ['updated_at' => now()];
-        if (array_key_exists('code', $payload)) {
-            $updates['code'] = $targetCode;
-        }
-        if (array_key_exists('label', $payload) && trim((string) $payload['label']) !== '') {
-            $updates['label'] = trim((string) $payload['label']);
-        }
-        if (array_key_exists('is_enabled', $payload)) {
-            $updates['is_enabled'] = (bool) $payload['is_enabled'];
-            DB::table('appcfg.company_feature_toggles')->updateOrInsert(
-                [
-                    'company_id' => $companyId,
-                    'feature_code' => 'DOC_KIND_' . $targetCode,
-                ],
-                [
-                    'is_enabled' => (bool) $payload['is_enabled'],
-                    'config' => json_encode(['managed_by' => 'masters']),
-                    'updated_by' => $authUser->id,
-                    'updated_at' => now(),
-                ]
-            );
-        }
-        if (array_key_exists('sort_order', $payload)) {
-            $updates['sort_order'] = (int) $payload['sort_order'];
-        }
-
-        DB::table('sales.document_kinds')->where('id', $id)->update($updates);
 
         return response()->json(['message' => 'Document kind updated']);
     }
@@ -2337,7 +1202,7 @@ class MasterDataController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $this->ensureDocumentKindsTable();
+        $this->salesLookupService->ensureDocumentKindsTable();
 
         $validator = Validator::make($request->all(), [
             'code' => ['required', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
@@ -2351,38 +1216,12 @@ class MasterDataController extends Controller
         }
 
         $payload = $validator->validated();
-        $code = strtoupper(trim((string) $payload['code']));
-        $label = trim((string) $payload['label']);
-        $sortOrder = isset($payload['sort_order']) ? (int) $payload['sort_order'] : 999;
-        $isEnabled = array_key_exists('is_enabled', $payload) ? (bool) $payload['is_enabled'] : true;
 
-        $exists = DB::table('sales.document_kinds')->where('code', $code)->exists();
-        if ($exists) {
-            return response()->json(['message' => 'Document kind code already exists'], 422);
+        try {
+            $this->salesLookupService->createDocumentKind($companyId, (int) $authUser->id, $payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        DB::table('sales.document_kinds')->insert([
-            'id' => DB::raw("nextval('sales.document_kinds_id_seq')"),
-            'code' => $code,
-            'label' => $label,
-            'sort_order' => $sortOrder,
-            'is_enabled' => $isEnabled,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        DB::table('appcfg.company_feature_toggles')->updateOrInsert(
-            [
-                'company_id' => $companyId,
-                'feature_code' => 'DOC_KIND_' . $code,
-            ],
-            [
-                'is_enabled' => $isEnabled,
-                'config' => json_encode(['managed_by' => 'masters']),
-                'updated_by' => $authUser->id,
-                'updated_at' => now(),
-            ]
-        );
 
         return response()->json(['message' => 'Document kind created'], 201);
     }
@@ -2407,268 +1246,20 @@ class MasterDataController extends Controller
             return (int) $value;
         })->unique()->values();
 
-        $existingIds = DB::table('core.units')
-            ->whereIn('id', $unitIds)
-            ->pluck('id')
-            ->map(function ($value) {
-                return (int) $value;
-            })
-            ->values();
+        $existingIds = collect($this->inventoryControllerSupportService->existingUnitIds($unitIds->all()));
 
         if ($existingIds->count() !== $unitIds->count()) {
             return response()->json(['message' => 'One or more unit ids are invalid'], 422);
         }
 
-        $this->ensureCompanyUnitsTable();
-
-        foreach ($items as $item) {
-            DB::table('appcfg.company_units')->updateOrInsert(
-                [
-                    'company_id' => $companyId,
-                    'unit_id' => (int) $item['id'],
-                ],
-                [
-                    'is_enabled' => (bool) $item['is_enabled'],
-                    'updated_by' => $authUser->id,
-                    'updated_at' => now(),
-                ]
-            );
-        }
+        $this->inventoryControllerSupportService->updateCompanyUnits($companyId, $items, (int) $authUser->id);
 
         return response()->json(['message' => 'Units updated']);
     }
 
-    private function companyUnits(int $companyId)
-    {
-        $this->ensureCompanyUnitsTable();
-
-        return DB::table('core.units as u')
-            ->leftJoin('appcfg.company_units as cu', function ($join) use ($companyId) {
-                $join->on('cu.unit_id', '=', 'u.id')
-                    ->where('cu.company_id', '=', $companyId);
-            })
-            ->select([
-                'u.id',
-                'u.code',
-                'u.sunat_uom_code',
-                'u.name',
-                DB::raw('COALESCE(cu.is_enabled, false) as is_enabled'),
-            ])
-            ->orderBy('u.name')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'code' => $row->code,
-                    'sunat_uom_code' => $row->sunat_uom_code,
-                    'name' => trim((string) $row->name),
-                    'is_enabled' => (bool) $row->is_enabled,
-                ];
-            })
-            ->values();
-    }
-
-    private function ensureCompanyUnitsTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_units (
-                company_id BIGINT NOT NULL,
-                unit_id BIGINT NOT NULL,
-                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, unit_id)
-            )'
-        );
-    }
-
     private function resolveCompanyOperationalLimits(int $companyId): array
     {
-        if (!DB::table('information_schema.tables')->where('table_schema', 'appcfg')->where('table_name', 'company_operational_limits')->exists()) {
-            return [
-                'max_branches_enabled' => 1,
-                'max_warehouses_enabled' => 1,
-                'max_cash_registers_enabled' => 1,
-                'max_cash_registers_per_warehouse' => 1,
-            ];
-        }
-
-        $row = DB::table('appcfg.company_operational_limits')
-            ->where('company_id', $companyId)
-            ->first([
-                'max_branches_enabled',
-                'max_warehouses_enabled',
-                'max_cash_registers_enabled',
-                'max_cash_registers_per_warehouse',
-            ]);
-
-        if (!$row) {
-            return [
-                'max_branches_enabled' => 1,
-                'max_warehouses_enabled' => 1,
-                'max_cash_registers_enabled' => 1,
-                'max_cash_registers_per_warehouse' => 1,
-            ];
-        }
-
-        return [
-            'max_branches_enabled' => max(1, (int) ($row->max_branches_enabled ?? 1)),
-            'max_warehouses_enabled' => max(1, (int) ($row->max_warehouses_enabled ?? 1)),
-            'max_cash_registers_enabled' => max(1, (int) ($row->max_cash_registers_enabled ?? 1)),
-            'max_cash_registers_per_warehouse' => max(1, (int) ($row->max_cash_registers_per_warehouse ?? 1)),
-        ];
-    }
-
-    private function ensureCompanyRoleProfilesTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
-                company_id BIGINT NOT NULL,
-                role_id BIGINT NOT NULL,
-                functional_profile VARCHAR(20) NULL,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, role_id)
-            )'
-        );
-    }
-
-    private function ensureCompanyFunctionalProfilesTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_functional_profiles (
-                company_id BIGINT NOT NULL,
-                code VARCHAR(40) NOT NULL,
-                label VARCHAR(120) NOT NULL,
-                status SMALLINT NOT NULL DEFAULT 1,
-                sort_order INTEGER NOT NULL DEFAULT 100,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                created_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, code)
-            )'
-        );
-    }
-
-    private function functionalProfilesCollection(int $companyId)
-    {
-        $this->ensureCompanyFunctionalProfilesTable();
-
-        $hasProfiles = DB::table('appcfg.company_functional_profiles')
-            ->where('company_id', $companyId)
-            ->exists();
-
-        if (!$hasProfiles) {
-            $seedRows = collect(self::ROLE_FUNCTIONAL_PROFILES)->map(function ($item) use ($companyId) {
-                return [
-                    'company_id' => $companyId,
-                    'code' => (string) $item['code'],
-                    'label' => (string) $item['label'],
-                    'status' => 1,
-                    'sort_order' => (int) $item['sort_order'],
-                    'updated_by' => null,
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ];
-            })->all();
-
-            DB::table('appcfg.company_functional_profiles')->insert($seedRows);
-        }
-
-        return DB::table('appcfg.company_functional_profiles')
-            ->select('code', 'label', 'status', 'sort_order')
-            ->where('company_id', $companyId)
-            ->orderBy('sort_order')
-            ->orderBy('label')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'code' => (string) $row->code,
-                    'label' => (string) $row->label,
-                    'status' => (int) $row->status,
-                    'sort_order' => (int) ($row->sort_order ?? 100),
-                ];
-            })
-            ->values();
-    }
-
-    private function functionalProfileCodes(int $companyId): array
-    {
-        return $this->functionalProfilesCollection($companyId)
-            ->where('status', 1)
-            ->pluck('code')
-            ->map(fn ($code) => strtoupper(trim((string) $code)))
-            ->filter(fn ($code) => $code !== '')
-            ->values()
-            ->all();
-    }
-
-    private function syncRoleFunctionalProfile(int $companyId, int $roleId, ?string $functionalProfile, $updatedBy): void
-    {
-        $this->ensureCompanyRoleProfilesTable();
-
-        $normalized = $this->normalizeFunctionalProfile($functionalProfile);
-
-        DB::table('appcfg.company_role_profiles')->updateOrInsert(
-            [
-                'company_id' => $companyId,
-                'role_id' => $roleId,
-            ],
-            [
-                'functional_profile' => $normalized,
-                'updated_by' => $updatedBy,
-                'updated_at' => now(),
-            ]
-        );
-    }
-
-    private function normalizeFunctionalProfile($value, ?array $allowedCodes = null): ?string
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        $normalized = strtoupper(trim((string) $value));
-        if ($normalized === '') {
-            return null;
-        }
-
-        if ($allowedCodes !== null && !in_array($normalized, $allowedCodes, true)) {
-            return null;
-        }
-
-        return $normalized;
-    }
-
-    private function syncRolePermissions(int $roleId, array $permissions): void
-    {
-        $moduleCodeMap = DB::table('appcfg.modules')
-            ->whereIn('code', collect($permissions)->pluck('module_code')->all())
-            ->pluck('id', 'code');
-
-        foreach ($permissions as $permission) {
-            if (!$moduleCodeMap->has($permission['module_code'])) {
-                continue;
-            }
-
-            $moduleId = (int) $moduleCodeMap->get($permission['module_code']);
-
-            DB::table('auth.role_module_access')->updateOrInsert(
-                [
-                    'role_id' => $roleId,
-                    'module_id' => $moduleId,
-                ],
-                [
-                    'can_view' => (bool) $permission['can_view'],
-                    'can_create' => (bool) $permission['can_create'],
-                    'can_update' => (bool) $permission['can_update'],
-                    'can_delete' => (bool) $permission['can_delete'],
-                    'can_export' => (bool) $permission['can_export'],
-                    'can_approve' => (bool) $permission['can_approve'],
-                    'updated_at' => now(),
-                ]
-            );
-        }
+        return $this->operationalLimitsService->getCompanyLimits($companyId);
     }
 
     private function resolveCompanyId(Request $request): int
@@ -2685,19 +1276,12 @@ class MasterDataController extends Controller
 
     private function tableExists(string $schema, string $table): bool
     {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->exists();
+        return $this->salesLookupService->tableExists($schema . '.' . $table);
     }
 
     private function tableColumnExists(string $schema, string $table, string $column): bool
     {
-        return DB::table('information_schema.columns')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->where('column_name', $column)
-            ->exists();
+        return in_array($column, $this->salesLookupService->tableColumns($schema . '.' . $table), true);
     }
 
     private function documentKindFeatureCodes(): array
@@ -2722,75 +1306,16 @@ class MasterDataController extends Controller
 
     private function documentKindCatalog()
     {
-        $this->ensureDocumentKindsTable();
-
-        return DB::table('sales.document_kinds')
-            ->select('id', 'code', 'label', 'is_enabled')
-            ->orderBy('sort_order')
-            ->orderBy('code')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'code' => (string) $row->code,
-                    'label' => (string) $row->label,
-                    'is_enabled' => (bool) $row->is_enabled,
-                ];
-            })
-            ->values();
+        return collect($this->salesLookupService->listDocumentKindsCatalog());
     }
 
     private function ensureDocumentKindsTable(): void
     {
-        DB::statement("CREATE SEQUENCE IF NOT EXISTS sales.document_kinds_id_seq START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1");
-        DB::statement("CREATE TABLE IF NOT EXISTS sales.document_kinds (id BIGINT PRIMARY KEY DEFAULT nextval('sales.document_kinds_id_seq'), code VARCHAR(30) NOT NULL UNIQUE, label VARCHAR(120) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
-        DB::statement("ALTER TABLE sales.document_kinds ADD COLUMN IF NOT EXISTS sunat_code VARCHAR(4) NULL");
-
-        $defaults = [
-            ['code' => 'QUOTATION',   'label' => 'Cotizacion',      'sort_order' => 10, 'sunat_code' => null],
-            ['code' => 'SALES_ORDER', 'label' => 'Pedido de Venta', 'sort_order' => 20, 'sunat_code' => null],
-            ['code' => 'INVOICE',     'label' => 'Factura',         'sort_order' => 30, 'sunat_code' => '01'],
-            ['code' => 'RECEIPT',     'label' => 'Boleta',          'sort_order' => 40, 'sunat_code' => '03'],
-            ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito', 'sort_order' => 50, 'sunat_code' => '07'],
-            ['code' => 'DEBIT_NOTE',  'label' => 'Nota de Debito',  'sort_order' => 60, 'sunat_code' => '08'],
-        ];
-
-        foreach ($defaults as $row) {
-            $exists = DB::table('sales.document_kinds')->where('code', $row['code'])->exists();
-            if (!$exists) {
-                DB::table('sales.document_kinds')->insert([
-                    'code'       => $row['code'],
-                    'label'      => $row['label'],
-                    'sort_order' => $row['sort_order'],
-                    'sunat_code' => $row['sunat_code'],
-                    'is_enabled' => true,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            } elseif ($row['sunat_code'] !== null) {
-                DB::table('sales.document_kinds')
-                    ->where('code', $row['code'])
-                    ->whereNull('sunat_code')
-                    ->update(['sunat_code' => $row['sunat_code'], 'updated_at' => now()]);
-            }
-        }
-
-        DB::table('sales.document_kinds')
-            ->whereRaw("UPPER(TRIM(code)) LIKE 'CREDIT_NOTE%'")
-            ->update(['sunat_code' => '07', 'updated_at' => now()]);
-
-        DB::table('sales.document_kinds')
-            ->whereRaw("UPPER(TRIM(code)) LIKE 'DEBIT_NOTE%'")
-            ->update(['sunat_code' => '08', 'updated_at' => now()]);
+        $this->salesLookupService->ensureDocumentKindsTable();
     }
 
     private function resolveDocumentKindIdByCode(string $code): ?int
     {
-        $row = DB::table('sales.document_kinds')
-            ->whereRaw('UPPER(TRIM(code)) = ?', [strtoupper(trim($code))])
-            ->select('id')
-            ->first();
-
-        return $row ? (int) $row->id : null;
+        return $this->salesLookupService->resolveDocumentKindIdByCode($code);
     }
 }

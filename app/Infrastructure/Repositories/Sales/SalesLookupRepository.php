@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\DB;
 
 class SalesLookupRepository
 {
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
     public function branchExists(int $companyId, int $branchId): bool
     {
         return DB::table('core.branches')
@@ -89,20 +92,64 @@ class SalesLookupRepository
 
     public function createPaymentMethod(array $payload): int
     {
-        return (int) DB::transaction(function () use ($payload) {
-            $nextId = (int) DB::table('master.payment_types')->lockForUpdate()->max('id') + 1;
+        try {
+            return (int) DB::transaction(function () use ($payload) {
+            $name = trim((string) ($payload['name'] ?? ''));
+            $code = strtoupper(trim((string) ($payload['code'] ?? '')));
+
+            if ($name === '') {
+                throw new \RuntimeException('Payment method name is required');
+            }
+
+            $nameExists = DB::table('master.payment_types')
+                ->whereRaw('UPPER(TRIM(name)) = ?', [strtoupper($name)])
+                ->exists();
+
+            if ($nameExists) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if ($code !== '') {
+                $codeExists = DB::table('master.payment_types')
+                    ->whereRaw("UPPER(TRIM(COALESCE(comment, ''))) = ?", [$code])
+                    ->exists();
+
+                if ($codeExists) {
+                    throw new \RuntimeException('Payment method code already exists');
+                }
+            }
+
+            $lastRow = DB::table('master.payment_types')
+                ->select('id')
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
+            $nextId = ((int) ($lastRow->id ?? 0)) + 1;
             $normalizedStatus = (int) ($payload['status'] ?? 1);
 
             DB::table('master.payment_types')->insert([
                 'id' => $nextId,
-                'name' => trim((string) $payload['name']),
-                'comment' => strtoupper(trim((string) $payload['code'])),
+                'name' => $name,
+                'comment' => $code,
                 'is_active' => $normalizedStatus === 1 ? 1 : 0,
                 'status' => $normalizedStatus,
             ]);
 
             return $nextId;
-        });
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            $message = strtolower((string) $e->getMessage());
+
+            if (str_contains($message, 'payment_types_name_key')) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if (str_contains($message, 'payment_types_comment_key')) {
+                throw new \RuntimeException('Payment method code already exists');
+            }
+
+            throw $e;
+        }
     }
 
     public function paymentMethodExists(int $id): bool
@@ -112,15 +159,61 @@ class SalesLookupRepository
 
     public function updatePaymentMethod(int $id, array $updates): void
     {
-        DB::table('master.payment_types')->where('id', $id)->update($updates);
+        if (array_key_exists('name', $updates)) {
+            $name = trim((string) $updates['name']);
+            if ($name !== '') {
+                $nameExists = DB::table('master.payment_types')
+                    ->where('id', '<>', $id)
+                    ->whereRaw('UPPER(TRIM(name)) = ?', [strtoupper($name)])
+                    ->exists();
+
+                if ($nameExists) {
+                    throw new \RuntimeException('Payment method name already exists');
+                }
+            }
+        }
+
+        if (array_key_exists('comment', $updates)) {
+            $code = strtoupper(trim((string) $updates['comment']));
+            if ($code !== '') {
+                $codeExists = DB::table('master.payment_types')
+                    ->where('id', '<>', $id)
+                    ->whereRaw("UPPER(TRIM(COALESCE(comment, ''))) = ?", [$code])
+                    ->exists();
+
+                if ($codeExists) {
+                    throw new \RuntimeException('Payment method code already exists');
+                }
+            }
+        }
+
+        try {
+            DB::table('master.payment_types')->where('id', $id)->update($updates);
+        } catch (\Illuminate\Database\QueryException $e) {
+            $message = strtolower((string) $e->getMessage());
+
+            if (str_contains($message, 'payment_types_name_key')) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if (str_contains($message, 'payment_types_comment_key')) {
+                throw new \RuntimeException('Payment method code already exists');
+            }
+
+            throw $e;
+        }
     }
 
-    public function findCompanyById(int $companyId, array $columns): ?object
+    public function findCompanyById(int $companyId, array $columns): ?\App\Application\DTOs\AppConfig\CompanyProfileDTO
     {
-        return DB::table('core.companies')
+        $columns = array_values(array_unique(array_merge($columns, ['id', 'status'])));
+
+        $company = DB::table('core.companies')
             ->select($columns)
             ->where('id', $companyId)
             ->first();
+
+        return $company ? \App\Application\DTOs\AppConfig\CompanyProfileDTO::fromRow($company) : null;
     }
 
     public function findLatestCompanySettings(
@@ -129,7 +222,7 @@ class SalesLookupRepository
         bool $preferRowsWithLogo,
         bool $orderByUpdatedAt,
         bool $orderByCreatedAt
-    ): ?object {
+    ): ?\App\Application\DTOs\AppConfig\CompanySettingsDTO {
         $query = DB::table('core.company_settings')
             ->select($columns)
             ->where('company_id', $companyId);
@@ -144,7 +237,9 @@ class SalesLookupRepository
             $query->orderByDesc('created_at');
         }
 
-        return $query->first();
+        $settings = $query->first();
+
+        return $settings ? \App\Application\DTOs\AppConfig\CompanySettingsDTO::fromRow($settings) : null;
     }
 
     public function listSeriesNumbers(
@@ -742,7 +837,7 @@ class SalesLookupRepository
         }
 
         $rows = $query
-            ->orderBy('d.issue_at', 'desc')
+            ->orderByRaw('COALESCE(d.created_at, d.issue_at) DESC')
             ->orderBy('d.id', 'desc')
             ->offset(($page - 1) * $limit)
             ->limit($limit)
@@ -1112,21 +1207,25 @@ class SalesLookupRepository
         return $row ? $row->bank_accounts : null;
     }
 
-    public function findVerticalFeatureOverride(int $companyId, int $verticalId, string $featureCode): ?object
+    public function findVerticalFeatureOverride(int $companyId, int $verticalId, string $featureCode): ?\App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO
     {
-        return DB::table('appcfg.company_vertical_feature_overrides')
+        $toggle = DB::table('appcfg.company_vertical_feature_overrides')
             ->where('company_id', $companyId)
             ->where('vertical_id', $verticalId)
             ->whereRaw('UPPER(feature_code) = ?', [strtoupper(trim($featureCode))])
             ->first(['is_enabled', 'config']);
+
+        return $toggle ? \App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO::fromRow($toggle) : null;
     }
 
-    public function findVerticalFeatureTemplate(int $verticalId, string $featureCode): ?object
+    public function findVerticalFeatureTemplate(int $verticalId, string $featureCode): ?\App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO
     {
-        return DB::table('appcfg.vertical_feature_templates')
+        $toggle = DB::table('appcfg.vertical_feature_templates')
             ->where('vertical_id', $verticalId)
             ->whereRaw('UPPER(feature_code) = ?', [strtoupper(trim($featureCode))])
             ->first(['is_enabled', 'config']);
+
+        return $toggle ? \App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO::fromRow($toggle) : null;
     }
 
     public function resolveActiveCompanyVertical(int $companyId): ?array
@@ -1226,9 +1325,9 @@ class SalesLookupRepository
         DB::statement('ALTER TABLE sales.customers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
     }
 
-    public function fetchCustomerIdentityForSalesValidation(int $companyId, int $customerId): ?object
+    public function fetchCustomerIdentityForSalesValidation(int $companyId, int $customerId): ?\App\Application\DTOs\Sales\SalesCustomerIdentityDTO
     {
-        return DB::table('sales.customers as c')
+        $customer = DB::table('sales.customers as c')
             ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
             ->select([
                 'c.id',
@@ -1239,6 +1338,8 @@ class SalesLookupRepository
             ->where('c.company_id', $companyId)
             ->where('c.id', $customerId)
             ->first();
+
+            return $customer ? \App\Application\DTOs\Sales\SalesCustomerIdentityDTO::fromRow($customer) : null;
     }
 
     public function resolveFallbackPaymentMethodId(int $companyId): ?int
@@ -1280,11 +1381,13 @@ class SalesLookupRepository
         return $row ? (int) $row->id : null;
     }
 
-    public function inventorySettingsForCompany(int $companyId): ?object
+    public function inventorySettingsForCompany(int $companyId): ?\App\Application\DTOs\Inventory\InventorySettingsDTO
     {
-        return DB::table('inventory.inventory_settings')
+        $settings = DB::table('inventory.inventory_settings')
             ->where('company_id', $companyId)
             ->first();
+
+        return $settings ? \App\Application\DTOs\Inventory\InventorySettingsDTO::fromRow($settings) : null;
     }
 
     public function listLotsForCompany(int $companyId, ?int $productId = null, ?int $warehouseId = null, int $limit = 300): Collection
@@ -1659,7 +1762,7 @@ class SalesLookupRepository
         return $query->exists();
     }
 
-    public function findPosStationDeviceConflict(int $companyId, string $normalizedDeviceId, ?int $excludeId = null): ?object
+    public function findPosStationDeviceConflict(int $companyId, string $normalizedDeviceId, ?int $excludeId = null): ?\App\Application\DTOs\Sales\PosStationConflictDTO
     {
         $query = DB::table('appcfg.pos_stations')
             ->select(['id', 'company_id', 'code'])
@@ -1670,7 +1773,9 @@ class SalesLookupRepository
             $query->where('id', '<>', $excludeId);
         }
 
-        return $query->first();
+        $conflict = $query->first();
+
+        return $conflict ? \App\Application\DTOs\Sales\PosStationConflictDTO::fromRow($conflict) : null;
     }
 
     public function createPosStation(int $companyId, int $cashRegisterId, array $payload, string $normalizedCode, string $normalizedDeviceId): int
@@ -2095,10 +2200,13 @@ class SalesLookupRepository
             ? (int) $payload['preferred_cash_register_id']
             : $defaultContext['cash_register_id'];
 
-        $hasPreferredWarehouseColumn = $this->tableColumns('auth.users')->contains(fn ($column) => $column === 'preferred_warehouse_id');
-        $hasPreferredCashRegisterColumn = $this->tableColumns('auth.users')->contains(fn ($column) => $column === 'preferred_cash_register_id');
-        $hasUserRolesCreatedAtColumn = $this->tableColumns('auth.user_roles')->contains(fn ($column) => $column === 'created_at');
-        $hasUserRolesUpdatedAtColumn = $this->tableColumns('auth.user_roles')->contains(fn ($column) => $column === 'updated_at');
+        $authUserColumns = $this->tableColumns('auth.users');
+        $userRoleColumns = $this->tableColumns('auth.user_roles');
+
+        $hasPreferredWarehouseColumn = in_array('preferred_warehouse_id', $authUserColumns, true);
+        $hasPreferredCashRegisterColumn = in_array('preferred_cash_register_id', $authUserColumns, true);
+        $hasUserRolesCreatedAtColumn = in_array('created_at', $userRoleColumns, true);
+        $hasUserRolesUpdatedAtColumn = in_array('updated_at', $userRoleColumns, true);
 
         $username = trim((string) $payload['username']);
         $email = array_key_exists('email', $payload) && $payload['email'] !== null ? trim(strtolower((string) $payload['email'])) : null;
@@ -2230,8 +2338,9 @@ class SalesLookupRepository
         }
 
         $updates = ['updated_at' => now()];
-        $hasPreferredWarehouseColumn = $this->tableColumns('auth.users')->contains(fn ($column) => $column === 'preferred_warehouse_id');
-        $hasPreferredCashRegisterColumn = $this->tableColumns('auth.users')->contains(fn ($column) => $column === 'preferred_cash_register_id');
+        $authUserColumns = $this->tableColumns('auth.users');
+        $hasPreferredWarehouseColumn = in_array('preferred_warehouse_id', $authUserColumns, true);
+        $hasPreferredCashRegisterColumn = in_array('preferred_cash_register_id', $authUserColumns, true);
 
         foreach (['branch_id', 'first_name', 'last_name', 'email', 'phone', 'status'] as $field) {
             if (array_key_exists($field, $payload)) {
@@ -2376,9 +2485,9 @@ class SalesLookupRepository
         ];
     }
 
-    public function resolveAuthRoleContext(int $userId, int $companyId): ?object
+    public function resolveAuthRoleContext(int $userId, int $companyId): ?\App\Application\DTOs\Auth\AuthRoleContextDTO
     {
-        return DB::table('auth.user_roles as ur')
+        $context = DB::table('auth.user_roles as ur')
             ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
             ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId): void {
                 $join->on('crp.role_id', '=', 'r.id')
@@ -2390,6 +2499,8 @@ class SalesLookupRepository
             ->orderBy('r.id')
             ->select('r.code as role_code', 'crp.functional_profile as role_profile')
             ->first();
+
+            return $context ? \App\Application\DTOs\Auth\AuthRoleContextDTO::fromRow($context) : null;
     }
 
     public function findProductUomConversionFactor(int $companyId, int $productId, int $fromUnitId, int $toUnitId): ?float
@@ -2405,13 +2516,15 @@ class SalesLookupRepository
         return $factor !== null ? (float) $factor : null;
     }
 
-    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?object
+    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?\App\Application\DTOs\Inventory\InventoryStockLevelDTO
     {
-        return DB::table('inventory.current_stock')
+        $stock = DB::table('inventory.current_stock')
             ->where('company_id', $companyId)
             ->where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
             ->first();
+
+        return $stock ? \App\Application\DTOs\Inventory\InventoryStockLevelDTO::fromRow($stock) : null;
     }
 
     public function listCandidateOutboundLots(
@@ -2441,23 +2554,27 @@ class SalesLookupRepository
             ->get();
     }
 
-    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?object
+    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?\App\Application\DTOs\Inventory\InventoryStockLevelDTO
     {
-        return DB::table('inventory.current_stock_by_lot')
+        $stock = DB::table('inventory.current_stock_by_lot')
             ->where('company_id', $companyId)
             ->where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
             ->where('lot_id', $lotId)
             ->first();
+
+        return $stock ? \App\Application\DTOs\Inventory\InventoryStockLevelDTO::fromRow($stock) : null;
     }
 
-    public function findTaxBridgeDocumentForDebug(int $companyId, int $documentId): ?object
+    public function findTaxBridgeDocumentForDebug(int $companyId, int $documentId): ?\App\Application\DTOs\Sales\TaxBridgeDebugDocumentDTO
     {
-        return DB::table('sales.commercial_documents')
+        $document = DB::table('sales.commercial_documents')
             ->select('id', 'company_id', 'branch_id')
             ->where('id', $documentId)
             ->where('company_id', $companyId)
             ->first();
+
+        return $document ? \App\Application\DTOs\Sales\TaxBridgeDebugDocumentDTO::fromRow($document) : null;
     }
 
     private function applyCommercialDocumentFilters(Builder $query, array $filters): void
@@ -2482,7 +2599,7 @@ class SalesLookupRepository
         $workshopVehicleSearchEnabled = (bool) ($filters['workshop_vehicle_search_enabled'] ?? false);
 
         if ($sellerUserId !== null && $sellerUserId > 0) {
-            $query->where('d.created_by', $sellerUserId);
+            $query->whereRaw("COALESCE(d.seller_user_id, CASE WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT ELSE NULL END, d.created_by) = ?", [$sellerUserId]);
         }
 
         if ($branchId !== null && $branchId !== '') {
@@ -2560,7 +2677,7 @@ class SalesLookupRepository
         if ($customerId > 0) {
             $query->where('d.customer_id', $customerId);
         } elseif ($customer !== '') {
-            $like = '%' . $customer . '%';
+            $like = strlen($customer) <= 3 ? $customer . '%' : '%' . $customer . '%';
             $query->where(function (Builder $nested) use ($like, $workshopVehicleSearchEnabled): void {
                 $nested->where('c.legal_name', 'ilike', $like)
                     ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like])
@@ -2584,7 +2701,7 @@ class SalesLookupRepository
         }
 
         if ($workshopVehicleSearchEnabled && $vehicle !== '') {
-            $vehicleLike = '%' . $vehicle . '%';
+            $vehicleLike = strlen($vehicle) <= 3 ? $vehicle . '%' : '%' . $vehicle . '%';
             $query->where(function (Builder $nested) use ($vehicleLike): void {
                 $nested->whereRaw("COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot'), '') ILIKE ?", [$vehicleLike]);
             });
@@ -2595,15 +2712,16 @@ class SalesLookupRepository
         }
 
         if ($issueDateFrom) {
-            $query->whereDate('d.issue_at', '>=', $issueDateFrom);
+            $query->where('d.issue_at', '>=', $issueDateFrom . self::DAY_START_SUFFIX);
         }
 
         if ($issueDateTo) {
-            $query->whereDate('d.issue_at', '<=', $issueDateTo);
+            $query->where('d.issue_at', '<=', $issueDateTo . self::DAY_END_SUFFIX);
         }
 
         if ($series !== '') {
-            $query->where('d.series', 'ilike', '%' . $series . '%');
+            $seriesLike = strlen($series) <= 3 ? $series . '%' : '%' . $series . '%';
+            $query->where('d.series', 'ilike', $seriesLike);
         }
 
         if ($number !== '') {
@@ -2704,6 +2822,17 @@ class SalesLookupRepository
         ))->map(function ($row) {
             return (string) $row->column_name;
         })->all();
+    }
+
+    private function splitQualifiedTable(string $qualifiedTable): array
+    {
+        if (strpos($qualifiedTable, '.') === false) {
+            return ['public', $qualifiedTable];
+        }
+
+        [$schema, $table] = explode('.', $qualifiedTable, 2);
+
+        return [$schema, $table];
     }
 
     private function firstExistingColumn(array $columns, array $candidates): ?string

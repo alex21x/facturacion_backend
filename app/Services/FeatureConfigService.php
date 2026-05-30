@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\DB;
+use App\Infrastructure\Repositories\AppConfig\FeatureConfigRepository;
 use Illuminate\Support\Facades\Cache;
 
 class FeatureConfigService
@@ -10,6 +10,10 @@ class FeatureConfigService
     private const CACHE_TTL = 3600; // 1 hour
     private const CACHE_PREFIX = 'feature_config:';
     private const CACHE_SCHEMA_VERSION = 'v3';
+
+    public function __construct(private FeatureConfigRepository $featureConfigRepository)
+    {
+    }
 
     /**
      * Get commerce settings for a company/branch.
@@ -28,19 +32,12 @@ class FeatureConfigService
         }
 
         // BATCH QUERY 1: Get all company features in ONE query
-        $companyFeatures = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->get(['feature_code', 'is_enabled', 'config'])
-            ->keyBy('feature_code');
+        $companyFeatures = $this->featureConfigRepository->getCompanyFeatures($companyId);
 
         // BATCH QUERY 2: Get all branch features in ONE query (if branch exists)
         $branchFeatures = collect();
         if ($branchId !== null) {
-            $branchFeatures = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->get(['feature_code', 'is_enabled', 'config'])
-                ->keyBy('feature_code');
+            $branchFeatures = $this->featureConfigRepository->getBranchFeatures($companyId, $branchId);
         }
 
         // Batch resolve vertical preferences (1 query instead of N)
@@ -119,18 +116,10 @@ class FeatureConfigService
         }
 
         // Find active vertical for this company
-        $activeVerticalQuery = DB::table('appcfg.company_verticals')
-            ->join('appcfg.verticals', 'appcfg.verticals.id', '=', 'appcfg.company_verticals.vertical_id')
-            ->where('appcfg.company_verticals.company_id', $companyId);
-
-        // Backward-compatible schema guard: older databases may not have is_active.
-        if ($this->columnExists('appcfg', 'company_verticals', 'is_active')) {
-            $activeVerticalQuery->where('appcfg.company_verticals.is_active', true);
-        }
-
-        $activeVertical = $activeVerticalQuery
-            ->orderByDesc('appcfg.company_verticals.id')
-            ->first(['appcfg.verticals.id', 'appcfg.verticals.code']);
+        $activeVertical = $this->featureConfigRepository->getActiveVerticalForCompany(
+            $companyId,
+            $this->columnExists('appcfg', 'company_verticals', 'is_active')
+        );
 
         if (!$activeVertical) {
             return [];
@@ -140,10 +129,7 @@ class FeatureConfigService
         $superadminOnly = array_map('strtoupper', config('features.superadmin_only_feature_codes', []));
 
         // BATCH QUERY: Get ALL vertical feature overrides for this company+vertical in ONE query
-        $overrides = DB::table('appcfg.company_vertical_feature_overrides')
-            ->where('company_id', $companyId)
-            ->where('vertical_id', $activeVertical->id)
-            ->get(['feature_code', 'is_enabled', 'config']);
+        $overrides = $this->featureConfigRepository->getVerticalOverrides($companyId, (int) $activeVertical->id);
 
         // Build result map in memory
         foreach ($overrides as $override) {
@@ -178,7 +164,7 @@ class FeatureConfigService
 
             if ($branchId !== null) {
                 $match['branch_id'] = $branchId;
-                DB::table('appcfg.branch_feature_toggles')->updateOrInsert(
+                $this->featureConfigRepository->upsertBranchFeatureToggle(
                     $match,
                     [
                         'is_enabled' => (bool)($feature['is_enabled'] ?? false),
@@ -188,7 +174,7 @@ class FeatureConfigService
                     ]
                 );
             } else {
-                DB::table('appcfg.company_feature_toggles')->updateOrInsert(
+                $this->featureConfigRepository->upsertCompanyFeatureToggle(
                     $match,
                     [
                         'is_enabled' => (bool)($feature['is_enabled'] ?? false),
@@ -221,9 +207,7 @@ class FeatureConfigService
             Cache::forget(self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ":company:{$companyId}:branch:{$branchId}");
         } else {
             // Clear all branches for this company
-            $branchIds = DB::table('core.branches')
-                ->where('company_id', $companyId)
-                ->pluck('id');
+            $branchIds = $this->featureConfigRepository->getBranchIdsByCompany($companyId);
 
             foreach ($branchIds as $bid) {
                 Cache::forget(self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ":company:{$companyId}:branch:{$bid}");
@@ -278,8 +262,7 @@ class FeatureConfigService
             return [];
         }
 
-        $rows = DB::table('appcfg.feature_labels')
-            ->get(['feature_code', $labelColumn]);
+        $rows = $this->featureConfigRepository->getFeatureLabels($labelColumn);
 
         $labels = $rows->mapWithKeys(function ($row) use ($labelColumn) {
             return [(string) $row->feature_code => (string) ($row->{$labelColumn} ?? $row->feature_code)];
@@ -318,10 +301,7 @@ class FeatureConfigService
                     $columns[] = 'category_label';
                 }
 
-                $rows = DB::table('appcfg.feature_labels')
-                    ->whereIn('feature_code', $codes)
-                    ->where('status', 1)
-                    ->get($columns);
+                $rows = $this->featureConfigRepository->getFeatureCategoryRows($codes, $columns);
 
                 foreach ($rows as $row) {
                     $code = (string) ($row->feature_code ?? '');
@@ -391,10 +371,7 @@ class FeatureConfigService
             $columns[] = 'category_label';
         }
 
-        $existing = DB::table('appcfg.feature_labels')
-            ->whereIn('feature_code', $codes->all())
-            ->get($columns)
-            ->keyBy('feature_code');
+        $existing = $this->featureConfigRepository->getExistingFeatureLabels($codes->all(), $columns);
 
         foreach ($codes as $code) {
             $label = $this->humanizeFeatureCode((string) $code);
@@ -432,10 +409,7 @@ class FeatureConfigService
                 $values['category_label'] = $categoryLabel;
             }
 
-            DB::table('appcfg.feature_labels')->updateOrInsert(
-                ['feature_code' => $code],
-                $values
-            );
+            $this->featureConfigRepository->upsertFeatureLabel((string) $code, $values);
         }
     }
 
@@ -522,10 +496,7 @@ class FeatureConfigService
         $key = "{$schema}.{$table}";
         
         if (!isset($tableCache[$key])) {
-            $tableCache[$key] = DB::select(
-                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?)",
-                [$schema, $table]
-            )[0]->exists ?? false;
+            $tableCache[$key] = $this->featureConfigRepository->tableExists($schema, $table);
         }
         
         return $tableCache[$key];
@@ -540,10 +511,7 @@ class FeatureConfigService
         $key = "{$schema}.{$table}.{$column}";
 
         if (!isset($columnCache[$key])) {
-            $columnCache[$key] = DB::select(
-                'SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?) as exists',
-                [$schema, $table, $column]
-            )[0]->exists ?? false;
+            $columnCache[$key] = $this->featureConfigRepository->columnExists($schema, $table, $column);
         }
 
         return $columnCache[$key];
@@ -572,14 +540,7 @@ class FeatureConfigService
             ->all();
 
         if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $rows = DB::table('appcfg.feature_labels')
-                ->where('status', 1)
-                ->orderBy('feature_code')
-                ->pluck('feature_code')
-                ->map(fn ($c) => strtoupper(trim((string) $c)))
-                ->filter(fn ($c) => $c !== '')
-                ->values()
-                ->all();
+            $rows = $this->featureConfigRepository->getCommerceFeatureCodesFromLabels();
 
             $codes = $rows;
         }

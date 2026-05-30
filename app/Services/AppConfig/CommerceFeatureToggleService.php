@@ -2,21 +2,22 @@
 
 namespace App\Services\AppConfig;
 
-use Illuminate\Support\Facades\DB;
+use App\Infrastructure\Repositories\AppConfig\ModuleToggleRepository;
 
 class CommerceFeatureToggleService
 {
+    public function __construct(private ModuleToggleRepository $moduleToggleRepository)
+    {
+    }
+
     public function isFeatureEnabledForContext(int $companyId, $branchId, string $featureCode): bool
     {
         $normalizedBranchId = $this->normalizeBranchId($branchId);
 
         $branchEnabled = null;
         if ($normalizedBranchId !== null) {
-            $branchToggle = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $normalizedBranchId)
-                ->where('feature_code', $featureCode)
-                ->first();
+            $branchToggle = $this->moduleToggleRepository
+                ->findBranchFeatureToggle($companyId, $normalizedBranchId, $featureCode);
 
             if ($branchToggle) {
                 $branchEnabled = (bool) ($branchToggle->is_enabled ?? false);
@@ -32,10 +33,7 @@ class CommerceFeatureToggleService
 
     public function isCompanyFeatureEnabled(int $companyId, string $featureCode): bool
     {
-        $row = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->first();
+        $row = $this->moduleToggleRepository->findCompanyFeatureToggle($companyId, $featureCode);
 
         return $row ? (bool) ($row->is_enabled ?? false) : false;
     }

@@ -3,6 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Restaurant\CheckoutRestaurantOrderRequest;
+use App\Http\Requests\Restaurant\CreateRestaurantOrderRequest;
+use App\Http\Requests\Restaurant\CreateRestaurantTableRequest;
+use App\Http\Requests\Restaurant\UpdateComandaStatusRequest;
+use App\Http\Requests\Restaurant\UpdateRestaurantTableRequest;
+use App\Http\Requests\Restaurant\UpsertRecipeRequest;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Restaurant\RestaurantComandaGateway;
 use App\Services\Restaurant\RestaurantOrderService;
@@ -10,7 +16,6 @@ use App\Services\Restaurant\RestaurantRecipeService;
 use App\Services\Sales\SalesLookupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Validator;
 
 class RestaurantController extends Controller
 {
@@ -30,17 +35,13 @@ class RestaurantController extends Controller
     public function bootstrap(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
         $mode = (string) $request->query('mode', 'full');
 
         if (!in_array($mode, ['full', 'orders_minimal'], true)) {
             $mode = 'full';
-        }
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
         if ($branchId !== null && $branchId !== '') {
@@ -153,7 +154,7 @@ class RestaurantController extends Controller
     public function fetchOrders(Request $request)
     {
         $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId  = $request->query('branch_id', $authUser->branch_id);
         $status    = strtoupper(trim((string) $request->query('status', '')));
         $search    = trim((string) $request->query('search', ''));
@@ -161,10 +162,6 @@ class RestaurantController extends Controller
         $perPage   = min(50, max(10, (int) $request->query('per_page', 12)));
         $includeItems = filter_var($request->query('include_items', false), FILTER_VALIDATE_BOOLEAN);
         $includeMeta = filter_var($request->query('include_meta', false), FILTER_VALIDATE_BOOLEAN);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
@@ -186,12 +183,7 @@ class RestaurantController extends Controller
 
     public function showOrder(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->orderService->fetchOrderDetail($companyId, $id);
@@ -203,45 +195,12 @@ class RestaurantController extends Controller
         return response()->json(['data' => $result]);
     }
 
-    public function createOrder(Request $request)
+    public function createOrder(CreateRestaurantOrderRequest $request)
     {
         $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'branch_id'        => 'required|integer|min:1',
-            'warehouse_id'     => 'nullable|integer|min:1',
-            'table_id'         => 'nullable|integer|min:1',
-            'series'           => 'required|string|max:10',
-            'currency_id'      => 'required|integer|min:1',
-            'payment_method_id'=> 'required|integer|min:1',
-            'customer_id'      => 'required|integer|min:1',
-            'notes'            => 'nullable|string|max:500',
-            'items'            => 'required|array|min:1',
-            'items.*.product_id'  => 'nullable|integer|min:1',
-            'items.*.description' => 'required|string|max:300',
-            'items.*.quantity'    => 'required|numeric|min:0.001',
-            'items.*.unit_price'  => 'required|numeric|min:0',
-            'items.*.unit_id'     => 'nullable|integer|min:1',
-            'items.*.tax_type'    => 'nullable|string|max:20',
-            'items.*.tax_rate'    => 'nullable|numeric|min:0|max:100',
-            'items.*.subtotal'    => 'nullable|numeric|min:0',
-            'items.*.tax_total'   => 'nullable|numeric|min:0',
-            'items.*.total'       => 'nullable|numeric|min:0',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
-        $payload   = $validator->validated();
+        $payload   = $request->validated();
         $branchId  = (int) $payload['branch_id'];
         $warehouseId = isset($payload['warehouse_id']) ? (int) $payload['warehouse_id'] : null;
 
@@ -285,28 +244,13 @@ class RestaurantController extends Controller
         return response()->json($result, 201);
     }
 
-    public function checkoutOrder(Request $request, $id)
+    public function checkoutOrder(CheckoutRestaurantOrderRequest $request, $id)
     {
         $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $orderId   = (int) $id;
 
-        $validator = Validator::make($request->all(), [
-            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT,SALES_ORDER',
-            'series'               => 'nullable|string|max:10',
-            'cash_register_id'     => 'nullable|integer|min:1',
-            'payment_method_id'    => 'nullable|integer|min:1',
-            'notes'                => 'nullable|string|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $result = $this->orderService->checkoutOrder(
@@ -332,16 +276,12 @@ class RestaurantController extends Controller
     public function comandas(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $status = strtoupper(trim((string) $request->query('status', '')));
         $search = trim((string) $request->query('search', ''));
         $page = max(1, (int) $request->query('page', 1));
         $perPage = min(100, max(10, (int) $request->query('per_page', 20)));
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
@@ -372,28 +312,11 @@ class RestaurantController extends Controller
         return response()->json($result);
     }
 
-    public function updateComandaStatus(Request $request, int $id)
+    public function updateComandaStatus(UpdateComandaStatusRequest $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'status' => 'required|string|in:PENDING,IN_PREP,READY,SERVED,CANCELLED',
-            'table_label' => 'nullable|string|max:80',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $result = $this->gateway->updateStatus(
@@ -413,12 +336,7 @@ class RestaurantController extends Controller
 
     public function getRecipe(Request $request, int $menuProductId)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->recipeService->getRecipe($companyId, $menuProductId);
@@ -430,31 +348,11 @@ class RestaurantController extends Controller
         return response()->json($result);
     }
 
-    public function upsertRecipe(Request $request, int $menuProductId)
+    public function upsertRecipe(UpsertRecipeRequest $request, int $menuProductId)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'notes' => 'nullable|string|max:300',
-            'lines' => 'required|array|min:1',
-            'lines.*.ingredient_product_id' => 'required|integer|min:1',
-            'lines.*.qty_required_base' => 'required|numeric|min:0.00000001',
-            'lines.*.wastage_percent' => 'nullable|numeric|min:0|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $result = $this->recipeService->upsertRecipe(
@@ -473,12 +371,7 @@ class RestaurantController extends Controller
 
     public function preparationRequirements(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->recipeService->resolvePreparationRequirements($companyId, $id);
@@ -493,14 +386,10 @@ class RestaurantController extends Controller
     public function tables(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $status = strtoupper(trim((string) $request->query('status', '')));
         $search = trim((string) $request->query('search', ''));
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
@@ -529,30 +418,11 @@ class RestaurantController extends Controller
         return response()->json($result);
     }
 
-    public function createTable(Request $request)
+    public function createTable(CreateRestaurantTableRequest $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'required|integer|min:1',
-            'code' => 'required|string|max:40',
-            'name' => 'required|string|max:120',
-            'capacity' => 'required|integer|min:1|max:30',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $branchId = (int) $payload['branch_id'];
 
         $branchExists = $this->salesLookupService->branchExists($companyId, $branchId);
@@ -578,29 +448,11 @@ class RestaurantController extends Controller
         return response()->json($result, 201);
     }
 
-    public function updateTable(Request $request, int $id)
+    public function updateTable(UpdateRestaurantTableRequest $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'nullable|string|max:120',
-            'capacity' => 'nullable|integer|min:1|max:30',
-            'status' => 'nullable|string|in:AVAILABLE,OCCUPIED,RESERVED,DISABLED',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $result = $this->gateway->updateTable(

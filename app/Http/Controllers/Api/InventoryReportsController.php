@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Inventory\CreateInventoryReportRequest;
 use App\Jobs\GenerateInventoryReportJob;
 use App\Services\Inventory\InventoryReportsService;
 use App\Support\Inventory\ProjectionEngine;
 use App\Support\Inventory\ReportEngine;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class InventoryReportsController extends Controller
 {
@@ -33,14 +33,9 @@ class InventoryReportsController extends Controller
 
     public function dashboard(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $days = min(max((int) $request->query('days', 30), 1), 180);
         $warehouseId = $request->query('warehouse_id');
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
         $inventoryPro = (bool) ($settings['enable_inventory_pro'] ?? false);
@@ -91,17 +86,12 @@ class InventoryReportsController extends Controller
 
     public function dailySnapshot(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $dateFrom = (string) $request->query('date_from', now()->subDays(7)->toDateString());
         $dateTo = (string) $request->query('date_to', now()->toDateString());
         $warehouseId = $request->query('warehouse_id');
         $productId = $request->query('product_id');
         $limit = min(max((int) $request->query('limit', 500), 1), 5000);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
         $advancedReporting = (bool) ($settings['enable_inventory_pro'] ?? false) && (bool) ($settings['enable_advanced_reporting'] ?? false);
@@ -143,16 +133,11 @@ class InventoryReportsController extends Controller
 
     public function lotExpiry(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $warehouseId = $request->query('warehouse_id');
         $productId = $request->query('product_id');
         $bucket = $request->query('bucket');
         $limit = min(max((int) $request->query('limit', 500), 1), 5000);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
         $expiryEnabled = (bool) ($settings['enable_inventory_pro'] ?? false) && (bool) ($settings['enable_expiry_tracking'] ?? false);
@@ -202,15 +187,10 @@ class InventoryReportsController extends Controller
 
     public function listRequests(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $status = $request->query('status');
         $reportType = $request->query('report_type');
         $limit = min(max((int) $request->query('limit', 50), 1), 200);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
 
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
 
@@ -235,28 +215,12 @@ class InventoryReportsController extends Controller
         ]);
     }
 
-    public function createRequest(Request $request)
+    public function createRequest(CreateInventoryReportRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'branch_id' => 'nullable|integer|min:1',
-            'report_type' => 'required|string|in:STOCK_SNAPSHOT,KARDEX_PHYSICAL,KARDEX_VALUED,LOT_EXPIRY,INVENTORY_CUT',
-            'filters' => 'nullable|array',
-            'run_async' => 'nullable|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
         $reportType = strtoupper((string) $payload['report_type']);
 
@@ -304,12 +268,7 @@ class InventoryReportsController extends Controller
 
     public function showRequest(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $settings = $this->inventoryReportsService->inventorySettingsForCompany($companyId);
 

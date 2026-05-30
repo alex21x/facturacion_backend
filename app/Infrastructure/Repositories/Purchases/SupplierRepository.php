@@ -24,11 +24,16 @@ class SupplierRepository implements SupplierRepositoryInterface
             $query = DB::table('inventory.purchase_suppliers')
                 ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
                 ->where('company_id', $companyId)
-                ->orderBy($autocomplete ? DB::raw('COALESCE(last_used_at, updated_at, created_at) DESC') : 'legal_name')
                 ->limit($limit);
 
+            if ($autocomplete) {
+                $query->orderByRaw('COALESCE(last_used_at, updated_at, created_at) DESC');
+            } else {
+                $query->orderBy('legal_name');
+            }
+
             if ($search !== '') {
-                $like = '%' . $search . '%';
+                $like = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
                 $normalizedDoc = preg_replace('/\D+/', '', $search);
 
                 $query->where(function ($nested) use ($like, $normalizedDoc) {
@@ -53,18 +58,21 @@ class SupplierRepository implements SupplierRepositoryInterface
 
     private function supplierSuggestionFromRow($row): array
     {
+        $legalName = isset($row->legal_name) ? (string) $row->legal_name : '';
+
         return [
             'id' => (int) $row->id,
             'doc_type' => $row->doc_type,
             'doc_number' => $row->doc_number,
-            'legal_name' => $row->legal_name,
+            'name' => $legalName,
+            'legal_name' => $legalName,
             'address' => $row->address,
             'phone' => $row->phone,
             'source' => $row->source,
         ];
     }
 
-    public function findSupplierByDocument(int $companyId, string $document): ?object
+    public function findSupplierByDocument(int $companyId, string $document): ?\App\Application\DTOs\Purchases\PurchaseSupplierDTO
     {
         $row = DB::table('inventory.purchase_suppliers')
             ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
@@ -72,7 +80,7 @@ class SupplierRepository implements SupplierRepositoryInterface
             ->where('doc_number', $document)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Purchases\PurchaseSupplierDTO::fromRow($row) : null;
     }
 
     public function getExistingSupplierDocumentSet(int $companyId): array

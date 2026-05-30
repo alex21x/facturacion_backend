@@ -5,13 +5,19 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\GreGuide\CancelGreGuideRequest;
 use App\Http\Requests\GreGuide\IndexGreGuideRequest;
+use App\Http\Requests\GreGuide\LookupsGreGuideRequest;
+use App\Http\Requests\GreGuide\PrintableGreGuideRequest;
 use App\Http\Requests\GreGuide\PrefillGreGuideFromDocumentRequest;
 use App\Http\Requests\GreGuide\SearchUbigeosRequest;
+use App\Http\Requests\GreGuide\SendGreGuideRequest;
+use App\Http\Requests\GreGuide\ShowGreGuideRequest;
+use App\Http\Requests\GreGuide\StatusTicketGreGuideRequest;
 use App\Http\Requests\GreGuide\StoreGreGuideRequest;
+use App\Http\Requests\GreGuide\TaxBridgeAuditHistoryGreGuideRequest;
 use App\Http\Requests\GreGuide\UpdateGreGuideRequest;
+use App\Infrastructure\Repositories\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\GreGuideService;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
-use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
 
 class GreGuideController extends Controller
@@ -48,8 +54,10 @@ class GreGuideController extends Controller
         return response()->json($data, 200);
     }
 
-    public function lookups(Request $request)
+    public function lookups(LookupsGreGuideRequest $request)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchId = $request->query('branch_id', $authUser->branch_id);
@@ -129,8 +137,10 @@ class GreGuideController extends Controller
         }
     }
 
-    public function show(Request $request, int $id)
+    public function show(ShowGreGuideRequest $request, int $id)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
 
@@ -146,8 +156,10 @@ class GreGuideController extends Controller
         return response()->json($guide, 200);
     }
 
-    public function taxBridgeAuditHistory(Request $request, int $id)
+    public function taxBridgeAuditHistory(TaxBridgeAuditHistoryGreGuideRequest $request, int $id)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
 
@@ -217,8 +229,10 @@ class GreGuideController extends Controller
         }
     }
 
-    public function send(Request $request, int $id)
+    public function send(SendGreGuideRequest $request, int $id)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
 
@@ -245,8 +259,10 @@ class GreGuideController extends Controller
         }
     }
 
-    public function statusTicket(Request $request, int $id)
+    public function statusTicket(StatusTicketGreGuideRequest $request, int $id)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
 
@@ -290,8 +306,10 @@ class GreGuideController extends Controller
         }
     }
 
-    public function printable(Request $request, int $id)
+    public function printable(PrintableGreGuideRequest $request, int $id)
     {
+        $request->validated();
+
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
 

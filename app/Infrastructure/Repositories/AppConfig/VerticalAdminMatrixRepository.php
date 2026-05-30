@@ -106,14 +106,14 @@ class VerticalAdminMatrixRepository
             ->all();
     }
 
-    public function findActiveVerticalByCode(string $verticalCode): ?object
+    public function findActiveVerticalByCode(string $verticalCode): ?\App\Application\DTOs\AppConfig\AppConfigVerticalReferenceDTO
     {
         $row = DB::table('appcfg.verticals')
             ->whereRaw('UPPER(code) = ?', [$verticalCode])
             ->where('status', 1)
             ->first(['id', 'code', 'name']);
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\AppConfig\AppConfigVerticalReferenceDTO::fromRow($row) : null;
     }
 
     public function runInTransaction(callable $callback): void

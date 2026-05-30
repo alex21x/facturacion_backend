@@ -29,6 +29,7 @@ class SalesDocumentLinePersistenceService
         int $nextNumber
     ): void {
         $lineNo = 1;
+        $ledgerRows = [];
 
         foreach ($processedItems as $processedItem) {
             $item = $processedItem['raw'];
@@ -158,7 +159,7 @@ class SalesDocumentLinePersistenceService
                             $ledgerUnitCost = 0.0;
                         }
 
-                        $this->itemRepository->createInventoryLedgerEntry([
+                        $ledgerRows[] = [
                             'company_id' => $companyId,
                             'warehouse_id' => (int) $warehouseId,
                             'product_id' => (int) $product->id,
@@ -171,7 +172,7 @@ class SalesDocumentLinePersistenceService
                             'notes' => $docNote,
                             'moved_at' => $resolvedIssueAt,
                             'created_by' => $authUser->id,
-                        ]);
+                        ];
                     }
                 } else {
                     if ($payloadUnitCost !== null) {
@@ -185,7 +186,7 @@ class SalesDocumentLinePersistenceService
                         $ledgerUnitCost = 0.0;
                     }
 
-                    $this->itemRepository->createInventoryLedgerEntry([
+                    $ledgerRows[] = [
                         'company_id' => $companyId,
                         'warehouse_id' => (int) $warehouseId,
                         'product_id' => (int) $product->id,
@@ -198,18 +199,26 @@ class SalesDocumentLinePersistenceService
                         'notes' => $docNote,
                         'moved_at' => $resolvedIssueAt,
                         'created_by' => $authUser->id,
-                    ]);
+                    ];
                 }
             }
 
             $lineNo++;
         }
+
+        $this->itemRepository->createInventoryLedgerEntriesBatch($ledgerRows);
     }
 
     public function persistPayments(int $documentId, array $payments): void
     {
+        if ($payments === []) {
+            return;
+        }
+
+        $rows = [];
+        $timestamp = now();
         foreach ($payments as $payment) {
-            $this->paymentRepository->create([
+            $rows[] = [
                 'document_id' => $documentId,
                 'payment_method_id' => $payment['payment_method_id'],
                 'amount' => $payment['amount'],
@@ -217,8 +226,10 @@ class SalesDocumentLinePersistenceService
                 'paid_at' => $payment['paid_at'] ?? null,
                 'status' => $payment['status'] ?? 'PENDING',
                 'notes' => $payment['notes'] ?? null,
-                'created_at' => now(),
-            ]);
+                'created_at' => $timestamp,
+            ];
         }
+
+        $this->paymentRepository->createBatch($rows);
     }
 }

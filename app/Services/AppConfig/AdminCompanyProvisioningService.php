@@ -2,6 +2,7 @@
 
 namespace App\Services\AppConfig;
 
+use App\Application\DTOs\AppConfig\AdminCompanyUserDTO;
 use App\Infrastructure\Repositories\AppConfig\AdminCompanyProvisioningRepository;
 use Illuminate\Support\Facades\Hash;
 
@@ -106,7 +107,7 @@ class AdminCompanyProvisioningService
         return $result;
     }
 
-    public function findActiveAdminUser(int $companyId, bool $includeLastTempPassword = false): ?object
+    public function findActiveAdminUser(int $companyId, bool $includeLastTempPassword = false): ?AdminCompanyUserDTO
     {
         return $this->repository->findActiveAdminUser($companyId, $includeLastTempPassword);
     }

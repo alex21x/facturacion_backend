@@ -2,15 +2,19 @@
 
 namespace App\Domain\Sales\Repositories;
 
+use App\Application\DTOs\Sales\SalesCustomerIdentityRecordDTO;
+use App\Application\DTOs\Sales\SalesCustomerPriceProfileDTO;
+use App\Application\DTOs\Sales\SalesCustomerProfileDTO;
+
 interface CustomerRepositoryInterface
 {
     public function getCustomers(int $companyId, string $search, $status, int $limit, bool $autocomplete, bool $workshopVehicleSearchEnabled): array;
 
-    public function findCustomerByDocument(int $companyId, string $document): ?object;
+    public function findCustomerByDocument(int $companyId, string $document): ?SalesCustomerProfileDTO;
 
-    public function findCustomerById(int $companyId, int $id): ?object;
+    public function findCustomerById(int $companyId, int $id): ?SalesCustomerProfileDTO;
 
-    public function findCustomerIdentityByDocument(int $companyId, string $document): ?object;
+    public function findCustomerIdentityByDocument(int $companyId, string $document): ?SalesCustomerIdentityRecordDTO;
 
     public function insertCustomer(array $data): int;
 
@@ -26,7 +30,7 @@ interface CustomerRepositoryInterface
 
     public function getExistingCustomersByDocument(int $companyId): array;
 
-    public function findCustomerPriceProfile(int $companyId, int $customerId): ?object;
+    public function findCustomerPriceProfile(int $companyId, int $customerId): ?SalesCustomerPriceProfileDTO;
 
     public function upsertCustomerPriceProfile(int $companyId, int $customerId, ?int $defaultTierId, float $discountPercent, int $status): void;
 

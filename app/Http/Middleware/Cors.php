@@ -11,7 +11,7 @@ class Cors
         $origin = $request->headers->get('Origin');
         $allowedOrigins = $this->allowedOrigins();
 
-        $isAllowed = $this->isAllowedOrigin($origin, $allowedOrigins);
+        $isAllowed = $this->isAllowedOrigin($origin, $allowedOrigins, $request->getHost());
         $allowAllLocal = $this->allowAllOriginsInLocal();
         // Echo origin instead of wildcard to maximize browser compatibility
         // (notably Private Network Access preflights in Chromium-based browsers).
@@ -103,16 +103,29 @@ class Cors
         return array_values(array_unique($normalized));
     }
 
-    private function isAllowedOrigin(?string $origin, array $allowedOrigins): bool
+    private function isAllowedOrigin(?string $origin, array $allowedOrigins, ?string $requestHost = null): bool
     {
         if (!$origin) {
             return false;
         }
 
-        $origin = rtrim(trim($origin), '/');
-
         if (in_array($origin, $allowedOrigins, true)) {
             return true;
+        }
+
+        // LAN/dev convenience: if frontend and backend share the same host
+        // but use different ports, allow the origin.
+        if ($requestHost !== null) {
+            $originParts = parse_url($origin);
+            if (is_array($originParts)) {
+                $originHost = strtolower(trim((string) ($originParts['host'] ?? '')));
+                $originScheme = strtolower(trim((string) ($originParts['scheme'] ?? '')));
+                if ($originHost !== ''
+                    && $originHost === strtolower(trim((string) $requestHost))
+                    && in_array($originScheme, ['http', 'https'], true)) {
+                    return true;
+                }
+            }
         }
 
         // Allow canonical production domains even if env variables were not
@@ -154,7 +167,13 @@ class Cors
 
     private function isRailwayHost(string $url): bool
     {
-        $host = (string) parse_url(trim($url), PHP_URL_HOST);
-        return $host !== '' && stripos($host, '.up.railway.app') !== false;
+        $trimmed = trim($url);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $host = strtolower((string) (parse_url($trimmed, PHP_URL_HOST) ?? ''));
+
+        return $host !== '' && str_ends_with($host, '.up.railway.app');
     }
 }

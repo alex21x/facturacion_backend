@@ -2,6 +2,7 @@
 
 namespace App\Services\AppConfig;
 
+use App\Application\DTOs\AppConfig\BackupCompanyDTO;
 use App\Infrastructure\Repositories\AppConfig\BackupMaintenanceRepository;
 
 class BackupMaintenanceService
@@ -10,7 +11,7 @@ class BackupMaintenanceService
     {
     }
 
-    public function findCompanyById(int $companyId): ?object
+    public function findCompanyById(int $companyId): ?BackupCompanyDTO
     {
         return $this->repository->findCompanyById($companyId);
     }

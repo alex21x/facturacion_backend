@@ -9,14 +9,16 @@ use App\Application\UseCases\Inventory\CreateInventoryStockEntryUseCase;
 use App\Application\UseCases\Purchases\ExportPurchasesStockEntriesUseCase;
 use App\Application\UseCases\Purchases\GetPurchasesLookupsUseCase;
 use App\Application\UseCases\Purchases\ListPurchasesStockEntriesUseCase;
+use App\Http\Requests\Purchases\BulkImportSuppliersRequest;
+use App\Http\Requests\Purchases\ReceivePurchaseOrderRequest;
+use App\Http\Requests\Purchases\UpdateStockEntryRequest;
+use App\Infrastructure\Repositories\Purchases\PurchasesPersistenceRepository;
 use App\Services\AppConfig\CommerceFeatureToggleService;
 use App\Services\AppConfig\CompanyIgvRateService;
-use App\Services\Purchases\PurchasesPersistenceService;
 use App\Services\Purchases\SupplierManagementService;
 use App\Services\Purchases\SupplierQueryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class PurchasesController
 {
@@ -30,7 +32,7 @@ class PurchasesController
         private ListPurchasesStockEntriesUseCase $listPurchasesStockEntriesUseCase,
         private ExportPurchasesStockEntriesUseCase $exportPurchasesStockEntriesUseCase,
         private CreateInventoryStockEntryUseCase $createInventoryStockEntryUseCase,
-        private PurchasesPersistenceService $purchasesPersistenceService,
+        private PurchasesPersistenceRepository $purchasesPersistenceService,
         private SupplierQueryService $supplierQueryService,
         private SupplierManagementService $supplierManagementService
     )
@@ -40,32 +42,12 @@ class PurchasesController
     /**
      * Receive a purchase order and convert it into an applied purchase entry.
      */
-    public function receivePurchaseOrder(Request $request, int $id)
+    public function receivePurchaseOrder(ReceivePurchaseOrderRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'issue_at' => 'nullable|date',
-            'reference_no' => 'nullable|string|max:60',
-            'supplier_reference' => 'nullable|string|max:120',
-            'payment_method_id' => 'nullable|integer|min:1',
-            'notes' => 'nullable|string|max:300',
-            'items' => 'nullable|array|min:1',
-            'items.*.product_id' => 'required_with:items|integer|min:1',
-            'items.*.qty' => 'required_with:items|numeric|gt:0',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         $source = $this->purchasesPersistenceService->findPurchaseOrderSource($id, $companyId);
 
@@ -273,44 +255,12 @@ class PurchasesController
     /**
      * Edit a stock entry while preserving inventory traceability.
      */
-    public function updateStockEntry(Request $request, int $id)
+    public function updateStockEntry(UpdateStockEntryRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'reference_no' => 'nullable|string|max:60',
-            'supplier_reference' => 'nullable|string|max:120',
-            'payment_method_id' => 'nullable|integer|min:1',
-            'issue_at' => 'nullable|date',
-            'notes' => 'nullable|string|max:300',
-            'metadata' => 'nullable|array',
-            'edit_reason' => 'nullable|string|max:180',
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|integer|min:1',
-            'items.*.qty' => 'required|numeric',
-            'items.*.unit_cost' => 'nullable|numeric|min:0',
-            'items.*.tax_category_id' => 'nullable|integer|min:1',
-            'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
-            'items.*.lot_id' => 'nullable|integer|min:1',
-            'items.*.lot_code' => 'nullable|string|max:80',
-            'items.*.manufacture_at' => 'nullable|date',
-            'items.*.expires_at' => 'nullable|date',
-            'items.*.notes' => 'nullable|string|max:200',
-            'items.*.metadata' => 'nullable|array',
-            'items.*.metadata' => 'nullable|array',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         $entry = $this->purchasesPersistenceService->findStockEntry($id, $companyId);
 
@@ -408,7 +358,9 @@ class PurchasesController
                 $hasItemMetadataColumn,
                 $hasLedgerTaxRateColumn,
                 $hasPaymentMethodColumn,
-                $hasMetadataColumn
+                $hasMetadataColumn,
+                $nextReferenceNo,
+                $nextSupplierReference
             ) {
                 if ($appliesStock) {
                     $this->clearPreviousEditLedgerForEntry($companyId, (int) $entry->id);
@@ -600,14 +552,8 @@ class PurchasesController
     public function lookups(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
@@ -673,14 +619,8 @@ class PurchasesController
     public function listStockEntries(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id');
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
 
         // Filtering parameters
         $entryType = $request->query('entry_type'); // PURCHASE, ADJUSTMENT, or null for both
@@ -725,14 +665,8 @@ class PurchasesController
     public function exportStockEntries(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id');
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
 
         // Filtering parameters (same as listStockEntries)
         $entryType = $request->query('entry_type');
@@ -1568,11 +1502,7 @@ class PurchasesController
 
     public function supplierAutocomplete(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensurePurchaseSuppliersTable();
         $search = trim((string) $request->query('q', ''));
@@ -1587,11 +1517,7 @@ class PurchasesController
 
     public function suppliers(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensurePurchaseSuppliersTable();
         $search = trim((string) $request->query('q', ''));
@@ -1604,44 +1530,20 @@ class PurchasesController
         ]);
     }
 
-    public function bulkImportSuppliers(Request $request)
+    public function bulkImportSuppliers(BulkImportSuppliersRequest $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'rows' => 'required|array|min:1|max:5000',
-            'rows.*.doc_type' => 'nullable|string|max:10',
-            'rows.*.doc_number' => 'required|string|max:40',
-            'rows.*.legal_name' => 'required|string|max:255',
-            'rows.*.address' => 'nullable|string|max:255',
-            'rows.*.phone' => 'nullable|string|max:40',
-            'rows.*.source' => 'nullable|string|max:20',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensurePurchaseSuppliersTable();
 
-        $result = $this->supplierManagementService->bulkImportSuppliers($companyId, $validator->validated()['rows']);
+        $result = $this->supplierManagementService->bulkImportSuppliers($companyId, $request->validated()['rows']);
 
         return response()->json($result);
     }
 
     public function resolveSupplierByDocument(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $document = preg_replace('/\D+/', '', (string) $request->query('document', ''));
         if (!is_string($document)) {
@@ -1687,27 +1589,9 @@ class PurchasesController
         $this->purchasesPersistenceService->executeStatement('CREATE INDEX IF NOT EXISTS purchase_suppliers_company_name_idx ON inventory.purchase_suppliers (company_id, legal_name)');
     }
 
-    private function fetchSupplierRowByDocument(int $companyId, string $document)
-    {
-        return $this->purchasesPersistenceService->findPurchaseSupplierByDocument($companyId, $document);
-    }
-
     private function upsertPurchaseSupplier(int $companyId, array $data): void
     {
         $this->purchasesPersistenceService->upsertPurchaseSupplier($companyId, $data);
-    }
-
-    private function supplierSuggestionFromRow($row): array
-    {
-        return [
-            'id' => isset($row->id) ? (int) $row->id : 0,
-            'doc_type' => isset($row->doc_type) ? (string) $row->doc_type : null,
-            'doc_number' => isset($row->doc_number) ? (string) $row->doc_number : '',
-            'name' => isset($row->legal_name) ? (string) $row->legal_name : '',
-            'address' => isset($row->address) ? (string) $row->address : null,
-            'phone' => isset($row->phone) ? (string) $row->phone : null,
-            'source' => isset($row->source) ? (string) $row->source : 'local',
-        ];
     }
 
     private function normalizeSupplierDocType(string $docTypeInput, string $docNumber): string

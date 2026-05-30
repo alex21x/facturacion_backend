@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DailySummary\EligibleDailySummaryDocumentsRequest;
+use App\Http\Requests\DailySummary\IndexDailySummaryRequest;
+use App\Http\Requests\DailySummary\StoreDailySummaryRequest;
 use App\Services\Sales\TaxBridge\DailySummaryService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class DailySummaryController extends Controller
 {
@@ -15,29 +17,9 @@ class DailySummaryController extends Controller
     }
 
     // ── GET /sales/daily-summaries ────────────────────────────────────────────
-    public function index(Request $request)
+    public function index(IndexDailySummaryRequest $request)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'summary_type' => 'required|integer|in:1,3',
-            'date'         => 'nullable|date_format:Y-m-d',
-            'status'       => 'nullable|string|in:DRAFT,SENDING,SENT,ACCEPTED,REJECTED,ERROR',
-            'page'         => 'nullable|integer|min:1',
-            'per_page'     => 'nullable|integer|min:5|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $data = $this->dailySummaryService->list(
             $companyId,
@@ -52,27 +34,9 @@ class DailySummaryController extends Controller
     }
 
     // ── GET /sales/daily-summaries/eligible-documents ────────────────────────
-    public function eligibleDocuments(Request $request)
+    public function eligibleDocuments(EligibleDailySummaryDocumentsRequest $request)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'summary_type' => 'required|integer|in:1,3',
-            'date'         => 'required|date_format:Y-m-d',
-            'branch_id'    => 'nullable|integer',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $branchId = $request->query('branch_id') !== null
             ? (int) $request->query('branch_id')
@@ -91,12 +55,7 @@ class DailySummaryController extends Controller
     // ── GET /sales/daily-summaries/{id} ──────────────────────────────────────
     public function show(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $summary = $this->dailySummaryService->show($companyId, $id);
 
@@ -108,32 +67,12 @@ class DailySummaryController extends Controller
     }
 
     // ── POST /sales/daily-summaries ───────────────────────────────────────────
-    public function store(Request $request)
+    public function store(StoreDailySummaryRequest $request)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'summary_type' => 'required|integer|in:1,3',
-            'summary_date' => 'required|date_format:Y-m-d',
-            'document_ids' => 'required|array|min:1',
-            'document_ids.*' => 'integer|min:1',
-            'branch_id'    => 'nullable|integer',
-            'notes'        => 'nullable|string|max:1000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $summary = $this->dailySummaryService->create(
@@ -158,12 +97,7 @@ class DailySummaryController extends Controller
     // ── DELETE /sales/daily-summaries/{id} ───────────────────────────────────
     public function destroy(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $this->dailySummaryService->deleteDraft($companyId, $id);
@@ -175,12 +109,7 @@ class DailySummaryController extends Controller
 
     public function removeDocument(Request $request, int $id, int $documentId)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->dailySummaryService->removeDocumentFromEditableSummary($companyId, $id, $documentId);
@@ -201,12 +130,7 @@ class DailySummaryController extends Controller
     // ── PUT /sales/daily-summaries/{id}/send ─────────────────────────────────
     public function send(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->dailySummaryService->send($companyId, $id);
@@ -232,12 +156,8 @@ class DailySummaryController extends Controller
 
     public function statusTicket(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->dailySummaryService->queryTicketStatus($companyId, $id, (int) $authUser->id, (string) ($authUser->username ?? ''));

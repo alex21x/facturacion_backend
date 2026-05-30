@@ -16,7 +16,8 @@ class ReferenceDocumentService
         ?int $branchId,
         ?string $noteTargetKind,
         string $noteKind,
-        int $limit
+        int $limit,
+        ?int $sellerUserId = null
     ): array {
         return $this->repository->listReferenceDocuments(
             $companyId,
@@ -24,7 +25,8 @@ class ReferenceDocumentService
             $branchId,
             $noteTargetKind,
             $noteKind,
-            $limit
+            $limit,
+            $sellerUserId
         )->all();
     }
 

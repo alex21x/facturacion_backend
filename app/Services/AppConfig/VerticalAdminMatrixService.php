@@ -24,9 +24,14 @@ class VerticalAdminMatrixService
         $companies = $this->verticalAdminMatrixRepository->listNonSystemCompanies($systemCompanyId);
         $companyIds = $companies->pluck('id')->map(fn ($id) => (int) $id)->all();
 
+        $existingAccessLinks = collect();
+        if ($this->companyAccessLinkService->tableExists('appcfg', 'company_access_links')) {
+            $existingAccessLinks = $this->companyAccessLinkService->getByCompanyIds($companyIds);
+        }
+
         foreach ($companies as $company) {
             $companyId = (int) $company->id;
-            if (!$this->companyAccessLinkService->existsByCompanyId($companyId)) {
+            if (!$existingAccessLinks->has($companyId)) {
                 $this->companyAccessLinkService->ensureCompanyAccessLink(
                     $companyId,
                     (string) ($company->legal_name ?? ''),
@@ -108,7 +113,7 @@ class VerticalAdminMatrixService
                 'active_vertical_code' => $active['vertical_code'] ?? null,
                 'active_vertical_name' => $active['vertical_name'] ?? null,
                 'access_slug' => $accessSlug,
-                'access_link_active' => $accessLink ? ((int) $accessLink->is_active === 1) : false,
+                'access_link_active' => $accessLink !== null,
                 'assignments' => $companyAssignments,
                 'admin_username' => $adminUser ? $adminUser->username : null,
                 'admin_email' => $adminUser ? $adminUser->email : null,

@@ -2,18 +2,25 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AppConfig\CompanyRateLimitService;
 use Closure;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class EnforceCompanyRateLimit
 {
     private const CACHE_TTL_SECONDS = 60;
-    private const SCHEMA_CACHE_TTL_SECONDS = 600;
+
+    public function __construct(
+        private CompanyRateLimitService $companyRateLimitService
+    ) {
+    }
 
     public function handle($request, Closure $next)
     {
+        if (strtoupper((string) $request->getMethod()) === 'OPTIONS') {
+            return $next($request);
+        }
+
         $authUser = $request->attributes->get('auth_user');
 
         if (!$authUser || !isset($authUser->company_id)) {
@@ -82,45 +89,7 @@ class EnforceCompanyRateLimit
 
         return (int) Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($companyId, $profile, $default) {
             try {
-                $query = DB::table('appcfg.company_rate_limits')->where('company_id', $companyId);
-
-                $hasProfileColumns = $this->hasProfileColumns();
-                if ($hasProfileColumns) {
-                    $row = $query
-                        ->select(
-                            'requests_per_minute',
-                            'requests_per_minute_read',
-                            'requests_per_minute_write',
-                            'requests_per_minute_reports',
-                            'is_enabled'
-                        )
-                        ->first();
-                } else {
-                    $row = $query
-                        ->select('requests_per_minute', 'is_enabled')
-                        ->first();
-                }
-
-                if (!$row) {
-                    return $default;
-                }
-
-                if ((int) ($row->is_enabled ?? 1) !== 1) {
-                    return 0;
-                }
-
-                $profileColumn = 'requests_per_minute_' . $profile;
-                $configured = 0;
-
-                if ($hasProfileColumns && isset($row->{$profileColumn})) {
-                    $configured = (int) ($row->{$profileColumn} ?? 0);
-                }
-
-                if ($configured <= 0) {
-                    $configured = (int) ($row->requests_per_minute ?? 0);
-                }
-
-                return $configured > 0 ? $configured : $default;
+                return $this->companyRateLimitService->resolveEffectiveLimit($companyId, $profile, $default);
             } catch (\Throwable $e) {
                 // Fallback to default limit when config table does not exist yet.
                 return $default;
@@ -139,20 +108,5 @@ class EnforceCompanyRateLimit
         }
 
         return (int) env('DEFAULT_COMPANY_RATE_LIMIT_PER_MINUTE', 3600);
-    }
-
-    private function hasProfileColumns(): bool
-    {
-        return (bool) Cache::remember('tenant_rate_limit_schema:profile_columns', self::SCHEMA_CACHE_TTL_SECONDS, function () {
-            try {
-                return Schema::hasColumns('appcfg.company_rate_limits', [
-                    'requests_per_minute_read',
-                    'requests_per_minute_write',
-                    'requests_per_minute_reports',
-                ]);
-            } catch (\Throwable $e) {
-                return false;
-            }
-        });
     }
 }

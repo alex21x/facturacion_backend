@@ -15,6 +15,29 @@ class CompanyRateLimitRepository
             ->exists();
     }
 
+    public function hasColumns(string $schema, string $table, array $columns): bool
+    {
+        if ($columns === []) {
+            return true;
+        }
+
+        $found = DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->whereIn('column_name', $columns)
+            ->pluck('column_name')
+            ->map(static fn ($value) => (string) $value)
+            ->all();
+
+        foreach ($columns as $column) {
+            if (!in_array($column, $found, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function listNonSystemCompanies(int $systemCompanyId): Collection
     {
         return DB::table('core.companies')
@@ -37,6 +60,31 @@ class CompanyRateLimitRepository
                 'last_preset_code',
                 'updated_at',
             ]);
+    }
+
+    public function findCompanyRateLimitByCompanyId(int $companyId, bool $hasProfileColumns): ?object
+    {
+        $query = DB::table('appcfg.company_rate_limits')
+            ->where('company_id', $companyId);
+
+        if ($hasProfileColumns) {
+            return $query
+                ->select([
+                    'requests_per_minute',
+                    'requests_per_minute_read',
+                    'requests_per_minute_write',
+                    'requests_per_minute_reports',
+                    'is_enabled',
+                ])
+                ->first();
+        }
+
+        return $query
+            ->select([
+                'requests_per_minute',
+                'is_enabled',
+            ])
+            ->first();
     }
 
     public function companyExists(int $companyId): bool
@@ -68,6 +116,47 @@ class CompanyRateLimitRepository
                 'updated_by' => $updatedBy,
                 'updated_at' => now(),
                 'created_at' => now(),
+            ]
+        );
+    }
+
+    public function upsertCompanyRateLimitsBatch(array $companyIds, array $payload, ?int $updatedBy): void
+    {
+        if ($companyIds === []) {
+            return;
+        }
+
+        $now = now();
+        $rows = [];
+        foreach ($companyIds as $companyId) {
+            $rows[] = [
+                'company_id' => (int) $companyId,
+                'is_enabled' => (bool) $payload['is_enabled'],
+                'requests_per_minute' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
+                'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
+                'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
+                'last_preset_code' => $payload['preset_code'] ?? null,
+                'updated_by' => $updatedBy,
+                'updated_at' => $now,
+                'created_at' => $now,
+            ];
+        }
+
+        DB::table('appcfg.company_rate_limits')->upsert(
+            $rows,
+            ['company_id'],
+            [
+                'is_enabled',
+                'requests_per_minute',
+                'requests_per_minute_read',
+                'requests_per_minute_write',
+                'requests_per_minute_reports',
+                'plan_code',
+                'last_preset_code',
+                'updated_by',
+                'updated_at',
             ]
         );
     }

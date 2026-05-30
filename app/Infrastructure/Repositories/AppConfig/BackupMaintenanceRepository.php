@@ -2,15 +2,18 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\BackupCompanyDTO;
 use Illuminate\Support\Facades\DB;
 
 class BackupMaintenanceRepository
 {
-    public function findCompanyById(int $companyId): ?object
+    public function findCompanyById(int $companyId): ?BackupCompanyDTO
     {
-        return DB::table('core.companies')
+        $company = DB::table('core.companies')
             ->where('id', $companyId)
             ->first(['id', 'tax_id', 'legal_name']);
+
+        return $company ? BackupCompanyDTO::fromRow($company) : null;
     }
 
     public function beginTransaction(): void

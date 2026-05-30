@@ -2,11 +2,23 @@
 
 namespace App\Services\Sales;
 
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
+use App\Application\DTOs\AppConfig\CompanyProfileDTO;
+use App\Application\DTOs\AppConfig\CompanySettingsDTO;
+use App\Application\DTOs\Inventory\InventorySettingsDTO;
+use App\Application\DTOs\Inventory\InventoryStockLevelDTO;
+use App\Application\DTOs\Sales\PosStationConflictDTO;
+use App\Application\DTOs\Sales\SalesCustomerIdentityDTO;
+use App\Application\DTOs\Sales\TaxBridgeDebugDocumentDTO;
 use App\Infrastructure\Repositories\Sales\SalesLookupRepository;
 use Illuminate\Support\Collection;
 
 class SalesLookupService
 {
+    private static bool $documentKindsTableEnsured = false;
+    private static bool $customersPhoneColumnEnsured = false;
+    private static bool $companyRoleProfilesTableEnsured = false;
+
     public function __construct(private SalesLookupRepository $repository)
     {
     }
@@ -56,7 +68,7 @@ class SalesLookupService
         $this->repository->updatePaymentMethod($id, $updates);
     }
 
-    public function findCompanyById(int $companyId, array $columns): ?object
+    public function findCompanyById(int $companyId, array $columns): ?CompanyProfileDTO
     {
         return $this->repository->findCompanyById($companyId, $columns);
     }
@@ -67,7 +79,7 @@ class SalesLookupService
         bool $preferRowsWithLogo,
         bool $orderByUpdatedAt,
         bool $orderByCreatedAt
-    ): ?object {
+    ): ?CompanySettingsDTO {
         return $this->repository->findLatestCompanySettings(
             $companyId,
             $columns,
@@ -137,7 +149,12 @@ class SalesLookupService
 
     public function ensureDocumentKindsTable(): void
     {
+        if (self::$documentKindsTableEnsured) {
+            return;
+        }
+
         $this->repository->ensureDocumentKindsTable();
+        self::$documentKindsTableEnsured = true;
     }
 
     public function listDocumentKindsCatalog(): array
@@ -221,12 +238,12 @@ class SalesLookupService
         return $this->repository->resolveCompanyBankAccountsRaw($companyId);
     }
 
-    public function findVerticalFeatureOverride(int $companyId, int $verticalId, string $featureCode): ?object
+    public function findVerticalFeatureOverride(int $companyId, int $verticalId, string $featureCode): ?CompanyFeatureToggleDTO
     {
         return $this->repository->findVerticalFeatureOverride($companyId, $verticalId, $featureCode);
     }
 
-    public function findVerticalFeatureTemplate(int $verticalId, string $featureCode): ?object
+    public function findVerticalFeatureTemplate(int $verticalId, string $featureCode): ?CompanyFeatureToggleDTO
     {
         return $this->repository->findVerticalFeatureTemplate($verticalId, $featureCode);
     }
@@ -287,10 +304,15 @@ class SalesLookupService
 
     public function ensureCustomersPhoneColumn(): void
     {
+        if (self::$customersPhoneColumnEnsured) {
+            return;
+        }
+
         $this->repository->ensureCustomersPhoneColumn();
+        self::$customersPhoneColumnEnsured = true;
     }
 
-    public function fetchCustomerIdentityForSalesValidation(int $companyId, int $customerId): ?object
+    public function fetchCustomerIdentityForSalesValidation(int $companyId, int $customerId): ?SalesCustomerIdentityDTO
     {
         return $this->repository->fetchCustomerIdentityForSalesValidation($companyId, $customerId);
     }
@@ -300,7 +322,7 @@ class SalesLookupService
         return $this->repository->resolveFallbackPaymentMethodId($companyId);
     }
 
-    public function inventorySettingsForCompany(int $companyId): ?object
+    public function inventorySettingsForCompany(int $companyId): ?InventorySettingsDTO
     {
         return $this->repository->inventorySettingsForCompany($companyId);
     }
@@ -420,7 +442,7 @@ class SalesLookupService
         return $this->repository->posStationCodeExists($companyId, $normalizedCode, $excludeId);
     }
 
-    public function findPosStationDeviceConflict(int $companyId, string $normalizedDeviceId, ?int $excludeId = null): ?object
+    public function findPosStationDeviceConflict(int $companyId, string $normalizedDeviceId, ?int $excludeId = null): ?PosStationConflictDTO
     {
         return $this->repository->findPosStationDeviceConflict($companyId, $normalizedDeviceId, $excludeId);
     }
@@ -437,7 +459,12 @@ class SalesLookupService
 
     public function ensureCompanyRoleProfilesTable(): void
     {
+        if (self::$companyRoleProfilesTableEnsured) {
+            return;
+        }
+
         $this->repository->ensureCompanyRoleProfilesTable();
+        self::$companyRoleProfilesTableEnsured = true;
     }
 
     public function buildAccessControlData(int $companyId): array
@@ -539,7 +566,7 @@ class SalesLookupService
         return $this->repository->findProductUomConversionFactor($companyId, $productId, $fromUnitId, $toUnitId);
     }
 
-    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?object
+    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?InventoryStockLevelDTO
     {
         return $this->repository->findCurrentStockRow($companyId, $warehouseId, $productId);
     }
@@ -549,12 +576,12 @@ class SalesLookupService
         return $this->repository->listCandidateOutboundLots($companyId, $warehouseId, $productId, $strategy);
     }
 
-    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?object
+    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?InventoryStockLevelDTO
     {
         return $this->repository->findCurrentStockByLotRow($companyId, $warehouseId, $productId, $lotId);
     }
 
-    public function findTaxBridgeDocumentForDebug(int $companyId, int $documentId): ?object
+    public function findTaxBridgeDocumentForDebug(int $companyId, int $documentId): ?TaxBridgeDebugDocumentDTO
     {
         return $this->repository->findTaxBridgeDocumentForDebug($companyId, $documentId);
     }

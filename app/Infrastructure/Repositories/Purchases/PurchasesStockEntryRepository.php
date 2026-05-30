@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\DB;
 
 class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInterface
 {
+	private const DAY_START_SUFFIX = ' 00:00:00';
+	private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
 	public function __construct(private CompanyIgvRateService $companyIgvRateService)
 	{
 	}
@@ -111,7 +114,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		}
 
 		if ($reference) {
-			$searchTerm = '%' . $reference . '%';
+			$searchTerm = strlen($reference) <= 3 ? $reference . '%' : '%' . $reference . '%';
 			$query->where(function ($q) use ($searchTerm) {
 				$q->where('se.reference_no', 'ilike', $searchTerm)
 					->orWhere('se.supplier_reference', 'ilike', $searchTerm);
@@ -119,11 +122,11 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		}
 
 		if ($dateFrom) {
-			$query->whereDate('se.issue_at', '>=', $dateFrom);
+			$query->where('se.issue_at', '>=', $dateFrom . self::DAY_START_SUFFIX);
 		}
 
 		if ($dateTo) {
-			$query->whereDate('se.issue_at', '<=', $dateTo);
+			$query->where('se.issue_at', '<=', $dateTo . self::DAY_END_SUFFIX);
 		}
 
 		if ($warehouseId) {

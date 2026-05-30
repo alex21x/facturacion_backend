@@ -2,6 +2,12 @@
 
 namespace App\Infrastructure\Repositories\Auth;
 
+use App\Application\DTOs\Auth\AuthAuthenticatedSessionDTO;
+use App\Application\DTOs\Auth\AuthAuthenticatedUserDTO;
+use App\Application\DTOs\Auth\AuthLoginUserDTO;
+use App\Application\DTOs\Auth\AuthRefreshSessionDTO;
+use App\Application\DTOs\Auth\AuthRefreshSessionRecordDTO;
+use App\Application\DTOs\Auth\AuthRoleContextDTO;
 use App\Domain\Auth\Repositories\AuthSessionRepositoryInterface;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -9,24 +15,45 @@ use Illuminate\Support\Facades\DB;
 
 class AuthSessionRepository implements AuthSessionRepositoryInterface
 {
+    private static array $tableExistsCache = [];
+    private static array $columnExistsCache = [];
+
     public function tableExists(string $schema, string $table): bool
     {
-        return DB::table('information_schema.tables')
+        $cacheKey = strtolower($schema . '.' . $table);
+        if (array_key_exists($cacheKey, self::$tableExistsCache)) {
+            return self::$tableExistsCache[$cacheKey];
+        }
+
+        $exists = DB::table('information_schema.tables')
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->exists();
+
+        self::$tableExistsCache[$cacheKey] = (bool) $exists;
+
+        return self::$tableExistsCache[$cacheKey];
     }
 
     public function columnExists(string $schema, string $table, string $column): bool
     {
-        return DB::table('information_schema.columns')
+        $cacheKey = strtolower($schema . '.' . $table . '.' . $column);
+        if (array_key_exists($cacheKey, self::$columnExistsCache)) {
+            return self::$columnExistsCache[$cacheKey];
+        }
+
+        $exists = DB::table('information_schema.columns')
             ->where('table_schema', $schema)
             ->where('table_name', $table)
             ->where('column_name', $column)
             ->exists();
+
+        self::$columnExistsCache[$cacheKey] = (bool) $exists;
+
+        return self::$columnExistsCache[$cacheKey];
     }
 
-    public function findActiveUserForLogin(string $username, ?string $accessSlug): ?object
+    public function findActiveUserForLogin(string $username, ?string $accessSlug): ?AuthLoginUserDTO
     {
         $query = DB::table('auth.users as u')
             ->join('core.companies as c', 'c.id', '=', 'u.company_id')
@@ -52,7 +79,9 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
                 ->where('cal.is_active', 1);
         }
 
-        return $query->first();
+        $user = $query->first();
+
+        return $user ? AuthLoginUserDTO::fromRow($user) : null;
     }
 
     public function revokeActiveRefreshTokensForDevice(int $userId, string $deviceHashPrefix): void
@@ -81,9 +110,9 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
             ]);
     }
 
-    public function findValidRefreshSession(string $refreshTokenHash): ?object
+    public function findValidRefreshSession(string $refreshTokenHash): ?AuthRefreshSessionDTO
     {
-        return DB::table('auth.refresh_tokens as rt')
+        $session = DB::table('auth.refresh_tokens as rt')
             ->join('auth.users as u', 'u.id', '=', 'rt.user_id')
             ->join('core.companies as c', 'c.id', '=', 'u.company_id')
             ->select([
@@ -106,6 +135,53 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
             ->where('rt.expires_at', '>', now())
             ->where('u.status', 1)
             ->first();
+
+        return $session ? AuthRefreshSessionDTO::fromRow($session) : null;
+    }
+
+    public function findRefreshSessionById(int $sessionId): ?AuthRefreshSessionRecordDTO
+    {
+        $session = DB::table('auth.refresh_tokens as rt')
+            ->select([
+                'rt.id',
+                'rt.user_id',
+                'rt.expires_at',
+                'rt.revoked_at',
+            ])
+            ->where('rt.id', $sessionId)
+            ->first();
+
+            return $session ? AuthRefreshSessionRecordDTO::fromRow($session) : null;
+    }
+
+            public function findAuthenticatedSessionByClaims(int $sessionId, int $userId): ?AuthAuthenticatedSessionDTO
+    {
+                $hasDeviceId = $this->columnExists('auth', 'refresh_tokens', 'device_id');
+                $hasDeviceName = $this->columnExists('auth', 'refresh_tokens', 'device_name');
+
+        $query = DB::table('auth.refresh_tokens as rt')
+            ->where('rt.id', $sessionId)
+            ->where('rt.user_id', $userId)
+            ->whereNull('rt.revoked_at')
+            ->where('rt.expires_at', '>', now())
+            ->select([
+                'rt.id',
+                'rt.user_id',
+                'rt.expires_at',
+                'rt.revoked_at',
+            ]);
+
+        if ($hasDeviceId) {
+            $query->addSelect('rt.device_id');
+        }
+
+        if ($hasDeviceName) {
+            $query->addSelect('rt.device_name');
+        }
+
+        $session = $query->first();
+
+        return $session ? AuthAuthenticatedSessionDTO::fromRow($session) : null;
     }
 
     public function revokeRefreshSession(int $sessionId): void
@@ -118,6 +194,30 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
             ]);
     }
 
+    public function findAuthenticatedUserById(int $userId): ?AuthAuthenticatedUserDTO
+    {
+        $user = DB::table('auth.users as u')
+            ->join('core.companies as c', 'c.id', '=', 'u.company_id')
+            ->select(
+                'u.id',
+                'u.company_id',
+                'u.branch_id',
+                'u.preferred_warehouse_id',
+                'u.preferred_cash_register_id',
+                'u.username',
+                'u.first_name',
+                'u.last_name',
+                'u.email',
+                'u.status'
+            )
+            ->where('u.id', $userId)
+            ->where('u.status', 1)
+            ->where('c.status', 1)
+            ->first();
+
+            return $user ? AuthAuthenticatedUserDTO::fromRow($user) : null;
+    }
+
     public function rotateRefreshSession(
         int $sessionId,
         int $userId,
@@ -126,7 +226,10 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
         string $deviceId,
         ?string $deviceName
     ): int {
-        return (int) DB::transaction(function () use ($sessionId, $userId, $newRefreshHash, $refreshExpiresAt, $deviceId, $deviceName) {
+        $hasDeviceId = $this->columnExists('auth', 'refresh_tokens', 'device_id');
+        $hasDeviceName = $this->columnExists('auth', 'refresh_tokens', 'device_name');
+
+        return (int) DB::transaction(function () use ($sessionId, $userId, $newRefreshHash, $refreshExpiresAt, $deviceId, $deviceName, $hasDeviceId, $hasDeviceName) {
             $this->revokeRefreshSession($sessionId);
 
             $payload = [
@@ -136,11 +239,11 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
                 'created_at' => now(),
             ];
 
-            if ($this->columnExists('auth', 'refresh_tokens', 'device_id')) {
+            if ($hasDeviceId) {
                 $payload['device_id'] = $deviceId;
             }
 
-            if ($this->columnExists('auth', 'refresh_tokens', 'device_name')) {
+            if ($hasDeviceName) {
                 $payload['device_name'] = $deviceName;
             }
 
@@ -196,20 +299,42 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
         );
     }
 
-    public function resolvePrimaryRoleContext(int $userId, int $companyId): ?object
+    public function resolvePrimaryRoleContext(int $userId, int $companyId): ?AuthRoleContextDTO
     {
-        return DB::table('auth.user_roles as ur')
+        $hasCompanyRoleProfiles = $this->tableExists('appcfg', 'company_role_profiles');
+
+        $query = DB::table('auth.user_roles as ur')
             ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
-            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId): void {
-                $join->on('crp.role_id', '=', 'r.id')
-                    ->where('crp.company_id', '=', $companyId);
-            })
             ->where('ur.user_id', $userId)
             ->where('r.company_id', $companyId)
             ->where('r.status', 1)
             ->orderBy('r.id')
-            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
-            ->first();
+            ->select('r.code as role_code');
+
+        if ($hasCompanyRoleProfiles) {
+            $query->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId): void {
+                $join->on('crp.role_id', '=', 'r.id')
+                    ->where('crp.company_id', '=', $companyId);
+            });
+            $query->addSelect('crp.functional_profile as role_profile');
+        } else {
+            $query->selectRaw('NULL::varchar as role_profile');
+        }
+
+        $roleContext = $query->first();
+
+            return $roleContext ? AuthRoleContextDTO::fromRow($roleContext) : null;
+    }
+
+    public function listActiveRefreshSessionIdsForDevice(int $userId, string $deviceHashPrefix): array
+    {
+        return DB::table('auth.refresh_tokens')
+            ->where('user_id', $userId)
+            ->whereNull('revoked_at')
+            ->where('token_hash', 'like', $deviceHashPrefix)
+            ->pluck('id')
+            ->map(static fn ($value) => (int) $value)
+            ->all();
     }
 
     public function ensureAdminPortalUsersTable(): void
@@ -226,6 +351,10 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
 
     public function isAdminPortalUser(int $userId): bool
     {
+        if (!$this->tableExists('appcfg', 'admin_portal_users')) {
+            return false;
+        }
+
         return DB::table('appcfg.admin_portal_users')
             ->where('user_id', $userId)
             ->where('status', 1)

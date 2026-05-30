@@ -22,9 +22,6 @@ class TaxBridgeAuditController extends Controller
     public function getDocumentHistory(Request $request, int $documentId)
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
 
         $document = $this->auditService->findCommercialDocumentScope($documentId);
 
@@ -33,7 +30,7 @@ class TaxBridgeAuditController extends Controller
         }
 
         $companyId = (int) $document->company_id;
-        if ($companyId !== (int) $authUser->company_id) {
+        if (!$this->auditService->canAccessCompanyScope((int) $authUser->company_id, $companyId)) {
             return response()->json(['message' => 'Unauthorized company scope'], 403);
         }
 
@@ -45,7 +42,7 @@ class TaxBridgeAuditController extends Controller
             return $traceabilityGate;
         }
 
-        $limit = min((int)$request->query('limit', 50), 500);
+        $limit = $this->auditService->sanitizeLimit($request->query('limit'), 50, 500);
 
         $history = $this->auditService->getDocumentHistory($documentId, $limit);
 
@@ -62,18 +59,8 @@ class TaxBridgeAuditController extends Controller
      */
     public function getBranchHistory(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
-
-        $companyId = (int)($request->query('company_id') ?? $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id') ? (int)$request->query('branch_id') : null;
-
-        // Validar que el usuario tiene acceso a esta company
-        if ($companyId !== (int)$authUser->company_id) {
-            return response()->json(['message' => 'Unauthorized company scope'], 403);
-        }
 
         $traceabilityGate = $this->ensureTraceabilityFeatureEnabled($companyId, $branchId);
         if ($traceabilityGate !== null) {
@@ -90,7 +77,7 @@ class TaxBridgeAuditController extends Controller
             'only_errors' => $request->query('only_errors') === 'true',
         ];
 
-        $limit = min((int)$request->query('limit', 100), 1000);
+        $limit = $this->auditService->sanitizeLimit($request->query('limit'), 100, 1000);
 
         $history = $this->auditService->getBranchHistory($companyId, $branchId, $filters, $limit);
 
@@ -109,19 +96,10 @@ class TaxBridgeAuditController extends Controller
      */
     public function getStatistics(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
-
-        $companyId = (int)($request->query('company_id') ?? $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id') ? (int)$request->query('branch_id') : null;
         $startDate = $request->query('start_date');
         $endDate = $request->query('end_date');
-
-        if ($companyId !== (int)$authUser->company_id) {
-            return response()->json(['message' => 'Unauthorized company scope'], 403);
-        }
 
         $traceabilityGate = $this->ensureTraceabilityFeatureEnabled($companyId, $branchId);
         if ($traceabilityGate !== null) {
@@ -147,18 +125,9 @@ class TaxBridgeAuditController extends Controller
      */
     public function getRecentFailures(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
-
-        $companyId = (int)($request->query('company_id') ?? $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id') ? (int)$request->query('branch_id') : null;
-        $limit = min((int)$request->query('limit', 20), 200);
-
-        if ($companyId !== (int)$authUser->company_id) {
-            return response()->json(['message' => 'Unauthorized company scope'], 403);
-        }
+        $limit = $this->auditService->sanitizeLimit($request->query('limit'), 20, 200);
 
         $traceabilityGate = $this->ensureTraceabilityFeatureEnabled($companyId, $branchId);
         if ($traceabilityGate !== null) {
@@ -182,9 +151,6 @@ class TaxBridgeAuditController extends Controller
     public function getLogDetails(Request $request, int $logId)
     {
         $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
 
         $scope = $this->auditService->findAuditLogScope($logId);
 
@@ -193,7 +159,7 @@ class TaxBridgeAuditController extends Controller
         }
 
         $companyId = (int) $scope->company_id;
-        if ($companyId !== (int) $authUser->company_id) {
+        if (!$this->auditService->canAccessCompanyScope((int) $authUser->company_id, $companyId)) {
             return response()->json(['message' => 'Unauthorized company scope'], 403);
         }
 
@@ -216,9 +182,7 @@ class TaxBridgeAuditController extends Controller
 
     private function ensureTraceabilityFeatureEnabled(int $companyId, ?int $branchId)
     {
-        $featureCode = 'SALES_TAX_BRIDGE_DEBUG_VIEW';
-
-        if (!$this->auditService->isFeatureEnabledForContext($companyId, $branchId, $featureCode)) {
+        if (!$this->auditService->isTraceabilityEnabledForAudit($companyId, $branchId)) {
             return response()->json([
                 'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
             ], 403);

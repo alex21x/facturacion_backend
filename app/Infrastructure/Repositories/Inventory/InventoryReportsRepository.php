@@ -2,31 +2,42 @@
 
 namespace App\Infrastructure\Repositories\Inventory;
 
+use App\Application\DTOs\Inventory\InventoryReportRequestDTO;
+use App\Application\DTOs\Inventory\InventorySettingsDTO;
+use App\Application\DTOs\Inventory\InventoryStockSummaryDTO;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class InventoryReportsRepository
 {
-    public function findInventorySettings(int $companyId): ?object
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
+    public function findInventorySettings(int $companyId): ?InventorySettingsDTO
     {
-        return DB::table('inventory.inventory_settings')
+        $settings = DB::table('inventory.inventory_settings')
             ->where('company_id', $companyId)
             ->first();
+
+        return $settings ? InventorySettingsDTO::fromRow($settings) : null;
     }
 
-    public function findStockSummary(int $companyId, ?int $warehouseId): ?object
+    public function findStockSummary(int $companyId, ?int $warehouseId): ?InventoryStockSummaryDTO
     {
         $query = DB::table('inventory.current_stock as cs')
             ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
-            ->where('cs.company_id', $companyId);
+            ->where('cs.company_id', $companyId)
+            ->whereNull('p.deleted_at');
 
         if ($warehouseId !== null) {
             $query->where('cs.warehouse_id', $warehouseId);
         }
 
-        return $query
+        $summary = $query
             ->selectRaw('COUNT(*) as rows, COALESCE(SUM(cs.stock), 0) as total_qty, COALESCE(SUM(cs.stock * p.cost_price), 0) as total_value')
             ->first();
+
+        return $summary ? InventoryStockSummaryDTO::fromRow($summary) : null;
     }
 
     public function listExpiryBuckets(int $companyId, ?int $warehouseId): Collection
@@ -66,7 +77,8 @@ class InventoryReportsRepository
         $query = DB::table('inventory.stock_daily_snapshot as ds')
             ->join('inventory.products as p', 'p.id', '=', 'ds.product_id')
             ->where('ds.company_id', $companyId)
-            ->where('ds.snapshot_date', '>=', $snapshotFrom);
+            ->where('ds.snapshot_date', '>=', $snapshotFrom)
+            ->whereNull('p.deleted_at');
 
         if ($warehouseId !== null) {
             $query->where('ds.warehouse_id', $warehouseId);
@@ -82,9 +94,11 @@ class InventoryReportsRepository
 
     public function listMovementTrendBasic(int $companyId, string $snapshotFrom, ?int $warehouseId): Collection
     {
+        $snapshotFromStart = $snapshotFrom . self::DAY_START_SUFFIX;
+
         $query = DB::table('inventory.inventory_ledger as il')
             ->where('il.company_id', $companyId)
-            ->whereDate('il.moved_at', '>=', $snapshotFrom);
+            ->where('il.moved_at', '>=', $snapshotFromStart);
 
         if ($warehouseId !== null) {
             $query->where('il.warehouse_id', $warehouseId);
@@ -99,10 +113,13 @@ class InventoryReportsRepository
 
     public function listTopProductsBasic(int $companyId, string $snapshotFrom, ?int $warehouseId): Collection
     {
+        $snapshotFromStart = $snapshotFrom . self::DAY_START_SUFFIX;
+
         $query = DB::table('inventory.inventory_ledger as il')
             ->join('inventory.products as p', 'p.id', '=', 'il.product_id')
             ->where('il.company_id', $companyId)
-            ->whereDate('il.moved_at', '>=', $snapshotFrom);
+            ->where('il.moved_at', '>=', $snapshotFromStart)
+            ->whereNull('p.deleted_at');
 
         if ($warehouseId !== null) {
             $query->where('il.warehouse_id', $warehouseId);
@@ -173,13 +190,19 @@ class InventoryReportsRepository
         ?int $productId,
         int $limit
     ): Collection {
+        $dateFromStart = $dateFrom . self::DAY_START_SUFFIX;
+        $dateToEnd = $dateTo . self::DAY_END_SUFFIX;
+
         $query = DB::table('inventory.inventory_ledger as il')
             ->leftJoin('inventory.products as p', 'p.id', '=', 'il.product_id')
             ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'il.warehouse_id')
             ->leftJoin('inventory.product_lots as pl', 'pl.id', '=', 'il.lot_id')
             ->selectRaw('DATE(il.moved_at) as snapshot_date, il.warehouse_id, w.code as warehouse_code, w.name as warehouse_name, il.product_id, p.sku as product_sku, p.name as product_name, il.lot_id, pl.lot_code as lot_code, COALESCE(SUM(CASE WHEN il.movement_type = \'IN\' THEN il.quantity ELSE 0 END), 0) as qty_in, COALESCE(SUM(CASE WHEN il.movement_type = \'OUT\' THEN il.quantity ELSE 0 END), 0) as qty_out, COALESCE(SUM(CASE WHEN il.movement_type = \'IN\' THEN il.quantity ELSE -il.quantity END), 0) as qty_net, COALESCE(SUM(CASE WHEN il.movement_type = \'IN\' THEN il.quantity * il.unit_cost ELSE 0 END), 0) as value_in, COALESCE(SUM(CASE WHEN il.movement_type = \'OUT\' THEN il.quantity * il.unit_cost ELSE 0 END), 0) as value_out, COALESCE(SUM(CASE WHEN il.movement_type = \'IN\' THEN il.quantity * il.unit_cost ELSE -il.quantity * il.unit_cost END), 0) as value_net, COUNT(*) as movement_count, MIN(il.moved_at) as first_moved_at, MAX(il.moved_at) as last_moved_at')
             ->where('il.company_id', $companyId)
-            ->whereBetween(DB::raw('DATE(il.moved_at)'), [$dateFrom, $dateTo])
+            ->whereBetween('il.moved_at', [$dateFromStart, $dateToEnd])
+            ->where(function ($q) {
+                $q->whereNull('p.id')->orWhereNull('p.deleted_at');
+            })
             ->groupByRaw('DATE(il.moved_at), il.warehouse_id, w.code, w.name, il.product_id, p.sku, p.name, il.lot_id, pl.lot_code')
             ->orderByDesc(DB::raw('DATE(il.moved_at)'))
             ->orderBy('p.name')
@@ -279,9 +302,9 @@ class InventoryReportsRepository
         return (int) DB::table('inventory.report_requests')->insertGetId($payload);
     }
 
-    public function findReportRequestById(int $id): ?object
+    public function findReportRequestById(int $id): ?InventoryReportRequestDTO
     {
-        return DB::table('inventory.report_requests')
+        $request = DB::table('inventory.report_requests')
             ->select([
                 'id',
                 'company_id',
@@ -296,11 +319,13 @@ class InventoryReportsRepository
             ])
             ->where('id', $id)
             ->first();
+
+        return $request ? InventoryReportRequestDTO::fromRow($request) : null;
     }
 
-    public function findReportRequestByCompany(int $id, int $companyId): ?object
+    public function findReportRequestByCompany(int $id, int $companyId): ?InventoryReportRequestDTO
     {
-        return DB::table('inventory.report_requests')
+        $request = DB::table('inventory.report_requests')
             ->select([
                 'id',
                 'company_id',
@@ -318,5 +343,7 @@ class InventoryReportsRepository
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->first();
+
+        return $request ? InventoryReportRequestDTO::fromRow($request) : null;
     }
 }

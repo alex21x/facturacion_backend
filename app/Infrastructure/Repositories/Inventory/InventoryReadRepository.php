@@ -8,11 +8,24 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryReadRepository implements InventoryReadRepositoryInterface
 {
-    public function getCurrentStock(int $companyId, $warehouseId, $productId): array
-    {
-        $cacheKey = sprintf('inventory_current_stock:%d:%s:%s', $companyId, $warehouseId ?? 'all', $productId ?? 'all');
+    private static bool $stockEntriesRuntimeEnsured = false;
 
-        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $productId) {
+    public function getCurrentStock(int $companyId, $warehouseId, $productId, array $productIds = []): array
+    {
+        $normalizedProductIds = array_values(array_unique(array_filter(array_map('intval', $productIds), function ($id) {
+            return $id > 0;
+        })));
+        sort($normalizedProductIds);
+
+        $cacheKey = sprintf(
+            'inventory_current_stock:%d:%s:%s:%s',
+            $companyId,
+            $warehouseId ?? 'all',
+            $productId ?? 'all',
+            empty($normalizedProductIds) ? 'all' : md5(implode(',', $normalizedProductIds))
+        );
+
+        return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $productId, $normalizedProductIds) {
             $query = DB::table('inventory.current_stock as cs')
                 ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
                 ->join('inventory.warehouses as w', 'w.id', '=', 'cs.warehouse_id')
@@ -35,6 +48,10 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
 
             if ($productId !== null && $productId !== '') {
                 $query->where('cs.product_id', (int) $productId);
+            }
+
+            if (!empty($normalizedProductIds)) {
+                $query->whereIn('cs.product_id', $normalizedProductIds);
             }
 
             return $query->get()->all();
@@ -92,7 +109,9 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
 
     public function getStockEntries(int $companyId, $warehouseId, $entryType, int $limit): array
     {
-        $this->ensureStockEntriesTables();
+        if ($this->shouldEnsureStockEntriesSchemaAtRuntime()) {
+            $this->ensureStockEntriesTables();
+        }
         $cacheKey = sprintf('inventory_stock_entries:%d:%s:%s:%d', $companyId, $warehouseId ?? 'all', $entryType ?? 'all', $limit);
 
         return Cache::remember($cacheKey, now()->addSeconds(10), function () use ($companyId, $warehouseId, $entryType, $limit) {
@@ -228,6 +247,21 @@ class InventoryReadRepository implements InventoryReadRepositoryInterface
             ],
         ];
         });
+    }
+
+    private function shouldEnsureStockEntriesSchemaAtRuntime(): bool
+    {
+        if (self::$stockEntriesRuntimeEnsured) {
+            return false;
+        }
+
+        $enabled = filter_var(env('INVENTORY_RUNTIME_SCHEMA_ENSURE', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled) {
+            return false;
+        }
+
+        self::$stockEntriesRuntimeEnsured = true;
+        return true;
     }
 
     private function ensureStockEntriesTables(): void

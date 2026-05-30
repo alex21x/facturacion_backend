@@ -15,14 +15,7 @@ class OpsLatencyController extends Controller
 
     public function summary(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) ($authUser->company_id ?? 0);
-
-        if ($companyId <= 0) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $windowMinutes = max(5, min(1440, (int) $request->query('window_minutes', 60)));
         $limit = max(1, min(100, (int) $request->query('limit', 30)));

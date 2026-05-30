@@ -10,5 +10,5 @@ interface InventoryReadRepositoryInterface
 
     public function getKardex(int $companyId, $productId, $warehouseId, $dateFrom, $dateTo, int $perPage, int $page): array;
 
-    public function getCurrentStock(int $companyId, $warehouseId, $productId): array;
+    public function getCurrentStock(int $companyId, $warehouseId, $productId, array $productIds = []): array;
 }

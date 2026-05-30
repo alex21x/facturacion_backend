@@ -10,8 +10,8 @@ class GetCurrentStockUseCase
     {
     }
 
-    public function execute(int $companyId, $warehouseId, $productId): array
+    public function execute(int $companyId, $warehouseId, $productId, array $productIds = []): array
     {
-        return $this->repository->getCurrentStock($companyId, $warehouseId, $productId);
+        return $this->repository->getCurrentStock($companyId, $warehouseId, $productId, $productIds);
     }
 }

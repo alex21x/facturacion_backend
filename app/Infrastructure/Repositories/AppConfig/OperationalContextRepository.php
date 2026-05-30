@@ -2,18 +2,19 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyProfileDTO;
 use Illuminate\Support\Facades\DB;
 
 class OperationalContextRepository
 {
-    public function findCompany(int $companyId): ?object
+    public function findCompany(int $companyId): ?CompanyProfileDTO
     {
         $row = DB::table('core.companies')
             ->select('id', 'tax_id', 'legal_name', 'trade_name', 'status')
             ->where('id', $companyId)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? CompanyProfileDTO::fromRow($row) : null;
     }
 
     public function branchExists(int $companyId, int $branchId): bool

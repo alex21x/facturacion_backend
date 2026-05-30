@@ -2,6 +2,10 @@
 
 namespace App\Infrastructure\Repositories\Cash;
 
+use App\Application\DTOs\Cash\CashMovementDTO;
+use App\Application\DTOs\Cash\CashSessionDetailDTO;
+use App\Application\DTOs\Cash\CashSessionRecordDTO;
+use App\Application\DTOs\Cash\CashSessionScopeDTO;
 use App\Domain\Cash\Repositories\CashMovementRepositoryInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -86,9 +90,9 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         return $query->get();
     }
 
-    public function findMovementById(int $movementId): ?object
+    public function findMovementById(int $movementId): ?CashMovementDTO
     {
-        return DB::table('sales.cash_movements as cm')
+        $movement = DB::table('sales.cash_movements as cm')
             ->leftJoin('auth.users as u', 'u.id', '=', 'sales.cash_movements.user_id')
             ->select([
                 'sales.cash_movements.*',
@@ -97,6 +101,8 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ])
             ->where('sales.cash_movements.id', $movementId)
             ->first();
+
+            return $movement ? CashMovementDTO::fromRow($movement) : null;
     }
 
     public function createMovement(array $payload): int
@@ -104,12 +110,14 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         return (int) DB::table('sales.cash_movements')->insertGetId($payload);
     }
 
-    public function findSessionScopeForCommercialDocuments(int $companyId, int $sessionId): ?object
+    public function findSessionScopeForCommercialDocuments(int $companyId, int $sessionId): ?CashSessionScopeDTO
     {
-        return DB::table('sales.cash_sessions')
+        $session = DB::table('sales.cash_sessions')
             ->where('id', $sessionId)
             ->where('company_id', $companyId)
             ->first(['id', 'company_id', 'branch_id', 'cash_register_id', 'opened_at', 'closed_at']);
+
+        return $session ? CashSessionScopeDTO::fromRow($session) : null;
     }
 
     public function listSessionCommercialDocuments(int $companyId, int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): Collection
@@ -222,9 +230,9 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ->get();
     }
 
-    public function findSessionDetail(int $companyId, int $sessionId): ?object
+    public function findSessionDetail(int $companyId, int $sessionId): ?CashSessionDetailDTO
     {
-        return DB::table('sales.cash_sessions as cs')
+        $session = DB::table('sales.cash_sessions as cs')
             ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cs.user_id, cs.opened_by)'))
             ->leftJoin('sales.cash_registers as cr', 'cr.id', '=', 'cs.cash_register_id')
             ->select([
@@ -246,6 +254,8 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ->where('cs.id', $sessionId)
             ->where('cs.company_id', $companyId)
             ->first();
+
+            return $session ? CashSessionDetailDTO::fromRow($session) : null;
     }
 
     public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
@@ -316,9 +326,30 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         ]);
     }
 
-    public function findSessionById(int $sessionId): ?object
+    public function findSessionById(int $sessionId): ?CashSessionRecordDTO
     {
-        return DB::table('sales.cash_sessions')->where('id', $sessionId)->first();
+        $session = DB::table('sales.cash_sessions')->where('id', $sessionId)->first();
+
+        return $session ? CashSessionRecordDTO::fromRow($session) : null;
+    }
+
+    private function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses): float
+    {
+        return (float) DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', $documentRefTypes);
+            })
+            ->where('cm.cash_session_id', $sessionId)
+            ->where(function ($query) use ($documentRefTypes, $excludedDocumentStatuses): void {
+                $query->whereNotIn('cm.ref_type', $documentRefTypes)
+                    ->orWhere(function ($nested) use ($excludedDocumentStatuses): void {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', $excludedDocumentStatuses);
+                    });
+            })
+            ->whereIn('cm.movement_type', $movementTypes)
+            ->sum('cm.amount');
     }
 
     public function recalcExpectedBalance(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): void

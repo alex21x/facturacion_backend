@@ -2,6 +2,7 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
 use Illuminate\Support\Facades\DB;
 
 class VerticalFeaturePreferenceRepository
@@ -14,7 +15,7 @@ class VerticalFeaturePreferenceRepository
             ->exists();
     }
 
-    public function findCompanyVerticalOverride(int $companyId, int $verticalId, string $normalizedFeatureCode): ?object
+    public function findCompanyVerticalOverride(int $companyId, int $verticalId, string $normalizedFeatureCode): ?CompanyFeatureToggleDTO
     {
         $row = DB::table('appcfg.company_vertical_feature_overrides')
             ->where('company_id', $companyId)
@@ -22,16 +23,16 @@ class VerticalFeaturePreferenceRepository
             ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
             ->first(['is_enabled', 'config']);
 
-        return $row ? (object) $row : null;
+        return $row ? CompanyFeatureToggleDTO::fromRow($row) : null;
     }
 
-    public function findVerticalTemplate(int $verticalId, string $normalizedFeatureCode): ?object
+    public function findVerticalTemplate(int $verticalId, string $normalizedFeatureCode): ?CompanyFeatureToggleDTO
     {
         $row = DB::table('appcfg.vertical_feature_templates')
             ->where('vertical_id', $verticalId)
             ->whereRaw('UPPER(feature_code) = ?', [$normalizedFeatureCode])
             ->first(['is_enabled', 'config']);
 
-        return $row ? (object) $row : null;
+        return $row ? CompanyFeatureToggleDTO::fromRow($row) : null;
     }
 }

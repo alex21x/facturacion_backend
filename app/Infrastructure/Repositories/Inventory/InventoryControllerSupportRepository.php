@@ -2,25 +2,14 @@
 
 namespace App\Infrastructure\Repositories\Inventory;
 
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
+use App\Application\DTOs\Inventory\InventoryProductReferenceDTO;
+use App\Application\DTOs\Inventory\InventoryWarehouseReferenceDTO;
 use App\Domain\Inventory\Repositories\InventoryControllerSupportRepositoryInterface;
 use Illuminate\Support\Facades\DB;
 
 class InventoryControllerSupportRepository implements InventoryControllerSupportRepositoryInterface
 {
-    public function ensureCompanyUnitsTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_units (
-                company_id BIGINT NOT NULL,
-                unit_id BIGINT NOT NULL,
-                is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, unit_id)
-            )'
-        );
-    }
-
     public function listCompanyUnits(int $companyId): array
     {
         return DB::table('core.units as u')
@@ -77,106 +66,39 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
         );
     }
 
-    public function ensureProductCatalogSchema(): void
+    public function upsertCompanyUnitsBatch(int $companyId, array $items, int $updatedBy): void
     {
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_lines (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_brands (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_locations (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.product_warranties (id BIGSERIAL PRIMARY KEY, company_id BIGINT NOT NULL, name VARCHAR(120) NOT NULL, status SMALLINT NOT NULL DEFAULT 1, created_by BIGINT NULL, created_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NULL, UNIQUE(company_id, name))');
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS line_id BIGINT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS brand_id BIGINT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS location_id BIGINT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS warranty_id BIGINT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS product_nature VARCHAR(20) NOT NULL DEFAULT 'PRODUCT'");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS sunat_code VARCHAR(40) NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS image_url TEXT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS seller_commission_percent NUMERIC(8,4) NOT NULL DEFAULT 0");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS created_by BIGINT NULL");
-        DB::statement("ALTER TABLE inventory.products ADD COLUMN IF NOT EXISTS updated_by BIGINT NULL");
-        DB::statement("
-            CREATE TABLE IF NOT EXISTS inventory.product_import_batches (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL,
-                imported_by BIGINT NOT NULL,
-                filename VARCHAR(300) NULL,
-                total_rows INT NOT NULL DEFAULT 0,
-                created_count INT NOT NULL DEFAULT 0,
-                updated_count INT NOT NULL DEFAULT 0,
-                skipped_count INT NOT NULL DEFAULT 0,
-                error_count INT NOT NULL DEFAULT 0,
-                errors_json JSONB NULL,
-                status VARCHAR(40) NOT NULL DEFAULT 'PROCESSING',
-                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                finished_at TIMESTAMPTZ NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        ");
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_product_import_batches_company ON inventory.product_import_batches (company_id, created_at DESC)');
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_product_import_batches_user ON inventory.product_import_batches (imported_by)');
-        DB::statement("ALTER TABLE inventory.product_import_batches ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
-        DB::statement("ALTER TABLE inventory.product_import_batches ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ NULL");
-        DB::statement("ALTER TABLE inventory.product_import_batches ADD COLUMN IF NOT EXISTS errors_json JSONB NULL");
-        DB::statement("ALTER TABLE inventory.product_import_batches ALTER COLUMN status TYPE VARCHAR(40)");
-        DB::statement("CREATE TABLE IF NOT EXISTS inventory.product_import_batch_items (
-            id BIGSERIAL PRIMARY KEY,
-            batch_id BIGINT NOT NULL REFERENCES inventory.product_import_batches(id) ON DELETE CASCADE,
-            row_number INT NOT NULL,
-            action_status VARCHAR(20) NOT NULL,
-            product_id BIGINT NULL,
-            sku VARCHAR(60) NULL,
-            barcode VARCHAR(80) NULL,
-            name VARCHAR(250) NULL,
-            message VARCHAR(500) NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )");
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_product_import_batch_items_batch ON inventory.product_import_batch_items (batch_id, id)');
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.stock_update_batches (
-            id BIGSERIAL PRIMARY KEY,
-            company_id BIGINT NOT NULL,
-            updated_by BIGINT NOT NULL,
-            filename VARCHAR(300) NULL,
-            mode VARCHAR(20) NOT NULL DEFAULT \'REPLACE\',
-            total_rows INT NOT NULL DEFAULT 0,
-            updated_count INT NOT NULL DEFAULT 0,
-            omitted_count INT NOT NULL DEFAULT 0,
-            error_count INT NOT NULL DEFAULT 0,
-            status VARCHAR(40) NOT NULL DEFAULT \'PROCESSING\',
-            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            finished_at TIMESTAMPTZ NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )');
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_stock_update_batches_company ON inventory.stock_update_batches (company_id, created_at DESC)');
-        DB::statement('CREATE TABLE IF NOT EXISTS inventory.stock_update_batch_items (
-            id BIGSERIAL PRIMARY KEY,
-            batch_id BIGINT NOT NULL REFERENCES inventory.stock_update_batches(id) ON DELETE CASCADE,
-            row_number INT NOT NULL,
-            action_status VARCHAR(20) NOT NULL,
-            product_id BIGINT NULL,
-            sku VARCHAR(60) NULL,
-            barcode VARCHAR(80) NULL,
-            name VARCHAR(250) NULL,
-            warehouse_id BIGINT NULL,
-            warehouse_code VARCHAR(50) NULL,
-            mode VARCHAR(20) NULL,
-            requested_qty NUMERIC(18,8) NULL,
-            current_stock NUMERIC(18,8) NULL,
-            applied_delta NUMERIC(18,8) NULL,
-            new_stock NUMERIC(18,8) NULL,
-            message VARCHAR(500) NULL,
-            metadata JSONB NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )');
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_stock_update_batch_items_batch ON inventory.stock_update_batch_items (batch_id, id)');
+        if ($items === []) {
+            return;
+        }
+
+        $timestamp = now();
+        $rows = [];
+        foreach ($items as $item) {
+            $rows[] = [
+                'company_id' => $companyId,
+                'unit_id' => (int) ($item['id'] ?? 0),
+                'is_enabled' => (bool) ($item['is_enabled'] ?? false),
+                'updated_by' => $updatedBy,
+                'updated_at' => $timestamp,
+            ];
+        }
+
+        DB::table('appcfg.company_units')->upsert(
+            $rows,
+            ['company_id', 'unit_id'],
+            ['is_enabled', 'updated_by', 'updated_at']
+        );
     }
 
-    public function findCompanyFeatureToggle(int $companyId, string $featureCode): ?object
+    public function findCompanyFeatureToggle(int $companyId, string $featureCode): ?CompanyFeatureToggleDTO
     {
         $row = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->where('feature_code', $featureCode)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? CompanyFeatureToggleDTO::fromRow($row) : null;
     }
 
     public function productMasterExists(string $table, int $id, int $companyId): bool
@@ -225,7 +147,12 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
     {
         return DB::table('core.units')
             ->where('status', 1)
-            ->select('id', 'code', 'sunat_uom_code', 'name')
+            ->select([
+                'id',
+                DB::raw("UPPER(TRIM(COALESCE(code, ''))) as normalized_code"),
+                DB::raw("UPPER(TRIM(COALESCE(sunat_uom_code, ''))) as normalized_sunat_uom_code"),
+                DB::raw("UPPER(TRIM(COALESCE(name, ''))) as normalized_name"),
+            ])
             ->get()
             ->all();
     }
@@ -245,7 +172,7 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
         return $row ? (int) $row->id : null;
     }
 
-    public function findDefaultWarehouseForImport(int $companyId): ?object
+    public function findDefaultWarehouseForImport(int $companyId): ?InventoryWarehouseReferenceDTO
     {
         $row = DB::table('inventory.warehouses as w')
             ->leftJoin('core.branches as b', function ($join) {
@@ -264,7 +191,7 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
             ->select(['w.id', 'w.code'])
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? InventoryWarehouseReferenceDTO::fromRow($row) : null;
     }
 
     public function findCurrentStock(int $companyId, int $warehouseId, int $productId): float
@@ -278,7 +205,7 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
         return $row ? (float) ($row->stock ?? 0) : 0.0;
     }
 
-    public function findActiveProductBySku(int $companyId, string $sku, ?int $excludeProductId = null): ?object
+    public function findActiveProductBySku(int $companyId, string $sku, ?int $excludeProductId = null): ?InventoryProductReferenceDTO
     {
         $query = DB::table('inventory.products')
             ->where('company_id', $companyId)
@@ -291,10 +218,10 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
 
         $row = $query->select('id')->first();
 
-        return $row ? (object) $row : null;
+        return $row ? InventoryProductReferenceDTO::fromRow($row) : null;
     }
 
-    public function findActiveProductByBarcode(int $companyId, string $barcode, ?int $excludeProductId = null): ?object
+    public function findActiveProductByBarcode(int $companyId, string $barcode, ?int $excludeProductId = null): ?InventoryProductReferenceDTO
     {
         $query = DB::table('inventory.products')
             ->where('company_id', $companyId)
@@ -307,7 +234,7 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
 
         $row = $query->select('id')->first();
 
-        return $row ? (object) $row : null;
+        return $row ? InventoryProductReferenceDTO::fromRow($row) : null;
     }
 
     public function findActiveProductByNameNatureUnit(
@@ -316,7 +243,7 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
         string $nature,
         ?int $unitId,
         ?int $excludeProductId = null
-    ): ?object {
+    ): ?InventoryProductReferenceDTO {
         $query = DB::table('inventory.products')
             ->where('company_id', $companyId)
             ->whereNull('deleted_at')
@@ -335,6 +262,6 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
 
         $row = $query->select('id')->first();
 
-        return $row ? (object) $row : null;
+        return $row ? InventoryProductReferenceDTO::fromRow($row) : null;
     }
 }

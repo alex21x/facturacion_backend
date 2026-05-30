@@ -2,6 +2,7 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyAccessLinkDTO;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -24,6 +25,14 @@ class CompanyAccessLinkRepository
             ->keyBy('company_id');
     }
 
+    public function getByCompanyIds(array $companyIds): Collection
+    {
+        return DB::table('appcfg.company_access_links')
+            ->whereIn('company_id', $companyIds)
+            ->get(['company_id', 'access_slug'])
+            ->keyBy('company_id');
+    }
+
     public function existsByCompanyId(int $companyId): bool
     {
         return DB::table('appcfg.company_access_links')
@@ -31,13 +40,13 @@ class CompanyAccessLinkRepository
             ->exists();
     }
 
-    public function findByCompanyId(int $companyId): ?object
+    public function findByCompanyId(int $companyId): ?CompanyAccessLinkDTO
     {
         $row = DB::table('appcfg.company_access_links')
             ->where('company_id', $companyId)
             ->first(['access_slug']);
 
-        return $row ? (object) $row : null;
+        return $row ? CompanyAccessLinkDTO::fromRow($row) : null;
     }
 
     public function slugExistsForOtherCompany(string $slug, int $companyId): bool

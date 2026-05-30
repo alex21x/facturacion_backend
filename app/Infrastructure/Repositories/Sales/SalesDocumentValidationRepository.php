@@ -57,23 +57,27 @@ class SalesDocumentValidationRepository
             ->exists();
     }
 
-    public function findActiveVehicle(int $companyId, int $customerId, int $vehicleId): ?object
+    public function findActiveVehicle(int $companyId, int $customerId, int $vehicleId): ?\App\Application\DTOs\Sales\SalesVehicleSnapshotDTO
     {
-        return DB::table('sales.customer_vehicles')
+        $vehicle = DB::table('sales.customer_vehicles')
             ->select('id', 'plate', 'brand', 'model')
             ->where('id', $vehicleId)
             ->where('company_id', $companyId)
             ->where('customer_id', $customerId)
             ->where('status', 1)
             ->first();
+
+        return $vehicle ? \App\Application\DTOs\Sales\SalesVehicleSnapshotDTO::fromRow($vehicle) : null;
     }
 
-    public function findSourceDocument(int $companyId, int $sourceDocumentId): ?object
+    public function findSourceDocument(int $companyId, int $sourceDocumentId): ?\App\Application\DTOs\Sales\SalesSourceDocumentDTO
     {
-        return DB::table('sales.commercial_documents')
+        $document = DB::table('sales.commercial_documents')
             ->select('id', 'customer_id', 'document_kind', 'series', 'number', 'status')
             ->where('id', $sourceDocumentId)
             ->where('company_id', $companyId)
             ->first();
+
+        return $document ? \App\Application\DTOs\Sales\SalesSourceDocumentDTO::fromRow($document) : null;
     }
 }

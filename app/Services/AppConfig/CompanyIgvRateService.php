@@ -2,11 +2,16 @@
 
 namespace App\Services\AppConfig;
 
-use Illuminate\Support\Facades\DB;
+use App\Application\DTOs\AppConfig\CompanyIgvRateDTO;
+use App\Infrastructure\Repositories\AppConfig\CompanyIgvRateRepository;
 
 class CompanyIgvRateService
 {
     private const DEFAULT_RATE_PERCENT = 18.0;
+
+    public function __construct(private CompanyIgvRateRepository $companyIgvRateRepository)
+    {
+    }
 
     public function resolveActiveRatePercent(int $companyId): float
     {
@@ -54,29 +59,13 @@ class CompanyIgvRateService
             ];
         }
 
-        return DB::transaction(function () use ($companyId, $normalizedRate, $name) {
-            DB::table('core.company_igv_rates')
-                ->where('company_id', $companyId)
-                ->where('is_active', true)
-                ->update([
-                    'is_active' => false,
-                    'updated_at' => now(),
-                ]);
+        return $this->companyIgvRateRepository->runInTransaction(function () use ($companyId, $normalizedRate, $name) {
+            $this->companyIgvRateRepository->deactivateActiveRates($companyId);
 
-            $existing = DB::table('core.company_igv_rates')
-                ->where('company_id', $companyId)
-                ->where('rate_percent', $normalizedRate)
-                ->orderByDesc('id')
-                ->first();
+            $existing = $this->companyIgvRateRepository->findLatestByRate($companyId, $normalizedRate);
 
             if ($existing) {
-                DB::table('core.company_igv_rates')
-                    ->where('id', $existing->id)
-                    ->update([
-                        'name' => $name,
-                        'is_active' => true,
-                        'updated_at' => now(),
-                    ]);
+                $this->companyIgvRateRepository->reactivateRate((int) $existing->id, $name);
 
                 return [
                     'id' => (int) $existing->id,
@@ -86,15 +75,7 @@ class CompanyIgvRateService
                 ];
             }
 
-            $id = DB::table('core.company_igv_rates')->insertGetId([
-                'company_id' => $companyId,
-                'name' => $name,
-                'rate_percent' => $normalizedRate,
-                'is_active' => true,
-                'effective_from' => now()->toDateString(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $id = $this->companyIgvRateRepository->createRate($companyId, $name, $normalizedRate);
 
             return [
                 'id' => (int) $id,
@@ -124,25 +105,17 @@ class CompanyIgvRateService
         return $normalizedCategories;
     }
 
-    private function resolveActiveRateRow(int $companyId): ?object
+    private function resolveActiveRateRow(int $companyId): ?CompanyIgvRateDTO
     {
-        if (!$this->tableExists()) {
+        if (!$this->companyIgvRateRepository->tableExists()) {
             return null;
         }
 
-        return DB::table('core.company_igv_rates')
-            ->where('company_id', $companyId)
-            ->where('is_active', true)
-            ->orderByDesc('effective_from')
-            ->orderByDesc('id')
-            ->first();
+        return $this->companyIgvRateRepository->findActiveRateRow($companyId);
     }
 
     private function tableExists(): bool
     {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', 'core')
-            ->where('table_name', 'company_igv_rates')
-            ->exists();
+        return $this->companyIgvRateRepository->tableExists();
     }
 }

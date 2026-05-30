@@ -211,14 +211,14 @@ class AdminCompanyProvisioningRepository
         ];
     }
 
-    public function findActiveAdminUser(int $companyId, bool $includeLastTempPassword = false): ?object
+    public function findActiveAdminUser(int $companyId, bool $includeLastTempPassword = false): ?\App\Application\DTOs\AppConfig\AdminCompanyUserDTO
     {
         $fields = ['u.id', 'u.username', 'u.email'];
         if ($includeLastTempPassword) {
             $fields[] = 'u.last_temp_password';
         }
 
-        return DB::table('auth.users as u')
+        $user = DB::table('auth.users as u')
             ->join('auth.user_roles as ur', 'ur.user_id', '=', 'u.id')
             ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
             ->where('u.company_id', $companyId)
@@ -226,6 +226,8 @@ class AdminCompanyProvisioningRepository
             ->whereRaw("UPPER(r.code) = 'ADMIN'")
             ->orderBy('u.id')
             ->first($fields);
+
+        return $user ? \App\Application\DTOs\AppConfig\AdminCompanyUserDTO::fromRow($user) : null;
     }
 
     public function updateAdminUserPassword(int $userId, string $passwordHash, ?string $encryptedTempPassword): void

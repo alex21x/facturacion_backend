@@ -3,11 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use App\Http\Requests\Auth\RefreshRequest;
 use App\Services\Auth\AuthSessionService;
 use App\Support\ApiToken;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
@@ -16,23 +17,8 @@ class AuthController extends Controller
     ) {
     }
 
-    public function login(Request $request)
+    public function login(LoginRequest $request)
     {
-        $validator = Validator::make($request->all(), [
-            'username' => 'required|string|max:80',
-            'password' => 'required|string|max:255',
-            'device_id' => 'required|string|max:120',
-            'device_name' => 'nullable|string|max:120',
-            'company_access_slug' => 'nullable|string|max:120',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
         $deviceId = trim((string) $request->input('device_id'));
         $requestedAccessSlug = strtolower(trim((string) $request->input('company_access_slug', '')));
 
@@ -121,20 +107,8 @@ class AuthController extends Controller
         ]);
     }
 
-    public function refresh(Request $request)
+    public function refresh(RefreshRequest $request)
     {
-        $validator = Validator::make($request->all(), [
-            'refresh_token' => 'required|string|min:32|max:255',
-            'device_id' => 'required|string|max:120',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
         $deviceId = trim((string) $request->input('device_id'));
         $refreshToken = trim((string) $request->input('refresh_token'));
         $refreshTokenHash = ApiToken::hashRefreshToken($refreshToken, $deviceId);

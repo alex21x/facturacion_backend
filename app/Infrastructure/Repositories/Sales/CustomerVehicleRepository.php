@@ -56,7 +56,7 @@ class CustomerVehicleRepository
         return (int) DB::table('sales.customer_vehicles')->insertGetId($values);
     }
 
-    public function findVehicle(int $companyId, int $customerId, int $vehicleId, bool $mustBeActive = false): ?object
+    public function findVehicle(int $companyId, int $customerId, int $vehicleId, bool $mustBeActive = false): ?\App\Application\DTOs\Sales\SalesVehicleSnapshotDTO
     {
         $query = DB::table('sales.customer_vehicles')
             ->where('id', $vehicleId)
@@ -67,7 +67,9 @@ class CustomerVehicleRepository
             $query->where('status', 1);
         }
 
-        return $query->first();
+        $vehicle = $query->first();
+
+        return $vehicle ? \App\Application\DTOs\Sales\SalesVehicleSnapshotDTO::fromRow($vehicle) : null;
     }
 
     public function updateVehicle(int $companyId, int $customerId, int $vehicleId, array $values): void
@@ -105,13 +107,15 @@ class CustomerVehicleRepository
         return DB::table('sales.customer_types')->where('id', $customerTypeId)->exists();
     }
 
-    public function findVehicleSnapshotById(int $companyId, int $customerId, int $vehicleId): ?object
+    public function findVehicleSnapshotById(int $companyId, int $customerId, int $vehicleId): ?\App\Application\DTOs\Sales\SalesVehicleSnapshotDTO
     {
-        return DB::table('sales.customer_vehicles')
+        $vehicle = DB::table('sales.customer_vehicles')
             ->select(['plate', 'brand', 'model'])
             ->where('company_id', $companyId)
             ->where('customer_id', $customerId)
             ->where('id', $vehicleId)
             ->first();
+
+        return $vehicle ? \App\Application\DTOs\Sales\SalesVehicleSnapshotDTO::fromRow($vehicle) : null;
     }
 }

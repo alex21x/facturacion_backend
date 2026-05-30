@@ -2,11 +2,33 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class ModuleToggleRepository
 {
+    public function findBranchFeatureToggle(int $companyId, int $branchId, string $featureCode): ?CompanyFeatureToggleDTO
+    {
+        $toggle = DB::table('appcfg.branch_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('branch_id', $branchId)
+            ->where('feature_code', $featureCode)
+            ->first();
+
+        return $toggle ? CompanyFeatureToggleDTO::fromRow($toggle) : null;
+    }
+
+    public function findCompanyFeatureToggle(int $companyId, string $featureCode): ?CompanyFeatureToggleDTO
+    {
+        $toggle = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->first();
+
+        return $toggle ? CompanyFeatureToggleDTO::fromRow($toggle) : null;
+    }
+
     public function listModulesWithScope(int $companyId, ?int $branchId): Collection
     {
         return DB::table('appcfg.modules as m')

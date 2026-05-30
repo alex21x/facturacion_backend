@@ -2,6 +2,7 @@
 
 namespace App\Services\Sales;
 
+use App\Application\DTOs\Sales\SalesVehicleSnapshotDTO;
 use App\Infrastructure\Repositories\Sales\CustomerVehicleRepository;
 
 class CustomerVehicleService
@@ -85,7 +86,7 @@ class CustomerVehicleService
         ];
     }
 
-    public function findVehicle(int $companyId, int $customerId, int $vehicleId, bool $mustBeActive = false): ?object
+    public function findVehicle(int $companyId, int $customerId, int $vehicleId, bool $mustBeActive = false): ?SalesVehicleSnapshotDTO
     {
         return $this->repository->findVehicle($companyId, $customerId, $vehicleId, $mustBeActive);
     }
@@ -137,7 +138,7 @@ class CustomerVehicleService
         return $this->repository->customerTypeExists($customerTypeId);
     }
 
-    public function findVehicleSnapshotById(int $companyId, int $customerId, int $vehicleId): ?object
+    public function findVehicleSnapshotById(int $companyId, int $customerId, int $vehicleId): ?SalesVehicleSnapshotDTO
     {
         return $this->repository->findVehicleSnapshotById($companyId, $customerId, $vehicleId);
     }

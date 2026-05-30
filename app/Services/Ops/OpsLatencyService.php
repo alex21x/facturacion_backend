@@ -15,4 +15,9 @@ class OpsLatencyService
     {
         return $this->repository->summaryByCompanyWindow($companyId, $windowMinutes, $limit);
     }
+
+    public function isSamplesTableAvailable(): bool
+    {
+        return $this->repository->isSamplesTableAvailable();
+    }
 }

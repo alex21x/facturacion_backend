@@ -2,62 +2,65 @@
 
 namespace App\Services\AppConfig;
 
-use App\Infrastructure\Repositories\AppConfig\AdminSettingsMatrixRepository;
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
 use Illuminate\Support\Collection;
 
 class AdminSettingsMatrixService
 {
-    public function __construct(private AdminSettingsMatrixRepository $repository)
+    public function __construct(
+        private AdminSettingsMatrixQueryService $queryService,
+        private AdminSettingsMatrixCommandService $commandService
+    )
     {
     }
 
     public function listNonSystemCompanies(int $systemCompanyId): Collection
     {
-        return $this->repository->listNonSystemCompanies($systemCompanyId);
+        return $this->queryService->listNonSystemCompanies($systemCompanyId);
     }
 
     public function companyExists(int $companyId): bool
     {
-        return $this->repository->companyExists($companyId);
+        return $this->queryService->companyExists($companyId);
     }
 
     public function getFeatureTogglesByCodes(array $featureCodes): Collection
     {
-        return $this->repository->getFeatureTogglesByCodes($featureCodes);
+        return $this->queryService->getFeatureTogglesByCodes($featureCodes);
     }
 
     public function getFeatureTogglesByCode(string $featureCode): Collection
     {
-        return $this->repository->getFeatureTogglesByCode($featureCode);
+        return $this->queryService->getFeatureTogglesByCode($featureCode);
     }
 
-    public function getFeatureToggleRow(int $companyId, string $featureCode): ?object
+    public function getFeatureToggleRow(int $companyId, string $featureCode): ?CompanyFeatureToggleDTO
     {
-        return $this->repository->getFeatureToggleRow($companyId, $featureCode);
+        return $this->queryService->getFeatureToggleRow($companyId, $featureCode);
     }
 
     public function upsertCompanyFeatureTogglesBulk(int $companyId, array $valuesByCode): void
     {
-        $this->repository->upsertCompanyFeatureTogglesBulk($companyId, $valuesByCode);
+        $this->commandService->upsertCompanyFeatureTogglesBulk($companyId, $valuesByCode);
     }
 
     public function upsertCompanyFeatureToggle(int $companyId, string $featureCode, array $values): void
     {
-        $this->repository->upsertCompanyFeatureToggle($companyId, $featureCode, $values);
+        $this->commandService->upsertCompanyFeatureToggle($companyId, $featureCode, $values);
     }
 
     public function getInventorySettingsByCompany(): Collection
     {
-        return $this->repository->getInventorySettingsByCompany();
+        return $this->queryService->getInventorySettingsByCompany();
     }
 
     public function ensureInventorySettingsSchema(): void
     {
-        $this->repository->ensureInventorySettingsSchema();
+        $this->commandService->ensureInventorySettingsSchema();
     }
 
     public function upsertInventorySettings(int $companyId, array $updates): void
     {
-        $this->repository->upsertInventorySettings($companyId, $updates);
+        $this->commandService->upsertInventorySettings($companyId, $updates);
     }
 }

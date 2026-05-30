@@ -7,7 +7,6 @@ use App\Services\Sales\TaxBridge\GreGuideService;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class GreGuideController extends Controller
@@ -74,11 +73,7 @@ class GreGuideController extends Controller
         }
 
         if ($branchId !== null) {
-            $branchExists = DB::table('core.branches')
-                ->where('id', $branchId)
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->exists();
+            $branchExists = $this->service->branchExistsForCompany($companyId, $branchId);
 
             if (!$branchExists) {
                 return response()->json(['message' => 'Invalid branch scope'], 422);
@@ -190,10 +185,7 @@ class GreGuideController extends Controller
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $guide = DB::table('sales.gre_guides')
-            ->where('id', $id)
-            ->select('id', 'company_id', 'branch_id')
-            ->first();
+        $guide = $this->service->findGuideScope($id);
 
         if (!$guide) {
             return response()->json(['message' => 'Guia GRE no encontrada'], 404);
@@ -430,32 +422,8 @@ class GreGuideController extends Controller
     {
         $featureCode = 'SALES_TAX_BRIDGE_DEBUG_VIEW';
 
-        if ($branchId !== null) {
-            $branchRow = DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', $featureCode)
-                ->select('is_enabled')
-                ->first();
-
-            if ($branchRow && isset($branchRow->is_enabled)) {
-                if (!(bool) $branchRow->is_enabled) {
-                    return response()->json([
-                        'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
-                    ], 403);
-                }
-
-                return null;
-            }
-        }
-
-        $companyRow = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->select('is_enabled')
-            ->first();
-
-        if (!$companyRow || !(bool) ($companyRow->is_enabled ?? false)) {
+        $isEnabled = $this->service->isFeatureEnabledForContext($companyId, $branchId, $featureCode, false);
+        if (!$isEnabled) {
             return response()->json([
                 'message' => 'La trazabilidad de intentos está deshabilitada por configuración',
             ], 403);

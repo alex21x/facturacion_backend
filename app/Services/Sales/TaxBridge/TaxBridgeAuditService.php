@@ -8,6 +8,46 @@ use Illuminate\Support\Facades\DB;
 
 class TaxBridgeAuditService
 {
+    public function findCommercialDocumentScope(int $documentId): ?object
+    {
+        return DB::table('sales.commercial_documents')
+            ->where('id', $documentId)
+            ->select('id', 'company_id', 'branch_id')
+            ->first();
+    }
+
+    public function findAuditLogScope(int $logId): ?object
+    {
+        return DB::table('sales.tax_bridge_audit_logs')
+            ->where('id', $logId)
+            ->select('company_id', 'branch_id')
+            ->first();
+    }
+
+    public function isFeatureEnabledForContext(int $companyId, ?int $branchId, string $featureCode): bool
+    {
+        if ($branchId !== null) {
+            $branchRow = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->where('feature_code', $featureCode)
+                ->select('is_enabled')
+                ->first();
+
+            if ($branchRow && isset($branchRow->is_enabled)) {
+                return (bool) $branchRow->is_enabled;
+            }
+        }
+
+        $companyRow = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->where('feature_code', $featureCode)
+            ->select('is_enabled')
+            ->first();
+
+        return $companyRow && (bool) ($companyRow->is_enabled ?? false);
+    }
+
     /**
      * Registrar un envío tributario (REQUEST + RESPONSE)
      */

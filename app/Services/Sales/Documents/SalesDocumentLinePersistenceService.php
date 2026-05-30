@@ -5,7 +5,6 @@ namespace App\Services\Sales\Documents;
 use App\Domain\Sales\Repositories\CommercialDocumentItemLotRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentPaymentRepositoryInterface;
-use Illuminate\Support\Facades\DB;
 
 class SalesDocumentLinePersistenceService
 {
@@ -159,7 +158,7 @@ class SalesDocumentLinePersistenceService
                             $ledgerUnitCost = 0.0;
                         }
 
-                        DB::table('inventory.inventory_ledger')->insert([
+                        $this->itemRepository->createInventoryLedgerEntry([
                             'company_id' => $companyId,
                             'warehouse_id' => (int) $warehouseId,
                             'product_id' => (int) $product->id,
@@ -186,7 +185,7 @@ class SalesDocumentLinePersistenceService
                         $ledgerUnitCost = 0.0;
                     }
 
-                    DB::table('inventory.inventory_ledger')->insert([
+                    $this->itemRepository->createInventoryLedgerEntry([
                         'company_id' => $companyId,
                         'warehouse_id' => (int) $warehouseId,
                         'product_id' => (int) $product->id,

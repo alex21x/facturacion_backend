@@ -26,6 +26,7 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
 
         return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), function () use ($companyId, $search, $status, $limit, $autocomplete) {
             $normalizedSearch = mb_strtolower(trim($search));
+            $searchIsShort = mb_strlen($normalizedSearch) <= 2;
 
             if ($autocomplete) {
                 $query = DB::table('inventory.products as p')
@@ -61,23 +62,15 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
                     ->whereNull('p.deleted_at');
 
                 if ($search !== '') {
-                    $searchPattern = $normalizedSearch . '%';
+                    $searchPattern = $searchIsShort
+                        ? ($normalizedSearch . '%')
+                        : ('%' . $normalizedSearch . '%');
 
                     $query->where(function ($nested) use ($searchPattern) {
                         $nested->whereRaw('lower(p.name) like ?', [$searchPattern])
                             ->orWhereRaw('lower(p.sku) like ?', [$searchPattern])
                             ->orWhereRaw('lower(p.barcode) like ?', [$searchPattern]);
                     });
-
-                    $query->orderByRaw(
-                        'CASE
-                            WHEN lower(p.sku) = ? THEN 0
-                            WHEN lower(p.name) = ? THEN 1
-                            WHEN lower(p.barcode) = ? THEN 2
-                            ELSE 3
-                        END',
-                        [$normalizedSearch, $normalizedSearch, $normalizedSearch]
-                    );
                 }
 
                 if ($status !== null && $status !== '') {
@@ -91,21 +84,12 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
             }
 
             $hasRestaurantRecipesTable = $this->hasRestaurantRecipesTable();
+            $hasDeletedAtOnRecipes = $hasRestaurantRecipesTable && $this->hasRestaurantRecipesDeletedAtColumn();
             $recipeFlagSelect = $hasRestaurantRecipesTable
-                ? DB::raw('CASE WHEN rr.menu_product_id IS NULL THEN false ELSE true END as has_recipe')
+                ? DB::raw($hasDeletedAtOnRecipes
+                    ? 'EXISTS (SELECT 1 FROM restaurant.product_recipes rr WHERE rr.menu_product_id = p.id AND rr.deleted_at IS NULL LIMIT 1) as has_recipe'
+                    : 'EXISTS (SELECT 1 FROM restaurant.product_recipes rr WHERE rr.menu_product_id = p.id LIMIT 1) as has_recipe')
                 : DB::raw('false as has_recipe');
-
-            $recipeHeadersSubquery = null;
-            if ($hasRestaurantRecipesTable) {
-                $recipeHeadersSubquery = DB::table('restaurant.product_recipes')
-                    ->select('menu_product_id');
-
-                if ($this->hasRestaurantRecipesDeletedAtColumn()) {
-                    $recipeHeadersSubquery->whereNull('deleted_at');
-                }
-
-                $recipeHeadersSubquery->groupBy('menu_product_id');
-            }
 
             $query = DB::table('inventory.products as p')
                 ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
@@ -146,14 +130,10 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
                 ->where('p.company_id', $companyId)
                 ->whereNull('p.deleted_at');
 
-            if ($recipeHeadersSubquery !== null) {
-                $query->leftJoinSub($recipeHeadersSubquery, 'rr', function ($join) {
-                    $join->on('rr.menu_product_id', '=', 'p.id');
-                });
-            }
-
             if ($search !== '') {
-                $searchPattern = '%' . $normalizedSearch . '%';
+                $searchPattern = $searchIsShort
+                    ? ($normalizedSearch . '%')
+                    : ('%' . $normalizedSearch . '%');
 
                 $query->where(function ($nested) use ($searchPattern) {
                     $nested->whereRaw('lower(p.name) like ?', [$searchPattern])

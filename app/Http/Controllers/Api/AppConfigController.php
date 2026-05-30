@@ -265,71 +265,104 @@ class AppConfigController extends Controller
         $companyId = (int) $request->query('company_id', $authUser->company_id);
         $branchId = $request->query('branch_id', $authUser->branch_id);
 
-        if ($branchId !== null) {
+        if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
+        } else {
+            $branchId = null;
         }
 
-        $toggleSet = $this->moduleToggleService->getFeatureToggles($companyId, $branchId);
-        $companyFeatures = $toggleSet['company_features'];
-        $branchFeatures = $toggleSet['branch_features'];
+        try {
+            $toggleSet = $this->moduleToggleService->getFeatureToggles($companyId, $branchId);
+            $companyFeatures = $toggleSet['company_features'];
+            $branchFeatures = $toggleSet['branch_features'];
 
-        $featureCodes = $companyFeatures->keys()->merge($branchFeatures->keys())->unique()->values();
+            $featureCodes = $companyFeatures->keys()->merge($branchFeatures->keys())->unique()->values();
 
-        // Guarantee user-facing labels are persisted in DB for known feature codes
-        // so new options appear translated immediately in AppConfig cards.
-        $this->ensureFeatureLabelsPersisted($featureCodes->all());
+            // Guarantee user-facing labels are persisted in DB for known feature codes
+            // so new options appear translated immediately in AppConfig cards.
+            $this->ensureFeatureLabelsPersisted($featureCodes->all());
 
-        $labelsByCode = $this->resolveFeatureLabels($featureCodes->all());
-        $categoriesByCode = $this->resolveFeatureCategories($featureCodes->all());
+            $labelsByCode = $this->resolveFeatureLabels($featureCodes->all());
+            $categoriesByCode = $this->resolveFeatureCategories($featureCodes->all());
 
-        $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode, $categoriesByCode) {
-            $company = $companyFeatures->get($featureCode);
-            $branch = $branchFeatures->get($featureCode);
+            $features = $featureCodes->map(function ($featureCode) use ($companyId, $companyFeatures, $branchFeatures, $labelsByCode, $categoriesByCode) {
+                $company = $companyFeatures->get($featureCode);
+                $branch = $branchFeatures->get($featureCode);
 
-            $isEnabled = false;
-            if ($branch && $branch->is_enabled !== null) {
-                $isEnabled = (bool) $branch->is_enabled;
-            } elseif ($company && $company->is_enabled !== null) {
-                $isEnabled = (bool) $company->is_enabled;
-            }
-
-            $companyConfig = $company ? $this->decodeJsonConfig($company->config) : null;
-            $branchConfig = $branch ? $this->decodeJsonConfig($branch->config) : null;
-
-            $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $featureCode);
-            if ($verticalPreference['resolved']) {
-                // Keep explicit company/branch values as source of truth; vertical is fallback only.
-                $hasExplicitToggle = ($branch && $branch->is_enabled !== null) || ($company && $company->is_enabled !== null);
-                $hasExplicitConfig = $branchConfig !== null || $companyConfig !== null;
-
-                if (!$hasExplicitToggle && $verticalPreference['is_enabled'] !== null) {
-                    $isEnabled = (bool) $verticalPreference['is_enabled'];
+                $isEnabled = false;
+                if ($branch && $branch->is_enabled !== null) {
+                    $isEnabled = (bool) $branch->is_enabled;
+                } elseif ($company && $company->is_enabled !== null) {
+                    $isEnabled = (bool) $company->is_enabled;
                 }
-                if (!$hasExplicitConfig && $verticalPreference['config'] !== null) {
-                    $companyConfig = $verticalPreference['config'];
-                    $branchConfig = null;
+
+                $companyConfig = $company ? $this->decodeJsonConfig($company->config) : null;
+                $branchConfig = $branch ? $this->decodeJsonConfig($branch->config) : null;
+
+                $verticalPreference = $this->resolveVerticalFeaturePreference($companyId, (string) $featureCode);
+                if ($verticalPreference['resolved']) {
+                    // Keep explicit company/branch values as source of truth; vertical is fallback only.
+                    $hasExplicitToggle = ($branch && $branch->is_enabled !== null) || ($company && $company->is_enabled !== null);
+                    $hasExplicitConfig = $branchConfig !== null || $companyConfig !== null;
+
+                    if (!$hasExplicitToggle && $verticalPreference['is_enabled'] !== null) {
+                        $isEnabled = (bool) $verticalPreference['is_enabled'];
+                    }
+                    if (!$hasExplicitConfig && $verticalPreference['config'] !== null) {
+                        $companyConfig = $verticalPreference['config'];
+                        $branchConfig = null;
+                    }
                 }
-            }
 
-            return [
-                'feature_code' => $featureCode,
-                'feature_label' => $labelsByCode[(string) $featureCode] ?? (string) $featureCode,
-                'feature_category_key' => $categoriesByCode[(string) $featureCode]['key'] ?? $this->deriveFeatureCategoryKey((string) $featureCode),
-                'feature_category_label' => $categoriesByCode[(string) $featureCode]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey((string) $featureCode)),
-                'is_enabled' => $isEnabled,
-                'company_enabled' => $company ? (bool) $company->is_enabled : null,
-                'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
-                'company_config' => $companyConfig,
-                'branch_config' => $branchConfig,
-                'vertical_source' => $verticalPreference['source'],
-            ];
-        })->values();
+                return [
+                    'feature_code' => $featureCode,
+                    'feature_label' => $labelsByCode[(string) $featureCode] ?? (string) $featureCode,
+                    'feature_category_key' => $categoriesByCode[(string) $featureCode]['key'] ?? $this->deriveFeatureCategoryKey((string) $featureCode),
+                    'feature_category_label' => $categoriesByCode[(string) $featureCode]['label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey((string) $featureCode)),
+                    'is_enabled' => $isEnabled,
+                    'company_enabled' => $company ? (bool) $company->is_enabled : null,
+                    'branch_enabled' => $branch ? (bool) $branch->is_enabled : null,
+                    'company_config' => $companyConfig,
+                    'branch_config' => $branchConfig,
+                    'vertical_source' => $verticalPreference['source'],
+                ];
+            })->values();
 
-        return response()->json([
-            'company_id' => $companyId,
-            'branch_id' => $branchId,
-            'features' => $features,
-        ]);
+            return response()->json([
+                'company_id' => $companyId,
+                'branch_id' => $branchId,
+                'features' => $features,
+            ]);
+        } catch (\Throwable $exception) {
+            // Fallback path to avoid intermittent UI hard-failures when the legacy
+            // toggle resolver throws due transient DB/cache issues.
+            $fallback = $this->featureConfigService->getCommerceSettings($companyId, $branchId);
+
+            $features = collect($fallback['features'] ?? [])->map(function ($row) {
+                $isEnabled = (bool) ($row['is_enabled'] ?? false);
+                $config = $row['config'] ?? null;
+
+                return [
+                    'feature_code' => (string) ($row['feature_code'] ?? ''),
+                    'feature_label' => (string) ($row['feature_label'] ?? ($row['feature_code'] ?? '')),
+                    'feature_category_key' => (string) ($row['feature_category_key'] ?? $this->deriveFeatureCategoryKey((string) ($row['feature_code'] ?? ''))),
+                    'feature_category_label' => (string) ($row['feature_category_label'] ?? $this->humanizeCategoryKey($this->deriveFeatureCategoryKey((string) ($row['feature_code'] ?? '')))),
+                    'is_enabled' => $isEnabled,
+                    'company_enabled' => $isEnabled,
+                    'branch_enabled' => $branchId !== null ? $isEnabled : null,
+                    'company_config' => $branchId === null ? $config : null,
+                    'branch_config' => $branchId !== null ? $config : null,
+                    'vertical_source' => $row['vertical_source'] ?? null,
+                ];
+            })->values();
+
+            return response()->json([
+                'company_id' => $companyId,
+                'branch_id' => $branchId,
+                'features' => $features,
+                'fallback' => true,
+            ]);
+        }
     }
 
     public function companyVerticalSettings(Request $request)

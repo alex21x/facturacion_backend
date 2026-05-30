@@ -2,26 +2,28 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\TaxBridgeGateway;
+use App\Application\Factories\Sales\CreateCommercialDocumentCommandFactory;
 use App\Application\UseCases\Sales\CreateCommercialDocumentUseCase;
+use App\Application\UseCases\Sales\PrepareCreateCommercialDocumentUseCase;
+use App\Application\UseCases\Sales\PrepareConvertCommercialDocumentUseCase;
+use App\Application\UseCases\Sales\PrepareUpdateCommercialDocumentUseCase;
+use App\Application\UseCases\Sales\PrepareVoidCommercialDocumentUseCase;
+use App\Application\UseCases\Sales\ResolveCompanyPrintProfileUseCase;
 use App\Application\UseCases\Sales\UpdateCommercialDocumentDraftUseCase;
 use App\Application\UseCases\Sales\VoidCommercialDocumentUseCase;
 use App\Domain\Sales\Policies\CommercialDocumentPolicy;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Sales\BulkImportCustomersRequest;
 use App\Http\Requests\Sales\ConvertCommercialDocumentRequest;
 use App\Http\Requests\Sales\CreateCommercialDocumentRequest;
-use App\Http\Requests\Sales\CreateCustomerRequest;
 use App\Http\Requests\Sales\CreateCustomerVehicleRequest;
 use App\Http\Requests\Sales\SunatVoidCommunicationRequest;
 use App\Http\Requests\Sales\UpdateCommercialDocumentRequest;
-use App\Http\Requests\Sales\UpdateCustomerRequest;
 use App\Http\Requests\Sales\UpdateCustomerVehicleRequest;
 use App\Http\Requests\Sales\VoidCommercialDocumentRequest;
 use App\Services\AppConfig\CompanyIgvRateService;
-use App\Services\Sales\CustomerManagementService;
 use App\Services\Sales\CustomerQueryService;
 use App\Services\Sales\CustomerVehicleService;
-use App\Services\Sales\ReferenceDocumentService;
 use App\Services\Sales\SalesBusinessRuleService;
 use App\Services\Sales\SalesDocumentValidationService;
 use App\Services\Sales\SalesLookupService;
@@ -29,16 +31,17 @@ use App\Services\Sales\Documents\SalesDocumentConversionService;
 use App\Services\Sales\Documents\SalesDocumentReadService;
 use App\Services\Sales\Documents\SalesDocumentException;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
-use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 
 class SalesController extends Controller
 {    
+    private const SELLER_ROLE_MARKERS = ['VENDED', 'SELLER', 'VENTA'];
+    private const CASHIER_ROLE_MARKERS = ['CAJA', 'CAJER', 'CASHIER'];
+
     private $stockProjection = [];
     private $lotStockProjection = [];
     private array $activeVerticalCache = [];
@@ -51,14 +54,18 @@ class SalesController extends Controller
 
     public function __construct(
         private CompanyIgvRateService $companyIgvRateService,
-        private TaxBridgeService $taxBridgeService,
+        private TaxBridgeGateway $taxBridgeService,
+        private CreateCommercialDocumentCommandFactory $createCommercialDocumentCommandFactory,
+        private PrepareCreateCommercialDocumentUseCase $prepareCreateCommercialDocumentUseCase,
+        private PrepareConvertCommercialDocumentUseCase $prepareConvertCommercialDocumentUseCase,
+        private PrepareUpdateCommercialDocumentUseCase $prepareUpdateCommercialDocumentUseCase,
+        private PrepareVoidCommercialDocumentUseCase $prepareVoidCommercialDocumentUseCase,
+        private ResolveCompanyPrintProfileUseCase $resolveCompanyPrintProfileUseCase,
         private CreateCommercialDocumentUseCase $createCommercialDocumentUseCase,
         private UpdateCommercialDocumentDraftUseCase $updateCommercialDocumentDraftUseCase,
         private VoidCommercialDocumentUseCase $voidCommercialDocumentUseCase,
         private CustomerQueryService $customerQueryService,
-        private CustomerManagementService $customerManagementService,
         private CustomerVehicleService $customerVehicleService,
-        private ReferenceDocumentService $referenceDocumentService,
         private SalesBusinessRuleService $salesBusinessRuleService,
         private SalesDocumentValidationService $salesDocumentValidationService,
         private SalesLookupService $salesLookupService,
@@ -218,116 +225,7 @@ class SalesController extends Controller
 
     private function resolveCompanyPrintProfile(int $companyId): array
     {
-        $companyColumns = $this->tableColumns('core.companies');
-        $companyEmailColumn = $this->firstExistingColumn($companyColumns, ['email', 'contact_email']);
-
-        $companySelect = ['tax_id', 'legal_name', 'trade_name'];
-        if ($companyEmailColumn) {
-            $companySelect[] = $companyEmailColumn;
-        }
-
-        $company = $this->salesLookupService->findCompanyById($companyId, $companySelect);
-
-        $settings = null;
-        if ($this->tableExists('core.company_settings')) {
-            $settingColumns = $this->tableColumns('core.company_settings');
-            $settingEmailColumn = $this->firstExistingColumn($settingColumns, ['email', 'contact_email']);
-
-            $settingsSelect = ['address', 'phone', 'logo_path', 'bank_accounts', 'extra_data'];
-            if ($settingEmailColumn) {
-                $settingsSelect[] = $settingEmailColumn;
-            }
-
-            $settings = $this->salesLookupService->findLatestCompanySettings(
-                $companyId,
-                $settingsSelect,
-                in_array('logo_path', $settingColumns, true),
-                in_array('updated_at', $settingColumns, true),
-                in_array('created_at', $settingColumns, true)
-            );
-        }
-
-        $companyEmail = null;
-        if ($settings) {
-            $companyEmail = (string) ($settings->email ?? $settings->contact_email ?? '');
-        }
-        if ($companyEmail === null || trim($companyEmail) === '') {
-            $companyEmail = (string) ($company->email ?? $company->contact_email ?? '');
-        }
-        $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
-
-        $extraData = [];
-        if ($settings && isset($settings->extra_data)) {
-            $decodedExtra = json_decode((string) $settings->extra_data, true);
-            $extraData = is_array($decodedExtra) ? $decodedExtra : [];
-        }
-
-        $logoDataUri = null;
-        if (isset($extraData['company_logo_data_uri'])) {
-            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
-            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
-                $logoDataUri = $candidateDataUri;
-            }
-        }
-
-        $logoPath = $settings->logo_path ?? null;
-        $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
-        $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
-
-        if ($logoDataUri === null && $logoNormalizedPath && $logoExistsInStorage) {
-            $generatedDataUri = $this->companyLogoDataUriFromPublicStorage($logoNormalizedPath);
-            if ($generatedDataUri !== null) {
-                $logoDataUri = $generatedDataUri;
-                $extraData['company_logo_data_uri'] = $generatedDataUri;
-
-                if ($this->tableExists('core.company_settings')) {
-                    $settingsUpdates = ['extra_data' => json_encode($extraData)];
-                    $companySettingsColumns = $this->tableColumns('core.company_settings');
-                    if (in_array('updated_at', $companySettingsColumns, true)) {
-                        $settingsUpdates['updated_at'] = now();
-                    }
-
-                    $this->salesLookupService->updateCompanySettings($companyId, $settingsUpdates);
-                }
-            }
-        }
-
-        $logoUrl = $logoExistsInStorage
-            ? $this->resolveCompanyLogoUrl($logoPath)
-            : null;
-
-        if (($logoUrl === null || $logoUrl === '') && $logoDataUri !== null) {
-            $logoUrl = $logoDataUri;
-        }
-
-        if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
-            $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
-        }
-
-        $bankAccounts = [];
-        if ($settings && isset($settings->bank_accounts)) {
-            $decodedBanks = json_decode((string) $settings->bank_accounts, true);
-            if (is_array($decodedBanks)) {
-                $bankAccounts = array_values(array_filter($decodedBanks, static fn ($item) => is_array($item)));
-            }
-        }
-
-        return [
-            'company_id' => $companyId,
-            'tax_id'     => $company->tax_id ?? null,
-            'legal_name' => $company->legal_name ?? '',
-            'trade_name' => $company->trade_name ?? null,
-            'company_description' => isset($extraData['company_description']) ? trim((string) $extraData['company_description']) : null,
-            'address'    => $settings->address ?? null,
-            'phone'      => $settings->phone ?? null,
-            'email'      => $companyEmail,
-            'logo_url'   => $logoUrl,
-            'logo_data_uri' => $logoDataUri,
-            'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
-                ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
-                : true,
-            'bank_accounts' => $bankAccounts,
-        ];
+        return $this->resolveCompanyPrintProfileUseCase->execute($companyId);
     }
 
     private function isFeatureEnabled(int $companyId, $branchId, string $featureCode): bool
@@ -338,76 +236,11 @@ class SalesController extends Controller
         return (bool) $resolved['is_enabled'];
     }
 
-    public function referenceDocuments(Request $request)
-    {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-        $customerId = (int) $request->query('customer_id', 0);
-        $branchId = $request->query('branch_id', $authUser->branch_id);
-        $documentKindId = (int) $request->query('document_kind_id', 0);
-        $noteKind = strtoupper(trim((string) $request->query('note_kind', '')));
-        $limit = (int) $request->query('limit', 1000);
-
-        if ($customerId <= 0) {
-            return response()->json([
-                'message' => 'customer_id es requerido',
-            ], 422);
-        }
-
-        if ($noteKind !== '' && !in_array($noteKind, ['CREDIT_NOTE', 'DEBIT_NOTE'], true)) {
-            return response()->json([
-                'message' => 'note_kind invalido',
-            ], 422);
-        }
-
-        if ($limit < 1) {
-            $limit = 1;
-        }
-        if ($limit > 10000) {
-            $limit = 10000;
-        }
-
-        $noteTargetKind = null;
-        if ($documentKindId > 0) {
-            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
-            if (is_array($catalogRow) && !empty($catalogRow['note_target_kind'])) {
-                $noteTargetKind = (string) $catalogRow['note_target_kind'];
-            }
-        }
-
-        if ($noteTargetKind === null && in_array($noteKind, ['CREDIT_NOTE', 'DEBIT_NOTE'], true)) {
-            $noteTargetKind = 'RECEIPT';
-        }
-
-        $rows = $this->referenceDocumentService->listReferenceDocuments(
-            $companyId,
-            $customerId,
-            ($branchId !== null && $branchId !== '') ? (int) $branchId : null,
-            $noteTargetKind,
-            $noteKind,
-            $limit
-        );
-
-        return response()->json([
-            'data' => $rows,
-        ]);
-    }
-
-    public function priceTiers(Request $request)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $rows = $this->referenceDocumentService->listPriceTiers($companyId);
-
-        return response()->json(['data' => $rows]);
-    }
-
     public function customerAutocomplete(Request $request)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
-        $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
         $search = trim((string) $request->query('q', ''));
         $status = 1;
@@ -427,35 +260,12 @@ class SalesController extends Controller
         ]);
     }
 
-    public function resolveCustomerByDocument(Request $request)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $document = preg_replace('/\D+/', '', (string) $request->query('document', ''));
-        if (!is_string($document)) {
-            $document = '';
-        }
-
-        if ($document === '' || !in_array(strlen($document), [8, 11], true)) {
-            return response()->json([
-                'message' => 'Debe enviar un DNI (8) o RUC (11) valido.',
-            ], 422);
-        }
-
-        $this->ensureCustomerPriceProfilesTable();
-
-        $result = $this->customerManagementService->resolveCustomerByDocument($companyId, $document);
-
-        return response()->json($result['body'], (int) $result['status']);
-    }
-
     public function customers(Request $request)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
 
-        $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
         $search = trim((string) $request->query('q', ''));
         $status = $request->query('status');
@@ -632,234 +442,33 @@ class SalesController extends Controller
         return response()->json(['message' => 'Vehicle deleted']);
     }
 
-    public function customerTypes(Request $request)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $rows = $this->customerVehicleService->listCustomerTypes();
-
-        return response()->json(['data' => $rows]);
-    }
-
-    public function createCustomer(CreateCustomerRequest $request)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $this->ensureCustomerPriceProfilesTable();
-        $this->ensureCustomersPhoneColumn();
-
-        $result = $this->customerManagementService->createCustomer($companyId, $request->validated());
-
-        return response()->json($result['body'], (int) $result['status']);
-    }
-
-    public function bulkImportCustomers(BulkImportCustomersRequest $request)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $this->ensureCustomerPriceProfilesTable();
-        $this->ensureCustomersPhoneColumn();
-
-        $result = $this->customerManagementService->bulkImportCustomers($companyId, $request->validated()['rows']);
-
-        return response()->json($result);
-    }
-
-    public function updateCustomer(UpdateCustomerRequest $request, int $id)
-    {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-
-        $this->ensureCustomerPriceProfilesTable();
-        $this->ensureCustomersPhoneColumn();
-
-        $result = $this->customerManagementService->updateCustomer($companyId, $id, $request->validated());
-
-        return response()->json($result['body'], (int) $result['status']);
-    }
-
     public function createCommercialDocument(CreateCommercialDocumentRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $payload = $request->validated();
-        $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
-        if ($documentKindId > 0) {
-            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
-            if (!is_array($catalogRow)) {
-                return response()->json([
-                    'message' => 'document_kind_id invalido',
-                ], 422);
-            }
-
-            $payload['document_kind'] = (string) ($catalogRow['code'] ?? '');
-            $payload['document_kind_id'] = $documentKindId;
-        }
         $companyId = (int) $request->attributes->get('resolved_company_id');
-        $branchId = array_key_exists('branch_id', $payload) ? $payload['branch_id'] : $authUser->branch_id;
-        $warehouseId = $payload['warehouse_id'] ?? null;
-        $cashRegisterId = $payload['cash_register_id'] ?? null;
-
-        // Fallback: if no warehouse_id in payload, try user's preferred warehouse, then first active warehouse for company
-        if ($warehouseId === null) {
-            $warehouseId = $authUser->preferred_warehouse_id ?? null;
-        }
-        if ($warehouseId === null) {
-            $fallbackWarehouse = $this->salesDocumentValidationService->firstActiveWarehouseId($companyId);
-            if ($fallbackWarehouse !== null) {
-                $warehouseId = $fallbackWarehouse;
-            }
-        }
-
-        if ($branchId !== null) {
-            $branchExists = $this->salesDocumentValidationService->branchExists($companyId, (int) $branchId);
-
-            if (!$branchExists) {
-                return response()->json([
-                    'message' => 'Invalid branch scope',
-                ], 422);
-            }
-        }
-
-        if ($warehouseId !== null) {
-            $warehouseExists = $this->salesDocumentValidationService->warehouseExists(
-                $companyId,
-                (int) $warehouseId,
-                $branchId !== null ? (int) $branchId : null
-            );
-
-            if (!$warehouseExists) {
-                return response()->json([
-                    'message' => 'Invalid warehouse scope',
-                ], 422);
-            }
-        }
-
-        if ($cashRegisterId !== null) {
-            $cashRegisterExists = $this->salesDocumentValidationService->cashRegisterExists(
-                $companyId,
-                (int) $cashRegisterId,
-                $branchId !== null ? (int) $branchId : null
-            );
-
-            if (!$cashRegisterExists) {
-                return response()->json([
-                    'message' => 'Invalid cash register scope',
-                ], 422);
-            }
-        }
-
-        $documentKind = (string) $payload['document_kind'];
-        $noteBaseKind = $this->salesBusinessRuleService->resolveNoteBaseKind($documentKind);
-        $metadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
-        $customerIdentity = $this->fetchCustomerIdentityForSalesValidation($companyId, (int) $payload['customer_id']);
-
-        if (!$customerIdentity) {
-            return response()->json([
-                'message' => 'Cliente no encontrado para emitir documento',
-            ], 422);
-        }
-
-        if (
-            $this->salesBusinessRuleService->documentKindRequiresRucCustomer($documentKind)
-            && !$this->salesBusinessRuleService->customerHasRucIdentity($customerIdentity)
-        ) {
-            return response()->json([
-                'message' => 'Para este tipo de documento el cliente debe tener RUC valido (11 digitos).',
-            ], 422);
-        }
 
         $workshopMultiVehicleEnabled = $this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)
             && $this->tableExists('sales.customer_vehicles');
 
-        $selectedVehicleId = isset($payload['customer_vehicle_id']) ? (int) $payload['customer_vehicle_id'] : 0;
-        if ($selectedVehicleId > 0 && !$workshopMultiVehicleEnabled) {
-            return response()->json([
-                'message' => 'La empresa no tiene habilitado el flujo de vehiculos por cliente.',
-            ], 422);
-        }
-
-        if ($selectedVehicleId > 0) {
-            $vehicle = $this->salesDocumentValidationService->findActiveVehicle(
-                $companyId,
-                (int) $payload['customer_id'],
-                $selectedVehicleId
-            );
-
-            if (!$vehicle) {
-                return response()->json([
-                    'message' => 'El vehiculo seleccionado no pertenece al cliente o no esta activo.',
-                ], 422);
-            }
-
-            $payload['customer_vehicle_id'] = (int) $vehicle->id;
-            $payload['vehicle_plate_snapshot'] = strtoupper(trim((string) ($vehicle->plate ?? '')));
-            $payload['vehicle_brand_snapshot'] = trim((string) ($vehicle->brand ?? '')) !== '' ? trim((string) $vehicle->brand) : null;
-            $payload['vehicle_model_snapshot'] = trim((string) ($vehicle->model ?? '')) !== '' ? trim((string) $vehicle->model) : null;
-            $payload['metadata'] = array_merge($metadata, [
-                'customer_vehicle_id' => (int) $vehicle->id,
-                'vehicle_plate' => $payload['vehicle_plate_snapshot'],
-                'vehicle_brand' => $payload['vehicle_brand_snapshot'],
-                'vehicle_model' => $payload['vehicle_model_snapshot'],
-            ]);
-            $metadata = $payload['metadata'];
-        }
-
-        if ($noteBaseKind !== null) {
-            $sourceDocumentId = isset($metadata['source_document_id']) ? (int) $metadata['source_document_id'] : 0;
-
-            if ($sourceDocumentId <= 0) {
-                return response()->json([
-                    'message' => 'Para nota de credito/debito debe indicar documento afectado',
-                ], 422);
-            }
-
-            $sourceDocument = $this->salesDocumentValidationService->findSourceDocument($companyId, $sourceDocumentId);
-
-            if (!$sourceDocument) {
-                return response()->json([
-                    'message' => 'Documento afectado no encontrado',
-                ], 422);
-            }
-
-            $sourceValidationError = $this->salesBusinessRuleService->validateSourceDocumentForNote(
-                $sourceDocument,
-                (int) $payload['customer_id']
-            );
-
-            if ($sourceValidationError !== null) {
-                return response()->json([
-                    'message' => $sourceValidationError,
-                ], 422);
-            }
-
-            $noteReasons = $this->resolveDocumentNoteReasons($noteBaseKind);
-            if (count($noteReasons) === 0) {
-                return response()->json([
-                    'message' => 'No hay maestro de tipos de nota configurado',
-                ], 422);
-            }
-
-            $resolvedReason = $this->salesBusinessRuleService->resolveNoteReason($noteReasons, $metadata);
-
-            if ($resolvedReason === null) {
-                return response()->json([
-                    'message' => 'Debe seleccionar un tipo de nota valido',
-                ], 422);
-            }
-
-            $payload['metadata'] = array_merge($metadata, [
-                ...$this->salesBusinessRuleService->buildNoteMetadata($sourceDocument, $resolvedReason),
-            ]);
-        }
-
         try {
-            $result = $this->createCommercialDocumentUseCase->execute(
+            $prepared = $this->prepareCreateCommercialDocumentUseCase->execute(
                 $authUser,
                 $payload,
                 $companyId,
-                $branchId,
-                $warehouseId,
-                $cashRegisterId
+                $workshopMultiVehicleEnabled
             );
+
+            $command = $this->createCommercialDocumentCommandFactory->fromPreparedPayload(
+                $authUser,
+                $prepared['payload'],
+                $companyId,
+                $prepared['branch_id'],
+                $prepared['warehouse_id'],
+                $prepared['cash_register_id']
+            );
+
+            $result = $this->createCommercialDocumentUseCase->executeCommand($command);
         } catch (SalesDocumentException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -872,76 +481,17 @@ class SalesController extends Controller
         ], 201);
     }
 
-    public function seriesNumbers(Request $request)
-    {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->attributes->get('resolved_company_id');
-        $branchId = $request->query('branch_id', $authUser->branch_id);
-        $warehouseId = $request->query('warehouse_id');
-        $documentKind = $request->query('document_kind');
-        $documentKindId = (int) $request->query('document_kind_id', 0);
-        $enabledOnly = filter_var($request->query('enabled_only', true), FILTER_VALIDATE_BOOLEAN);
-
-        $branchIdFilter = ($branchId !== null && $branchId !== '') ? (int) $branchId : null;
-        $warehouseIdFilter = ($warehouseId !== null && $warehouseId !== '') ? (int) $warehouseId : null;
-        $resolvedDocumentKindId = null;
-        $resolvedDocumentKindCode = null;
-
-        if ($documentKindId > 0) {
-            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
-            if (!is_array($catalogRow)) {
-                return response()->json([
-                    'message' => 'document_kind_id invalido',
-                ], 422);
-            }
-
-            $resolvedDocumentKindId = $documentKindId;
-            $resolvedDocumentKindCode = (string) ($catalogRow['code'] ?? '');
-        } elseif ($documentKind) {
-            $catalogRow = $this->findDocumentKindCatalogRowByCode((string) $documentKind);
-            if (is_array($catalogRow)) {
-                $resolvedDocumentKindId = (int) ($catalogRow['id'] ?? 0);
-                $resolvedDocumentKindCode = (string) ($catalogRow['code'] ?? '');
-            } else {
-                $resolvedDocumentKindCode = (string) $documentKind;
-            }
-        }
-
-        $rows = $this->salesLookupService->listSeriesNumbers(
-            $companyId,
-            $branchIdFilter,
-            $warehouseIdFilter,
-            $enabledOnly,
-            $resolvedDocumentKindId,
-            $resolvedDocumentKindCode
-        );
-
-        return response()->json([
-            'data' => $rows,
-        ]);
-    }
-
     public function updateCommercialDocument(UpdateCommercialDocumentRequest $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
         $payload = $request->validated();
-        $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
-        if ($documentKindId > 0) {
-            $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
-            if (!is_array($catalogRow)) {
-                return response()->json([
-                    'message' => 'document_kind_id invalido',
-                ], 422);
-            }
-
-            $payload['document_kind'] = (string) ($catalogRow['code'] ?? '');
-            $payload['document_kind_id'] = $documentKindId;
-        }
 
         try {
-            $result = $this->updateCommercialDocumentDraftUseCase->execute($authUser, $companyId, $documentId, $payload);
+            $preparedPayload = $this->prepareUpdateCommercialDocumentUseCase->execute($payload);
+
+            $result = $this->updateCommercialDocumentDraftUseCase->execute($authUser, $companyId, $documentId, $preparedPayload);
         } catch (SalesDocumentException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -971,27 +521,9 @@ class SalesController extends Controller
             false
         );
 
-        $voidPassword = trim((string) ($payload['void_password'] ?? ''));
-        unset($payload['void_password']);
-
-        if ($requireVoidPassword) {
-            if ($voidPassword === '') {
-                return response()->json([
-                    'message' => 'Debe ingresar su clave para confirmar la anulacion.',
-                ], 422);
-            }
-
-            $passwordHash = $this->salesLookupService->findUserPasswordHashById((int) $authUser->id);
-
-            if (!$passwordHash || !Hash::check($voidPassword, (string) $passwordHash)) {
-                return response()->json([
-                    'message' => 'Clave invalida para anular el documento.',
-                ], 422);
-            }
-        }
-
         try {
-            $result = $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $payload);
+            $preparedPayload = $this->prepareVoidCommercialDocumentUseCase->execute($authUser, $payload, $requireVoidPassword);
+            $result = $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $preparedPayload);
         } catch (SalesDocumentException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -1012,15 +544,14 @@ class SalesController extends Controller
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
         $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
-        $isAdminUser = str_contains($roleCode, 'ADMIN');
+        $isSellerUser = $this->isSellerUserRole($roleCode, $roleProfile);
+        $isAdminUser = $this->isAdminUserRole($roleCode, $roleProfile);
         // In SELLER_TO_CASHIER mode a cashier must see pending pre-documents from ALL
         // sellers in the branch, not only their own.
-        $isCashierUser = $roleProfile === 'CASHIER'
-            || str_contains($roleCode, 'CAJA')
-            || str_contains($roleCode, 'CAJER')
-            || str_contains($roleCode, 'CASHIER');
+        $isCashierUser = $this->isCashierUserRole($roleCode, $roleProfile);
         $conversionStateParam = strtoupper(trim((string) ($request->query('conversion_state', ''))));
         $cashierBranchScope = $isCashierUser && $conversionStateParam === 'PENDING';
+        $canViewAllSellersInPendingQueue = !$isSellerUser && $cashierBranchScope;
         $sellerToCashierEnabled = $this->resolveFeatureResolutionForContext(
             $companyId, $resolvedBranchId, 'SALES_SELLER_TO_CASHIER', false
         )['is_enabled'];
@@ -1047,7 +578,7 @@ class SalesController extends Controller
             'number' => trim((string) $request->query('number', '')),
             // Admin: no filter. Cashier viewing pending orders in separated mode: no filter (sees all sellers).
             // Everyone else (seller, etc.): restricted to own documents.
-            'seller_user_id' => ($isAdminUser || ($sellerToCashierEnabled && $cashierBranchScope))
+            'seller_user_id' => ((!$isSellerUser && $isAdminUser) || ($sellerToCashierEnabled && $canViewAllSellersInPendingQueue))
                 ? null
                 : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
@@ -1079,7 +610,9 @@ class SalesController extends Controller
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $format = strtolower(trim((string) $request->query('format', 'csv')));
         $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
-        $isAdminUser = str_contains($roleCode, 'ADMIN');
+        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
+        $isSellerUser = $this->isSellerUserRole($roleCode, $roleProfile);
+        $isAdminUser = $this->isAdminUserRole($roleCode, $roleProfile);
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, $resolvedBranchId)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -1100,7 +633,7 @@ class SalesController extends Controller
             'issue_date_to' => $request->query('issue_date_to'),
             'series' => trim((string) $request->query('series', '')),
             'number' => trim((string) $request->query('number', '')),
-            'seller_user_id' => $isAdminUser ? null : (int) $authUser->id,
+            'seller_user_id' => (!$isSellerUser && $isAdminUser) ? null : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
         $detailMode = strtoupper(trim((string) $request->query('detail', 'SUMMARY')));
@@ -1330,224 +863,41 @@ class SalesController extends Controller
                 'message' => 'Debes seleccionar la estacion de caja activa antes de convertir en este modo.',
             ], 422);
         }
-
-        if (in_array((string) $source->status, ['VOID', 'CANCELED'], true)) {
-            return response()->json([
-                'message' => 'No se puede convertir un documento anulado/cancelado',
-            ], 422);
-        }
-
-        $targetDocumentKind = (string) $payload['target_document_kind'];
-        $targetStatus = isset($payload['status']) && $payload['status'] !== null
-            ? (string) $payload['status']
-            : 'ISSUED';
-
-        if ($targetDocumentKind === 'SALES_ORDER' && strtoupper($targetStatus) !== 'ISSUED') {
-            $targetStatus = 'ISSUED';
-        }
-
-        if ((string) $source->document_kind === 'SALES_ORDER' && $targetDocumentKind === 'SALES_ORDER') {
-            return response()->json([
-                'message' => 'El documento origen ya es una nota de pedido',
-            ], 422);
-        }
-
-        $alreadyConverted = $this->salesDocumentConversionService->alreadyConvertedToTarget(
-            $companyId,
-            $sourceId,
-            $targetDocumentKind
-        );
-
-        if ($alreadyConverted) {
-            return response()->json([
-                'message' => 'El documento ya fue convertido a ' . $targetDocumentKind,
-            ], 409);
-        }
-
-        $sourceItems = $this->salesDocumentConversionService->getSourceItems($sourceId);
-
-        if ($sourceItems->isEmpty()) {
-            return response()->json([
-                'message' => 'El documento origen no tiene items para convertir',
-            ], 422);
-        }
-
-        $sourceItemIds = $sourceItems->pluck('id')->map(function ($rowId) {
-            return (int) $rowId;
-        })->values()->all();
-
-        $lotsByItem = $this->salesDocumentConversionService->getLotsGroupedByItemIds($sourceItemIds);
-
-        $series = isset($payload['series']) && trim((string) $payload['series']) !== ''
-            ? trim((string) $payload['series'])
-            : null;
-
-        if ($series === null) {
-            $targetCatalog = $this->findDocumentKindCatalogRowByCode((string) $targetDocumentKind);
-            $targetDocumentKindId = is_array($targetCatalog) ? (int) ($targetCatalog['id'] ?? 0) : 0;
-            $targetDocumentKindCode = strtoupper(trim((string) ($targetCatalog['code'] ?? $targetDocumentKind)));
-
-            $candidateSeries = $this->salesDocumentConversionService->findCandidateSeries(
+        try {
+            $prepared = $this->prepareConvertCommercialDocumentUseCase->execute(
+                $source,
+                $payload,
                 $companyId,
-                $targetDocumentKindCode,
-                $targetDocumentKindId,
-                $source->branch_id !== null ? (int) $source->branch_id : null,
-                $source->warehouse_id !== null ? (int) $source->warehouse_id : null
+                $sourceId,
+                $sellerToCashierEnabled
+            );
+        } catch (SalesDocumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], $e->httpStatus());
+        }
+
+        try {
+            $command = $this->createCommercialDocumentCommandFactory->fromPreparedPayload(
+                $authUser,
+                $prepared['forward_payload'],
+                $companyId,
+                $prepared['forward_payload']['branch_id'] ?? null,
+                $prepared['forward_payload']['warehouse_id'] ?? null,
+                $prepared['forward_payload']['cash_register_id'] ?? null
             );
 
-            if (!$candidateSeries) {
-                return response()->json([
-                    'message' => 'No existe serie habilitada para ' . $targetDocumentKind,
-                ], 422);
-            }
-
-            $series = (string) $candidateSeries->series;
+            $result = $this->createCommercialDocumentUseCase->executeCommand($command);
+        } catch (SalesDocumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], $e->httpStatus());
         }
 
-        $sourceMetadata = [];
-        if (isset($source->metadata) && $source->metadata !== null && $source->metadata !== '') {
-            $decoded = json_decode((string) $source->metadata, true);
-            if (is_array($decoded)) {
-                $sourceMetadata = $decoded;
-            }
-        }
-
-        $sourceHadStockImpact = $this->shouldAffectStock((string) $source->document_kind, (string) $source->status);
-
-        $allProductIds = $sourceItems
-            ->pluck('product_id')
-            ->filter(fn ($id) => $id !== null)
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
-        $validProductMap = [];
-        if (!empty($allProductIds)) {
-            $validProductMap = $this->salesDocumentConversionService->getValidProductIdMap($companyId, $allProductIds);
-        }
-
-        $sourceNumber = (string) $source->series . '-' . (string) $source->number;
-        $originSellerUserId = 0;
-        if (isset($sourceMetadata['origin_seller_user_id']) && is_numeric($sourceMetadata['origin_seller_user_id'])) {
-            $originSellerUserId = (int) $sourceMetadata['origin_seller_user_id'];
-        }
-        if ($originSellerUserId <= 0) {
-            $originSellerUserId = (int) ($source->created_by ?? 0);
-        }
-
-        $originSellerUserName = trim((string) ($sourceMetadata['origin_seller_user_name'] ?? ''));
-        if ($originSellerUserName === '' && $originSellerUserId > 0) {
-            $originSellerUserName = $this->salesDocumentConversionService->resolveUserFullName($originSellerUserId);
-        }
-        $resolvedPaymentMethodId = isset($payload['payment_method_id'])
-            ? (int) $payload['payment_method_id']
-            : ($source->payment_method_id !== null ? (int) $source->payment_method_id : null);
-
-        if ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER' && ($resolvedPaymentMethodId === null || $resolvedPaymentMethodId <= 0)) {
-            $resolvedPaymentMethodId = $this->resolveFallbackPaymentMethodId($companyId);
-        }
-
-        if ($this->salesBusinessRuleService->documentKindRequiresRucCustomer($targetDocumentKind)) {
-            $sourceCustomerIdentity = $this->fetchCustomerIdentityForSalesValidation($companyId, (int) $source->customer_id);
-            if (!$sourceCustomerIdentity || !$this->salesBusinessRuleService->customerHasRucIdentity($sourceCustomerIdentity)) {
-                return response()->json([
-                    'message' => 'Para convertir a este tipo de documento el cliente debe tener RUC valido (11 digitos).',
-                ], 422);
-            }
-        }
-
-        $itemsPayload = $sourceItems->map(function ($item) use ($lotsByItem, $validProductMap) {
-            $itemLots = $lotsByItem->get((int) $item->id, collect())->map(function ($lot) {
-                return [
-                    'lot_id' => (int) $lot->lot_id,
-                    'qty' => (float) $lot->qty,
-                ];
-            })->values()->all();
-
-            $productId = $item->product_id !== null ? (int) $item->product_id : null;
-            if ($productId !== null && !isset($validProductMap[$productId])) {
-                $productId = null;
-            }
-
-            return [
-                'line_no' => (int) $item->line_no,
-                'product_id' => $productId,
-                'unit_id' => $item->unit_id !== null ? (int) $item->unit_id : null,
-                'price_tier_id' => $item->price_tier_id !== null ? (int) $item->price_tier_id : null,
-                'tax_category_id' => $item->tax_category_id !== null ? (int) $item->tax_category_id : null,
-                'description' => (string) $item->description,
-                'qty' => (float) $item->qty,
-                'qty_base' => (float) $item->qty_base,
-                'conversion_factor' => (float) $item->conversion_factor,
-                'base_unit_price' => (float) $item->base_unit_price,
-                'unit_price' => (float) $item->unit_price,
-                'unit_cost' => (float) $item->unit_cost,
-                'wholesale_discount_percent' => (float) $item->wholesale_discount_percent,
-                'price_source' => $item->price_source ?: 'MANUAL',
-                'discount_total' => (float) $item->discount_total,
-                'tax_total' => (float) $item->tax_total,
-                'subtotal' => (float) $item->subtotal,
-                'total' => (float) $item->total,
-                'metadata' => null,
-                'lots' => !empty($itemLots) ? $itemLots : null,
-            ];
-        })->values()->all();
-
-        $conversionMetadata = [
-            'source_document_id' => $sourceId,
-            'source_document_kind' => (string) $source->document_kind,
-            'source_document_number' => $sourceNumber,
-            'conversion_origin' => 'SALES_MODULE',
-            'stock_already_discounted' => $sourceHadStockImpact,
-            'defer_sunat_send' => filter_var($payload['defer_sunat_send'] ?? false, FILTER_VALIDATE_BOOLEAN),
-        ];
-
-        $conversionMetadata['origin_seller_user_id'] = $originSellerUserId > 0 ? $originSellerUserId : null;
-        $conversionMetadata['origin_seller_user_name'] = $originSellerUserName !== '' ? $originSellerUserName : null;
-
-        $forwardPayload = [
-            'company_id' => $companyId,
-            'branch_id' => $source->branch_id !== null ? (int) $source->branch_id : null,
-            'warehouse_id' => $source->warehouse_id !== null ? (int) $source->warehouse_id : null,
-            'cash_register_id' => isset($payload['cash_register_id'])
-                ? (int) $payload['cash_register_id']
-                : (isset($sourceMetadata['cash_register_id']) && $sourceMetadata['cash_register_id'] !== null
-                    ? (int) $sourceMetadata['cash_register_id']
-                    : null),
-            'document_kind' => $targetDocumentKind,
-            'series' => $series,
-            'issue_at' => $this->resolveIssueAtForStorage($payload['issue_at'] ?? null),
-            'due_at' => $this->resolveDueAtForStorage($payload['due_at'] ?? $source->due_at),
-            'customer_id' => (int) $source->customer_id,
-            'currency_id' => (int) $source->currency_id,
-            'payment_method_id' => $resolvedPaymentMethodId,
-            'exchange_rate' => $source->exchange_rate !== null ? (float) $source->exchange_rate : null,
-            'notes' => $payload['notes'] ?? $source->notes,
-            'metadata' => array_merge($sourceMetadata, $conversionMetadata),
-            'status' => $targetStatus,
-            'items' => $itemsPayload,
-            'payments' => (
-                in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
-                || ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER')
-            )
-                && strtoupper($targetStatus) === 'ISSUED'
-                && $resolvedPaymentMethodId !== null
-                ? [[
-                    'payment_method_id' => $resolvedPaymentMethodId,
-                    'amount' => (float) $source->total,
-                    'status' => 'PAID',
-                    'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
-                    'method' => 'REGISTERED',
-                ]]
-                : [],
-        ];
-
-        $forwardRequest = Request::create('/api/sales/commercial-documents', 'POST', $forwardPayload);
-        $forwardRequest->attributes->set('auth_user', $authUser);
-        $forwardRequest->attributes->set('resolved_company_id', $companyId);
-
-        return $this->createCommercialDocument($forwardRequest);
+        return response()->json([
+            'message' => 'Commercial document created',
+            'data' => $result,
+        ], 201);
     }
 
     public function showCommercialDocument(Request $request, $id)
@@ -1768,6 +1118,7 @@ class SalesController extends Controller
                 'customerName' => (string) ($doc->customer_name ?? '-'),
                 'customerDocNumber' => (string) ($doc->customer_doc_number ?? '-'),
                 'customerAddress' => (string) ($doc->customer_address ?? '-'),
+                'notes' => isset($doc->notes) ? (trim((string) $doc->notes) !== '' ? (string) $doc->notes : null) : null,
                 'subtotal' => (float) (($doc->subtotal ?? 0) ?: ($gravadaTotal + $inafectaTotal + $exoneradaTotal)),
                 'taxTotal' => (float) $taxTotal,
                 'grandTotal' => (float) $doc->total,
@@ -1967,6 +1318,10 @@ class SalesController extends Controller
                 $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
                 $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
                 $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+                $documentNotes = trim((string) ($doc['notes'] ?? ''));
+                $documentNotesLine = $documentNotes !== ''
+                    ? '<div class="line"><span class="k">OBSERVACIONES:</span><span class="v">' . $this->escapeHtml($documentNotes) . '</span></div>'
+                    : '';
                 $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
                 $currencyCode = strtoupper((string) ($doc['currencyCode'] ?? 'PEN'));
                 $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? ($currencyCode === 'PEN' ? 'S/' : $currencyCode)));
@@ -2144,6 +1499,44 @@ class SalesController extends Controller
                     ? '<div class="sign-box"><strong>Firma electronica:</strong> ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
                     : '';
 
+                $resolveTaxAccountNumber = function (array $metadata, string $flatKey, string $nestedKey): string {
+                    $flat = trim((string) ($metadata[$flatKey] ?? ''));
+                    if ($flat !== '') {
+                        return $flat;
+                    }
+
+                    $nested = $metadata[$nestedKey] ?? null;
+                    if (!is_array($nested)) {
+                        return '';
+                    }
+
+                    return trim((string) ($nested['account_number'] ?? ''));
+                };
+
+                $tributaryAccountLines = [];
+                if (!empty($metaData['has_detraccion'])) {
+                    $account = $resolveTaxAccountNumber($metaData, 'detraccion_account_number', 'detraccion_account');
+                    if ($account !== '') {
+                        $tributaryAccountLines[] = 'Detraccion: ' . $this->escapeHtml($account);
+                    }
+                }
+                if (!empty($metaData['has_retencion'])) {
+                    $account = $resolveTaxAccountNumber($metaData, 'retencion_account_number', 'retencion_account');
+                    if ($account !== '') {
+                        $tributaryAccountLines[] = 'Retencion: ' . $this->escapeHtml($account);
+                    }
+                }
+                if (!empty($metaData['has_percepcion'])) {
+                    $account = $resolveTaxAccountNumber($metaData, 'percepcion_account_number', 'percepcion_account');
+                    if ($account !== '') {
+                        $tributaryAccountLines[] = 'Percepcion: ' . $this->escapeHtml($account);
+                    }
+                }
+
+                $tributaryAccountBlock = count($tributaryAccountLines) > 0
+                    ? '<div class="sign-box"><strong>Cuentas tributarias:</strong><br>' . implode('<br>', $tributaryAccountLines) . '</div>'
+                    : '';
+
                 return <<<HTML
 <!doctype html>
 <html>
@@ -2236,6 +1629,7 @@ class SalesController extends Controller
                         <div class="line"><span class="k">SENOR(ES):</span><span class="v">{$customer}</span></div>
                         <div class="line"><span class="k">TELEFONO:</span><span class="v">-</span></div>
                         <div class="line"><span class="k">DIRECCION:</span><span class="v">{$customerAddress}</span></div>
+                        {$documentNotesLine}
                         {$vehicleBlock}
                     </td>
                     <td>
@@ -2301,6 +1695,7 @@ class SalesController extends Controller
         </section>
 
         <section class="extras">
+            {$tributaryAccountBlock}
             {$banksSection}
             {$paymentBrandsSection}
             {$electronicSignatureBlock}
@@ -2350,6 +1745,10 @@ HTML;
         $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
         $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+        $documentNotes = trim((string) ($doc['notes'] ?? ''));
+        $documentNotesRow = $documentNotes !== ''
+            ? '<div class="info-row"><div class="info-label">OBSERVACIONES:</div><div class="info-value">' . $this->escapeHtml($documentNotes) . '</div></div>'
+            : '';
         $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
         $companyId = (int) ($company['company_id'] ?? $company['id'] ?? 0);
         $branchId = isset($doc['branchId']) && $doc['branchId'] !== null
@@ -2535,6 +1934,60 @@ HTML;
                     : '')
             : '';
 
+        $resolveTaxAccountNumber = function (array $metadata, string $flatKey, string $nestedKey): string {
+            $flat = trim((string) ($metadata[$flatKey] ?? ''));
+            if ($flat !== '') {
+                return $flat;
+            }
+
+            $nested = $metadata[$nestedKey] ?? null;
+            if (!is_array($nested)) {
+                return '';
+            }
+
+            return trim((string) ($nested['account_number'] ?? ''));
+        };
+
+        $taxConditionRows = '';
+        if (!empty($docMetadata['has_detraccion'])) {
+            $account = $resolveTaxAccountNumber($docMetadata, 'detraccion_account_number', 'detraccion_account');
+            if ($account !== '') {
+                $taxConditionRows .= '<div class="summary-row"><span class="summary-label">Cuenta detraccion</span><span class="summary-value">' . $this->escapeHtml($account) . '</span></div>';
+            }
+        }
+        if (!empty($docMetadata['has_retencion'])) {
+            $account = $resolveTaxAccountNumber($docMetadata, 'retencion_account_number', 'retencion_account');
+            if ($account !== '') {
+                $taxConditionRows .= '<div class="summary-row"><span class="summary-label">Cuenta retencion</span><span class="summary-value">' . $this->escapeHtml($account) . '</span></div>';
+            }
+        }
+        if (!empty($docMetadata['has_percepcion'])) {
+            $account = $resolveTaxAccountNumber($docMetadata, 'percepcion_account_number', 'percepcion_account');
+            if ($account !== '') {
+                $taxConditionRows .= '<div class="summary-row"><span class="summary-label">Cuenta percepcion</span><span class="summary-value">' . $this->escapeHtml($account) . '</span></div>';
+            }
+        }
+
+        $ticketTaxAccountsBlock = $taxConditionRows !== ''
+            ? '<div class="company-footer-title">Condiciones tributarias</div>' . $taxConditionRows
+            : '';
+
+        $electronicSignatureRaw = $this->findFirstMetaStringValue($docMetadata, [
+            'sunat_electronic_signature',
+            'sunat_signature',
+            'firma_electronica',
+            'firma',
+            'signature',
+            'hash_cpe',
+            'codigo_hash',
+            'digest_value',
+            'digestValue',
+        ]);
+        $electronicSignatureRaw = $this->normalizeElectronicSignatureValue($electronicSignatureRaw);
+        $ticketElectronicSignatureBlock = $electronicSignatureRaw !== ''
+            ? '<div class="summary-words">Firma electronica: ' . $this->escapeHtml($electronicSignatureRaw) . '</div>'
+            : '';
+
         $a4HeaderHtml = $isA4 ? <<<A4HEAD
 <div class="header--a4">
     <div class="logo-col">
@@ -2650,6 +2103,7 @@ TICKETHEAD;
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
     <div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div>
     <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
+    {$documentNotesRow}
     {$vehicleRow}
 
     <div class="divider"></div>
@@ -2667,6 +2121,8 @@ TICKETHEAD;
     </div>
 
     <div class="footer">
+            {$ticketTaxAccountsBlock}
+            {$ticketElectronicSignatureBlock}
       {$banksSection}
             {$paymentBrandsSection}
       <div>Gracias por su compra</div>
@@ -2871,6 +2327,45 @@ HTML;
         }
     }
 
+    private function isSellerUserRole(string $roleCode, string $roleProfile): bool
+    {
+        if ($roleProfile === 'SELLER' || str_contains($roleProfile, 'VENDED')) {
+            return true;
+        }
+
+        foreach (self::SELLER_ROLE_MARKERS as $marker) {
+            if (str_contains($roleCode, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isCashierUserRole(string $roleCode, string $roleProfile): bool
+    {
+        if ($roleProfile === 'CASHIER') {
+            return true;
+        }
+
+        foreach (self::CASHIER_ROLE_MARKERS as $marker) {
+            if (str_contains($roleCode, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isAdminUserRole(string $roleCode, string $roleProfile): bool
+    {
+        if ($this->isSellerUserRole($roleCode, $roleProfile)) {
+            return false;
+        }
+
+        return str_contains($roleCode, 'ADMIN');
+    }
+
     private function amountToSpanishWords(float $amount, string $currencyCode = 'PEN'): string
     {
         $safeAmount = max(0, $amount);
@@ -3031,42 +2526,7 @@ HTML;
     private function resolveDocumentNoteReasons(string $documentKind): array
     {
         $normalizedKind = $this->salesBusinessRuleService->resolveNoteBaseKind($documentKind) ?? strtoupper($documentKind);
-        $rows = $this->salesLookupService->resolveDocumentNoteReasonsRows($normalizedKind);
-
-        if (count($rows) === 0) {
-            return $this->defaultDocumentNoteReasons($normalizedKind);
-        }
-
-        return $rows;
-    }
-
-    private function resolveNoteBaseKind(string $documentKind): ?string
-    {
-        return $this->salesBusinessRuleService->resolveNoteBaseKind($documentKind);
-    }
-
-    private function defaultDocumentNoteReasons(string $documentKind): array
-    {
-        if ($documentKind === 'DEBIT_NOTE') {
-            return [
-                ['id' => 1, 'code' => '01', 'description' => 'InterÃ©s por mora'],
-                ['id' => 2, 'code' => '02', 'description' => 'Aumento en el valor'],
-                ['id' => 3, 'code' => '03', 'description' => 'Penalidades u otros conceptos'],
-            ];
-        }
-
-        return [
-            ['id' => 1, 'code' => '01', 'description' => 'AnulaciÃ³n de la operaciÃ³n'],
-            ['id' => 2, 'code' => '02', 'description' => 'AnulaciÃ³n por error en el RUC'],
-            ['id' => 3, 'code' => '03', 'description' => 'CorrecciÃ³n por error en la descripciÃ³n'],
-            ['id' => 4, 'code' => '04', 'description' => 'Descuento global'],
-            ['id' => 5, 'code' => '05', 'description' => 'Descuento por Ã­tem'],
-            ['id' => 6, 'code' => '06', 'description' => 'DevoluciÃ³n total'],
-            ['id' => 7, 'code' => '07', 'description' => 'DevoluciÃ³n por Ã­tem'],
-            ['id' => 8, 'code' => '08', 'description' => 'BonificaciÃ³n'],
-            ['id' => 9, 'code' => '09', 'description' => 'DisminuciÃ³n en el valor'],
-            ['id' => 10, 'code' => '10', 'description' => 'Otros conceptos'],
-        ];
+        return $this->salesLookupService->resolveDocumentNoteReasonsRows($normalizedKind);
     }
 
     private function getDetractionMinAmount(int $companyId, $branchId): float
@@ -3526,16 +2986,6 @@ HTML;
     private function enabledUnits(int $companyId)
     {
         return $this->salesLookupService->enabledUnits($companyId);
-    }
-
-    private function ensureCompanyUnitsTable(): void
-    {
-        // Table is now guaranteed by migration 2026_04_18_000006. No-op.
-    }
-
-    private function ensureCustomerPriceProfilesTable(): void
-    {
-        // Table is now guaranteed by migration 2026_04_18_000006. No-op.
     }
 
     private function ensureCustomersPhoneColumn(): void

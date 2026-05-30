@@ -185,15 +185,17 @@ class GreGuideService
             return [];
         }
 
+        $qLike = strlen($q) <= 3 ? $q . '%' : '%' . $q . '%';
+
         $limit = max(1, min(60, $limit));
 
         if ($this->tableExists('core.ubigeos')) {
             return DB::table('core.ubigeos')
-                ->where(function ($sub) use ($q) {
+                ->where(function ($sub) use ($q, $qLike) {
                     $sub->where('code', 'ILIKE', $q . '%')
-                        ->orWhere('department', 'ILIKE', '%' . $q . '%')
-                        ->orWhere('province', 'ILIKE', '%' . $q . '%')
-                        ->orWhere('district', 'ILIKE', '%' . $q . '%');
+                        ->orWhere('department', 'ILIKE', $qLike)
+                        ->orWhere('province', 'ILIKE', $qLike)
+                        ->orWhere('district', 'ILIKE', $qLike);
                 })
                 ->orderBy('code')
                 ->limit($limit)
@@ -211,11 +213,11 @@ class GreGuideService
         $source = $this->detectUbigeoSource();
         if ($source !== null) {
             return DB::table($source['table'])
-                ->where(function ($sub) use ($q, $source) {
+                ->where(function ($sub) use ($q, $qLike, $source) {
                     $sub->where($source['code'], 'ILIKE', $q . '%')
-                        ->orWhere($source['department'], 'ILIKE', '%' . $q . '%')
-                        ->orWhere($source['province'], 'ILIKE', '%' . $q . '%')
-                        ->orWhere($source['district'], 'ILIKE', '%' . $q . '%');
+                    ->orWhere($source['department'], 'ILIKE', $qLike)
+                    ->orWhere($source['province'], 'ILIKE', $qLike)
+                    ->orWhere($source['district'], 'ILIKE', $qLike);
                 })
                 ->orderBy($source['code'])
                 ->limit($limit)
@@ -342,14 +344,15 @@ class GreGuideService
         }
 
         if (!empty($filters['issue_date'])) {
-            $query->whereDate('gg.issue_date', (string) $filters['issue_date']);
+            $query->where('gg.issue_date', (string) $filters['issue_date']);
         }
 
         if (!empty($filters['search'])) {
             $search = trim((string) $filters['search']);
-            $query->where(function ($q) use ($search) {
-                $q->where('gg.identifier', 'ILIKE', '%' . $search . '%')
-                    ->orWhere('gg.series', 'ILIKE', '%' . $search . '%')
+            $searchLike = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
+            $query->where(function ($q) use ($search, $searchLike) {
+                $q->where('gg.identifier', 'ILIKE', $searchLike)
+                    ->orWhere('gg.series', 'ILIKE', $searchLike)
                     ->orWhereRaw("CAST(gg.number AS TEXT) ILIKE ?", ['%' . $search . '%'])
                     ->orWhereRaw("COALESCE(gg.destinatario->>'doc_number','') ILIKE ?", ['%' . $search . '%'])
                     ->orWhereRaw("COALESCE(gg.destinatario->>'name','') ILIKE ?", ['%' . $search . '%']);

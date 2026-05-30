@@ -13,7 +13,8 @@ class ReferenceDocumentRepository
         ?int $branchId,
         ?string $noteTargetKind,
         string $noteKind,
-        int $limit
+        int $limit,
+        ?int $sellerUserId = null
     ): Collection {
         $query = DB::table('sales.commercial_documents as d')
             ->select([
@@ -64,6 +65,10 @@ class ReferenceDocumentRepository
             $query->where('d.branch_id', $branchId);
         }
 
+        if ($sellerUserId !== null && $sellerUserId > 0) {
+            $query->whereRaw("COALESCE(d.seller_user_id, CASE WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT ELSE NULL END, d.created_by) = ?", [$sellerUserId]);
+        }
+
         if ($noteKind === 'CREDIT_NOTE') {
             $query->whereRaw("(COALESCE(d.total, 0) - COALESCE(notes_agg.applied_credit_total, 0)) > 0");
         }
@@ -73,7 +78,7 @@ class ReferenceDocumentRepository
         }
 
         return $query
-            ->orderBy('d.issue_at', 'desc')
+            ->orderByRaw('COALESCE(d.created_at, d.issue_at) DESC')
             ->orderBy('d.id', 'desc')
             ->limit($limit)
             ->get();

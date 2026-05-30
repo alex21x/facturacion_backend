@@ -2,12 +2,16 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\Auth\AuthSessionService;
 use Closure;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
 
 class ModuleRbacAccess
 {
+    public function __construct(
+        private AuthSessionService $authSessionService
+    ) {
+    }
+
     public function handle($request, Closure $next, $moduleCode, $action = 'view')
     {
         $authUser = $request->attributes->get('auth_user');
@@ -18,57 +22,24 @@ class ModuleRbacAccess
             ], 401);
         }
 
-        $companyId = isset($authUser->company_id) ? (int) $authUser->company_id : 0;
-        $cacheKey = "rbac.{$companyId}.{$authUser->id}.{$moduleCode}";
-        $cached   = Cache::get($cacheKey);
+        $permissions = $this->authSessionService->resolveUserPermissions((int) $authUser->id);
+        $modulePermission = $permissions[$moduleCode] ?? null;
 
-        if ($cached === null) {
-            $module = DB::table('appcfg.modules')
-                ->select('id', 'code', 'status')
-                ->where('code', $moduleCode)
-                ->where('status', 1)
-                ->first();
-
-            if (!$module) {
-                return response()->json([
-                    'message' => 'Module not found or inactive',
-                    'module_code' => $moduleCode,
-                ], 403);
-            }
-
-            $roleAccess = DB::table('auth.role_module_access as rma')
-                ->join('auth.user_roles as ur', 'ur.role_id', '=', 'rma.role_id')
-                ->where('ur.user_id', $authUser->id)
-                ->where('rma.module_id', $module->id)
-                ->selectRaw('COALESCE(bool_or(rma.can_view), false) as can_view')
-                ->selectRaw('COALESCE(bool_or(rma.can_create), false) as can_create')
-                ->selectRaw('COALESCE(bool_or(rma.can_update), false) as can_update')
-                ->selectRaw('COALESCE(bool_or(rma.can_delete), false) as can_delete')
-                ->selectRaw('COALESCE(bool_or(rma.can_export), false) as can_export')
-                ->selectRaw('COALESCE(bool_or(rma.can_approve), false) as can_approve')
-                ->first();
-
-            $userOverride = DB::table('auth.user_module_overrides')
-                ->where('user_id', $authUser->id)
-                ->where('module_id', $module->id)
-                ->first();
-
-            $cached = [
-                'module_id'   => $module->id,
-                'module_code' => $module->code,
-                'access'      => [
-                    'view'    => $this->resolveFlag($userOverride, $roleAccess, 'can_view'),
-                    'create'  => $this->resolveFlag($userOverride, $roleAccess, 'can_create'),
-                    'update'  => $this->resolveFlag($userOverride, $roleAccess, 'can_update'),
-                    'delete'  => $this->resolveFlag($userOverride, $roleAccess, 'can_delete'),
-                    'export'  => $this->resolveFlag($userOverride, $roleAccess, 'can_export'),
-                    'approve' => $this->resolveFlag($userOverride, $roleAccess, 'can_approve'),
-                ],
-            ];
-            Cache::put($cacheKey, $cached, 300);
+        if (!is_array($modulePermission)) {
+            return response()->json([
+                'message' => 'Module not found or inactive',
+                'module_code' => $moduleCode,
+            ], 403);
         }
 
-        $access = $cached['access'];
+        $access = [
+            'view' => (bool) ($modulePermission['can_view'] ?? false),
+            'create' => (bool) ($modulePermission['can_create'] ?? false),
+            'update' => (bool) ($modulePermission['can_update'] ?? false),
+            'delete' => (bool) ($modulePermission['can_delete'] ?? false),
+            'export' => (bool) ($modulePermission['can_export'] ?? false),
+            'approve' => (bool) ($modulePermission['can_approve'] ?? false),
+        ];
 
         if (!array_key_exists($action, $access)) {
             return response()->json([
@@ -91,23 +62,10 @@ class ModuleRbacAccess
             ], 403);
         }
 
-        $request->attributes->set('rbac_module_id', $cached['module_id']);
-        $request->attributes->set('rbac_module_code', $cached['module_code']);
+        $request->attributes->set('rbac_module_id', null);
+        $request->attributes->set('rbac_module_code', $moduleCode);
         $request->attributes->set('rbac_access', $access);
 
         return $next($request);
-    }
-
-    private function resolveFlag($userOverride, $roleAccess, string $column): bool
-    {
-        if ($userOverride && $userOverride->{$column} !== null) {
-            return (bool) $userOverride->{$column};
-        }
-
-        if ($roleAccess && $roleAccess->{$column} !== null) {
-            return (bool) $roleAccess->{$column};
-        }
-
-        return false;
     }
 }

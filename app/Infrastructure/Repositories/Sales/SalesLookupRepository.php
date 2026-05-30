@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\DB;
 
 class SalesLookupRepository
 {
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
     public function branchExists(int $companyId, int $branchId): bool
     {
         return DB::table('core.branches')
@@ -89,7 +92,33 @@ class SalesLookupRepository
 
     public function createPaymentMethod(array $payload): int
     {
-        return (int) DB::transaction(function () use ($payload) {
+        try {
+            return (int) DB::transaction(function () use ($payload) {
+            $name = trim((string) ($payload['name'] ?? ''));
+            $code = strtoupper(trim((string) ($payload['code'] ?? '')));
+
+            if ($name === '') {
+                throw new \RuntimeException('Payment method name is required');
+            }
+
+            $nameExists = DB::table('master.payment_types')
+                ->whereRaw('UPPER(TRIM(name)) = ?', [strtoupper($name)])
+                ->exists();
+
+            if ($nameExists) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if ($code !== '') {
+                $codeExists = DB::table('master.payment_types')
+                    ->whereRaw("UPPER(TRIM(COALESCE(comment, ''))) = ?", [$code])
+                    ->exists();
+
+                if ($codeExists) {
+                    throw new \RuntimeException('Payment method code already exists');
+                }
+            }
+
             $lastRow = DB::table('master.payment_types')
                 ->select('id')
                 ->orderByDesc('id')
@@ -100,14 +129,27 @@ class SalesLookupRepository
 
             DB::table('master.payment_types')->insert([
                 'id' => $nextId,
-                'name' => trim((string) $payload['name']),
-                'comment' => strtoupper(trim((string) $payload['code'])),
+                'name' => $name,
+                'comment' => $code,
                 'is_active' => $normalizedStatus === 1 ? 1 : 0,
                 'status' => $normalizedStatus,
             ]);
 
             return $nextId;
-        });
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            $message = strtolower((string) $e->getMessage());
+
+            if (str_contains($message, 'payment_types_name_key')) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if (str_contains($message, 'payment_types_comment_key')) {
+                throw new \RuntimeException('Payment method code already exists');
+            }
+
+            throw $e;
+        }
     }
 
     public function paymentMethodExists(int $id): bool
@@ -117,7 +159,49 @@ class SalesLookupRepository
 
     public function updatePaymentMethod(int $id, array $updates): void
     {
-        DB::table('master.payment_types')->where('id', $id)->update($updates);
+        if (array_key_exists('name', $updates)) {
+            $name = trim((string) $updates['name']);
+            if ($name !== '') {
+                $nameExists = DB::table('master.payment_types')
+                    ->where('id', '<>', $id)
+                    ->whereRaw('UPPER(TRIM(name)) = ?', [strtoupper($name)])
+                    ->exists();
+
+                if ($nameExists) {
+                    throw new \RuntimeException('Payment method name already exists');
+                }
+            }
+        }
+
+        if (array_key_exists('comment', $updates)) {
+            $code = strtoupper(trim((string) $updates['comment']));
+            if ($code !== '') {
+                $codeExists = DB::table('master.payment_types')
+                    ->where('id', '<>', $id)
+                    ->whereRaw("UPPER(TRIM(COALESCE(comment, ''))) = ?", [$code])
+                    ->exists();
+
+                if ($codeExists) {
+                    throw new \RuntimeException('Payment method code already exists');
+                }
+            }
+        }
+
+        try {
+            DB::table('master.payment_types')->where('id', $id)->update($updates);
+        } catch (\Illuminate\Database\QueryException $e) {
+            $message = strtolower((string) $e->getMessage());
+
+            if (str_contains($message, 'payment_types_name_key')) {
+                throw new \RuntimeException('Payment method name already exists');
+            }
+
+            if (str_contains($message, 'payment_types_comment_key')) {
+                throw new \RuntimeException('Payment method code already exists');
+            }
+
+            throw $e;
+        }
     }
 
     public function findCompanyById(int $companyId, array $columns): ?\App\Application\DTOs\AppConfig\CompanyProfileDTO
@@ -753,7 +837,7 @@ class SalesLookupRepository
         }
 
         $rows = $query
-            ->orderBy('d.issue_at', 'desc')
+            ->orderByRaw('COALESCE(d.created_at, d.issue_at) DESC')
             ->orderBy('d.id', 'desc')
             ->offset(($page - 1) * $limit)
             ->limit($limit)
@@ -2515,7 +2599,7 @@ class SalesLookupRepository
         $workshopVehicleSearchEnabled = (bool) ($filters['workshop_vehicle_search_enabled'] ?? false);
 
         if ($sellerUserId !== null && $sellerUserId > 0) {
-            $query->where('d.created_by', $sellerUserId);
+            $query->whereRaw("COALESCE(d.seller_user_id, CASE WHEN COALESCE((d.metadata->>'origin_seller_user_id'), '') ~ '^[0-9]+$' THEN (d.metadata->>'origin_seller_user_id')::BIGINT ELSE NULL END, d.created_by) = ?", [$sellerUserId]);
         }
 
         if ($branchId !== null && $branchId !== '') {
@@ -2593,7 +2677,7 @@ class SalesLookupRepository
         if ($customerId > 0) {
             $query->where('d.customer_id', $customerId);
         } elseif ($customer !== '') {
-            $like = '%' . $customer . '%';
+            $like = strlen($customer) <= 3 ? $customer . '%' : '%' . $customer . '%';
             $query->where(function (Builder $nested) use ($like, $workshopVehicleSearchEnabled): void {
                 $nested->where('c.legal_name', 'ilike', $like)
                     ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like])
@@ -2617,7 +2701,7 @@ class SalesLookupRepository
         }
 
         if ($workshopVehicleSearchEnabled && $vehicle !== '') {
-            $vehicleLike = '%' . $vehicle . '%';
+            $vehicleLike = strlen($vehicle) <= 3 ? $vehicle . '%' : '%' . $vehicle . '%';
             $query->where(function (Builder $nested) use ($vehicleLike): void {
                 $nested->whereRaw("COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot'), '') ILIKE ?", [$vehicleLike]);
             });
@@ -2628,15 +2712,16 @@ class SalesLookupRepository
         }
 
         if ($issueDateFrom) {
-            $query->whereDate('d.issue_at', '>=', $issueDateFrom);
+            $query->where('d.issue_at', '>=', $issueDateFrom . self::DAY_START_SUFFIX);
         }
 
         if ($issueDateTo) {
-            $query->whereDate('d.issue_at', '<=', $issueDateTo);
+            $query->where('d.issue_at', '<=', $issueDateTo . self::DAY_END_SUFFIX);
         }
 
         if ($series !== '') {
-            $query->where('d.series', 'ilike', '%' . $series . '%');
+            $seriesLike = strlen($series) <= 3 ? $series . '%' : '%' . $series . '%';
+            $query->where('d.series', 'ilike', $seriesLike);
         }
 
         if ($number !== '') {

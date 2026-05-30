@@ -15,9 +15,9 @@ use App\Http\Requests\GreGuide\StatusTicketGreGuideRequest;
 use App\Http\Requests\GreGuide\StoreGreGuideRequest;
 use App\Http\Requests\GreGuide\TaxBridgeAuditHistoryGreGuideRequest;
 use App\Http\Requests\GreGuide\UpdateGreGuideRequest;
+use App\Infrastructure\Repositories\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\GreGuideService;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
-use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
 
 class GreGuideController extends Controller

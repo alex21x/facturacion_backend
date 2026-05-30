@@ -34,6 +34,11 @@ class CompanyRateLimitService
         return $this->queryService->listMatrixRows($systemCompanyId, $defaultRead, $defaultWrite, $defaultReports);
     }
 
+    public function resolveEffectiveLimit(int $companyId, string $profile, int $defaultLimit): int
+    {
+        return $this->queryService->resolveEffectiveLimit($companyId, $profile, $defaultLimit);
+    }
+
     public function updateCompanyRateLimit(int $companyId, array $payload, ?int $updatedBy): void
     {
         $this->commandService->updateCompanyRateLimit($companyId, $payload, $updatedBy);

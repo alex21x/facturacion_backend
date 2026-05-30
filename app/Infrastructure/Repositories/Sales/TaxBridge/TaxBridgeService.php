@@ -2381,9 +2381,13 @@ class TaxBridgeService
 
     private function nextVoidCommunicationNumber(int $companyId): int
     {
+        $today = now()->toDateString();
+        $from = $today . ' 00:00:00';
+        $to = $today . ' 23:59:59.999999';
+
         $todayCount = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
-            ->whereDate('updated_at', now()->toDateString())
+            ->whereBetween('updated_at', [$from, $to])
             ->count();
 
         return max(1, (int) $todayCount + 1);

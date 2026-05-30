@@ -7,6 +7,7 @@ use App\Infrastructure\Repositories\AppConfig\CompanyRateLimitRepository;
 class CompanyRateLimitQueryService
 {
     private ?bool $hasRateLimitTable = null;
+    private ?bool $hasProfileColumns = null;
 
     public function __construct(
         private CompanyRateLimitRepository $companyRateLimitRepository
@@ -64,5 +65,49 @@ class CompanyRateLimitQueryService
                 'updated_at' => $limit->updated_at ?? null,
             ];
         })->values()->all();
+    }
+
+    public function resolveEffectiveLimit(int $companyId, string $profile, int $defaultLimit): int
+    {
+        if (!$this->hasTable()) {
+            return $defaultLimit;
+        }
+
+        $hasProfileColumns = $this->hasProfileColumns();
+        $row = $this->companyRateLimitRepository->findCompanyRateLimitByCompanyId($companyId, $hasProfileColumns);
+
+        if (!$row) {
+            return $defaultLimit;
+        }
+
+        if ((int) ($row->is_enabled ?? 1) !== 1) {
+            return 0;
+        }
+
+        $profileColumn = 'requests_per_minute_' . $profile;
+        $configured = 0;
+
+        if ($hasProfileColumns && isset($row->{$profileColumn})) {
+            $configured = (int) ($row->{$profileColumn} ?? 0);
+        }
+
+        if ($configured <= 0) {
+            $configured = (int) ($row->requests_per_minute ?? 0);
+        }
+
+        return $configured > 0 ? $configured : $defaultLimit;
+    }
+
+    private function hasProfileColumns(): bool
+    {
+        if ($this->hasProfileColumns !== null) {
+            return $this->hasProfileColumns;
+        }
+
+        return $this->hasProfileColumns = $this->companyRateLimitRepository->hasColumns('appcfg', 'company_rate_limits', [
+            'requests_per_minute_read',
+            'requests_per_minute_write',
+            'requests_per_minute_reports',
+        ]);
     }
 }

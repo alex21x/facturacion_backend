@@ -39,6 +39,7 @@ class UpdateCommercialDocumentRequest extends SalesDocumentKindFormRequest
             'items.*.tax_total' => 'nullable|numeric|min:0',
             'items.*.subtotal' => 'nullable|numeric|min:0',
             'items.*.total' => 'nullable|numeric|min:0',
+            'items.*.notes' => 'nullable|string|max:300',
             'items.*.metadata' => 'nullable|array',
             'items.*.lots' => 'nullable|array',
             'items.*.lots.*.lot_id' => 'required_with:items.*.lots|integer|min:1',

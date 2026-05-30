@@ -1843,18 +1843,24 @@ class AppConfigController extends Controller
             $isSuperAdmin = in_array($callerRoleCode, ['SUPERADMIN', 'SUPER_ADMIN'], true);
 
             if (!$isSuperAdmin) {
-                $submittedCodes = array_map(
-                    fn ($f) => strtoupper(trim((string) ($f['feature_code'] ?? ''))),
-                    $payload['features']
-                );
-                $blocked = array_intersect($submittedCodes, $superadminOnlyCodes);
+                $existingSettings = $this->featureConfigService->getCommerceSettings($companyId, $branchId);
+                $existingByCode = collect($existingSettings['features'] ?? [])->keyBy(function ($feature) {
+                    return strtoupper(trim((string) ($feature['feature_code'] ?? '')));
+                });
 
-                if (!empty($blocked)) {
-                    return response()->json([
-                        'message' => 'Las siguientes funcionalidades solo pueden ser modificadas desde el Portal Administrador: ' . implode(', ', array_values($blocked)),
-                        'blocked_codes' => array_values($blocked),
-                    ], 403);
+                // Non-superadmin can update config fields, but must not alter the
+                // enable/disable state of superadmin-only feature flags.
+                // Keep persisted state to avoid false 403 when payload includes stale
+                // values while saving only tax account/config data.
+                foreach ($payload['features'] as &$feature) {
+                    $featureCode = strtoupper(trim((string) ($feature['feature_code'] ?? '')));
+                    if ($featureCode === '' || !in_array($featureCode, $superadminOnlyCodes, true)) {
+                        continue;
+                    }
+
+                    $feature['is_enabled'] = (bool) data_get($existingByCode->get($featureCode), 'is_enabled', false);
                 }
+                unset($feature);
             }
         }
 
@@ -2992,13 +2998,8 @@ class AppConfigController extends Controller
 
         $this->adminSettingsMatrixService->upsertCompanyFeatureTogglesBulk($companyId, $valuesByCode);
 
-        // Invalidate feature config cache for this company
-        if (class_exists('App\\Services\\FeatureConfigService')) {
-            $service = new \App\Services\FeatureConfigService();
-            if (method_exists($service, 'invalidateCache')) {
-                $service->invalidateCache($companyId, null);
-            }
-        }
+        // Invalidate feature config cache for this company.
+        $this->featureConfigService->invalidateCache($companyId, null);
 
         return $this->companyCommerceAdminMatrix($request);
     }

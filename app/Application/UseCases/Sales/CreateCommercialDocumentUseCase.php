@@ -11,9 +11,14 @@ class CreateCommercialDocumentUseCase
     {
     }
 
+    public function executeCommand(CreateCommercialDocumentCommand $command): array
+    {
+        return $this->service->createFromCommand($command);
+    }
+
     public function execute(object $authUser, array $payload, int $companyId, ?int $branchId, ?int $warehouseId, ?int $cashRegisterId): array
     {
-        return $this->service->createFromCommand(
+        return $this->executeCommand(
             CreateCommercialDocumentCommand::fromInput(
                 $authUser,
                 $payload,

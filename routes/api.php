@@ -122,25 +122,25 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
 
     Route::middleware('rbac.module:SALES,view')->group(function () {
         Route::middleware('company.scope')->group(function () {
-            Route::get('/sales/bootstrap', 'Api\\SalesController@bootstrap');
-            Route::get('/sales/lookups', 'Api\\SalesController@lookups');
-            Route::get('/sales/price-tiers', 'Api\\SalesController@priceTiers');
-            Route::get('/sales/customer-types', 'Api\\SalesController@customerTypes');
-            Route::get('/sales/customers', 'Api\\SalesController@customers');
-            Route::get('/sales/customers/{id}/vehicles', 'Api\\SalesController@customerVehicles');
-            Route::get('/sales/customers/autocomplete', 'Api\\SalesController@customerAutocomplete');
-            Route::get('/sales/customers/resolve-document', 'Api\\SalesController@resolveCustomerByDocument');
-            Route::get('/sales/reference-documents', 'Api\\SalesController@referenceDocuments');
-            Route::get('/sales/series-numbers', 'Api\\SalesController@seriesNumbers');
-            Route::get('/sales/commercial-documents', 'Api\\SalesController@commercialDocuments');
-            Route::get('/sales/commercial-documents/export', 'Api\\SalesController@exportCommercialDocuments');
-            Route::get('/sales/commercial-documents/{id}', 'Api\\SalesController@showCommercialDocument');
-            Route::get('/sales/commercial-documents/{id}/print', 'Api\\SalesController@printableCommercialDocument');
-            Route::get('/sales/commercial-documents/{id}/print-pdf', 'Api\\SalesController@printableCommercialDocumentPdf');
-            Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesController@previewTaxBridgePayload');
-            Route::get('/sales/commercial-documents/{id}/tax-bridge-debug', 'Api\\SalesController@taxBridgeDebug');
-            Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesController@downloadSunatXml');
-            Route::get('/sales/commercial-documents/{id}/download-cdr', 'Api\\SalesController@downloadSunatCdr');
+            Route::get('/sales/bootstrap', 'Api\\SalesLookupController@bootstrap');
+            Route::get('/sales/lookups', 'Api\\SalesLookupController@lookups');
+            Route::get('/sales/price-tiers', 'Api\\SalesLookupController@priceTiers');
+            Route::get('/sales/reference-documents', 'Api\\SalesLookupController@referenceDocuments');
+            Route::get('/sales/series-numbers', 'Api\\SalesLookupController@seriesNumbers');
+            Route::get('/sales/customer-types', 'Api\\SalesCustomerController@customerTypes');
+            Route::get('/sales/customers', 'Api\\SalesCustomerController@customers');
+            Route::get('/sales/customers/{id}/vehicles', 'Api\\SalesCustomerController@customerVehicles');
+            Route::get('/sales/customers/autocomplete', 'Api\\SalesCustomerController@customerAutocomplete');
+            Route::get('/sales/customers/resolve-document', 'Api\\SalesCustomerController@resolveCustomerByDocument');
+            Route::get('/sales/commercial-documents', 'Api\\SalesDocumentController@commercialDocuments');
+            Route::get('/sales/commercial-documents/export', 'Api\\SalesDocumentController@exportCommercialDocuments');
+            Route::get('/sales/commercial-documents/{id}', 'Api\\SalesDocumentController@showCommercialDocument');
+            Route::get('/sales/commercial-documents/{id}/print', 'Api\\SalesDocumentController@printableCommercialDocument');
+            Route::get('/sales/commercial-documents/{id}/print-pdf', 'Api\\SalesDocumentController@printableCommercialDocumentPdf');
+            Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesDocumentController@previewTaxBridgePayload');
+            Route::get('/sales/commercial-documents/{id}/tax-bridge-debug', 'Api\\SalesDocumentController@taxBridgeDebug');
+            Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesDocumentController@downloadSunatXml');
+            Route::get('/sales/commercial-documents/{id}/download-cdr', 'Api\\SalesDocumentController@downloadSunatCdr');
         });
         Route::middleware('company.scope')->group(function () {
             Route::get('/sales/sunat-exceptions', 'Api\\SunatExceptionsController@index');
@@ -196,12 +196,12 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
         Route::middleware('company.scope')->group(function () {
-            Route::post('/sales/commercial-documents', 'Api\\SalesController@createCommercialDocument');
-            Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesController@convertCommercialDocument');
-            Route::put('/sales/commercial-documents/{id}', 'Api\\SalesController@updateCommercialDocument');
-            Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesController@voidCommercialDocument');
-            Route::put('/sales/commercial-documents/{id}/retry-tax-bridge', 'Api\\SalesController@retryTaxBridgeSend');
-            Route::put('/sales/commercial-documents/{id}/sunat-void', 'Api\\SalesController@sunatVoidCommunication');
+            Route::post('/sales/commercial-documents', 'Api\\SalesDocumentController@createCommercialDocument');
+            Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesDocumentController@convertCommercialDocument');
+            Route::put('/sales/commercial-documents/{id}', 'Api\\SalesDocumentController@updateCommercialDocument');
+            Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesDocumentController@voidCommercialDocument');
+            Route::put('/sales/commercial-documents/{id}/retry-tax-bridge', 'Api\\SalesDocumentController@retryTaxBridgeSend');
+            Route::put('/sales/commercial-documents/{id}/sunat-void', 'Api\\SalesDocumentController@sunatVoidCommunication');
         });
 
         Route::middleware('company.scope')->group(function () {
@@ -210,12 +210,12 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         });
         Route::post('/sales/sunat-exceptions/{id}/manual-confirm', 'Api\\SunatExceptionsController@manualConfirm')->middleware('company.scope');
         Route::middleware('company.scope')->group(function () {
-            Route::post('/sales/customers', 'Api\\SalesController@createCustomer');
-            Route::post('/sales/customers/bulk-import', 'Api\\SalesController@bulkImportCustomers');
-            Route::put('/sales/customers/{id}', 'Api\\SalesController@updateCustomer');
-            Route::post('/sales/customers/{id}/vehicles', 'Api\\SalesController@createCustomerVehicle');
-            Route::put('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesController@updateCustomerVehicle');
-            Route::delete('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesController@deleteCustomerVehicle');
+            Route::post('/sales/customers', 'Api\\SalesCustomerController@createCustomer');
+            Route::post('/sales/customers/bulk-import', 'Api\\SalesCustomerController@bulkImportCustomers');
+            Route::put('/sales/customers/{id}', 'Api\\SalesCustomerController@updateCustomer');
+            Route::post('/sales/customers/{id}/vehicles', 'Api\\SalesCustomerController@createCustomerVehicle');
+            Route::put('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesCustomerController@updateCustomerVehicle');
+            Route::delete('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesCustomerController@deleteCustomerVehicle');
         });
 
         // Daily Summary (Resumen Diario de Boletas)

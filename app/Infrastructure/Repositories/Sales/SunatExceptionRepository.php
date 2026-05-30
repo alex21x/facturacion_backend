@@ -7,6 +7,9 @@ use Illuminate\Support\Facades\DB;
 
 class SunatExceptionRepository
 {
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
     private const FINAL_SUNAT_STATUSES = [
         'ACCEPTED',
         'SENT_BY_SUMMARY',
@@ -130,11 +133,11 @@ class SunatExceptionRepository
         }
 
         if ($dateFrom !== null && $dateFrom !== '') {
-            $query->whereDate('d.issue_at', '>=', $dateFrom);
+            $query->where('d.issue_at', '>=', $dateFrom . self::DAY_START_SUFFIX);
         }
 
         if ($dateTo !== null && $dateTo !== '') {
-            $query->whereDate('d.issue_at', '<=', $dateTo);
+            $query->where('d.issue_at', '<=', $dateTo . self::DAY_END_SUFFIX);
         }
 
         return $query

@@ -7,6 +7,7 @@ use App\Application\Commands\Sales\CreateCommercialDocumentCommand;
 use App\Domain\Sales\Policies\CommercialDocumentPolicy;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
 use App\Services\Sales\Documents\SalesDocumentLinePersistenceService;
+use App\Services\Sales\Documents\SalesDocumentException;
 use App\Services\Sales\Documents\SalesDocumentNoteValidationService;
 use App\Services\Sales\Documents\SalesDocumentPaymentMetadataService;
 use App\Services\Sales\Documents\SalesDocumentSeriesService;

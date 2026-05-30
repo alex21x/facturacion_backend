@@ -59,7 +59,7 @@ class CustomerRepository implements CustomerRepositoryInterface
                 ->limit($limit);
 
             if ($search !== '') {
-                $like = '%' . $search . '%';
+                $like = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
                 $normalizedDoc = preg_replace('/\D+/', '', $search);
 
                 $query->where(function ($nested) use ($like, $normalizedDoc, $workshopVehicleSearchEnabled) {
@@ -89,7 +89,8 @@ class CustomerRepository implements CustomerRepositoryInterface
                                         ->orWhere('cv.model', 'ilike', $like);
 
                                     if ($normalizedDoc !== '') {
-                                        $vehicleNested->orWhere('cv.plate_normalized', 'ilike', '%' . $normalizedDoc . '%');
+                                        $normalizedLike = strlen($normalizedDoc) <= 3 ? $normalizedDoc . '%' : '%' . $normalizedDoc . '%';
+                                        $vehicleNested->orWhere('cv.plate_normalized', 'ilike', $normalizedLike);
                                     }
                                 });
                         });

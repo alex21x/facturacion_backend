@@ -241,11 +241,13 @@ class RacingOperationsRepository
 
     public function listMaintenancePending(int $companyId): array
     {
+        $today = now()->toDateString();
+
         return DB::table('racing.maintenance_records as mr')
             ->join('racing.vehicles as v', 'v.id', '=', 'mr.vehicle_id')
             ->where('mr.company_id', $companyId)
             ->whereNotNull('mr.next_service_date')
-            ->whereDate('mr.next_service_date', '<=', now()->toDateString())
+            ->where('mr.next_service_date', '<=', $today)
             ->orderBy('mr.next_service_date')
             ->limit(50)
             ->get([
@@ -268,8 +270,8 @@ class RacingOperationsRepository
             ->join('racing.vehicles as v', 'v.id', '=', 'mr.vehicle_id')
             ->where('mr.company_id', $companyId)
             ->whereNotNull('mr.next_service_date')
-            ->whereDate('mr.next_service_date', '>', $fromDate)
-            ->whereDate('mr.next_service_date', '<=', $toDate)
+            ->where('mr.next_service_date', '>', $fromDate)
+            ->where('mr.next_service_date', '<=', $toDate)
             ->orderBy('mr.next_service_date')
             ->limit(50)
             ->get([

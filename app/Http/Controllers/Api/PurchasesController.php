@@ -358,7 +358,9 @@ class PurchasesController
                 $hasItemMetadataColumn,
                 $hasLedgerTaxRateColumn,
                 $hasPaymentMethodColumn,
-                $hasMetadataColumn
+                $hasMetadataColumn,
+                $nextReferenceNo,
+                $nextSupplierReference
             ) {
                 if ($appliesStock) {
                     $this->clearPreviousEditLedgerForEntry($companyId, (int) $entry->id);

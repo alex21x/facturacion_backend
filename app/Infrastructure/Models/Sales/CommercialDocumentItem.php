@@ -20,6 +20,7 @@ class CommercialDocumentItem extends Model
         'price_tier_id',
         'tax_category_id',
         'description',
+        'notes',
         'qty',
         'qty_base',
         'conversion_factor',

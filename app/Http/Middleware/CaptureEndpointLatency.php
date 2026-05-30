@@ -3,15 +3,20 @@
 namespace App\Http\Middleware;
 
 use App\Jobs\PersistEndpointLatencySampleJob;
+use App\Services\Ops\OpsLatencyService;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class CaptureEndpointLatency
 {
     private static ?bool $tableAvailable = null;
 
     private float $start = 0.0;
+
+    public function __construct(
+        private OpsLatencyService $opsLatencyService
+    ) {
+    }
 
     public function handle(Request $request, Closure $next)
     {
@@ -34,7 +39,7 @@ class CaptureEndpointLatency
             return;
         }
 
-        if (!self::isTableAvailable()) {
+        if (!$this->isTableAvailable()) {
             return;
         }
 
@@ -97,17 +102,14 @@ class CaptureEndpointLatency
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
-    private static function isTableAvailable(): bool
+    private function isTableAvailable(): bool
     {
         if (self::$tableAvailable !== null) {
             return self::$tableAvailable;
         }
 
         try {
-            self::$tableAvailable = DB::table('information_schema.tables')
-                ->where('table_schema', 'ops')
-                ->where('table_name', 'http_endpoint_latency_samples')
-                ->exists();
+            self::$tableAvailable = $this->opsLatencyService->isSamplesTableAvailable();
         } catch (\Throwable $e) {
             self::$tableAvailable = false;
         }

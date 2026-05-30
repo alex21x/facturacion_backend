@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Contracts\PadronLookupGateway;
+use App\Contracts\TaxBridgeGateway;
 use App\Infrastructure\External\MundosoftPadronLookupGateway;
+use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Throwable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +21,7 @@ class AppServiceProvider extends ServiceProvider
     public function register()
     {
         $this->app->bind(PadronLookupGateway::class, MundosoftPadronLookupGateway::class);
+        $this->app->bind(TaxBridgeGateway::class, TaxBridgeService::class);
     }
 
     /**

@@ -6,6 +6,9 @@ use Illuminate\Support\Facades\DB;
 
 class ReportEngine
 {
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
     public const STATUS_PENDING = 'PENDING';
     public const STATUS_PROCESSING = 'PROCESSING';
     public const STATUS_COMPLETED = 'COMPLETED';
@@ -446,10 +449,10 @@ class ReportEngine
             $query->where('d.status', strtoupper((string) $filters['status']));
         }
         if (!empty($filters['issue_date_from'])) {
-            $query->whereDate('d.issue_at', '>=', (string) $filters['issue_date_from']);
+            $query->where('d.issue_at', '>=', (string) $filters['issue_date_from'] . self::DAY_START_SUFFIX);
         }
         if (!empty($filters['issue_date_to'])) {
-            $query->whereDate('d.issue_at', '<=', (string) $filters['issue_date_to']);
+            $query->where('d.issue_at', '<=', (string) $filters['issue_date_to'] . self::DAY_END_SUFFIX);
         }
         if (!empty($filters['customer'])) {
             $text = '%' . mb_strtolower((string) $filters['customer']) . '%';

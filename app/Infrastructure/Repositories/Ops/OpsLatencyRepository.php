@@ -7,6 +7,14 @@ use Illuminate\Support\Facades\DB;
 
 class OpsLatencyRepository implements OpsLatencyRepositoryInterface
 {
+    public function isSamplesTableAvailable(): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', 'ops')
+            ->where('table_name', 'http_endpoint_latency_samples')
+            ->exists();
+    }
+
     public function summaryByCompanyWindow(int $companyId, int $windowMinutes, int $limit): array
     {
         return DB::select(

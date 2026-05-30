@@ -33,7 +33,7 @@ class SupplierRepository implements SupplierRepositoryInterface
             }
 
             if ($search !== '') {
-                $like = '%' . $search . '%';
+                $like = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
                 $normalizedDoc = preg_replace('/\D+/', '', $search);
 
                 $query->where(function ($nested) use ($like, $normalizedDoc) {
@@ -58,11 +58,14 @@ class SupplierRepository implements SupplierRepositoryInterface
 
     private function supplierSuggestionFromRow($row): array
     {
+        $legalName = isset($row->legal_name) ? (string) $row->legal_name : '';
+
         return [
             'id' => (int) $row->id,
             'doc_type' => $row->doc_type,
             'doc_number' => $row->doc_number,
-            'legal_name' => $row->legal_name,
+            'name' => $legalName,
+            'legal_name' => $legalName,
             'address' => $row->address,
             'phone' => $row->phone,
             'source' => $row->source,

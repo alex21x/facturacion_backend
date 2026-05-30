@@ -618,7 +618,11 @@ class MasterDataController extends Controller
     public function createPaymentMethod(PaymentMethodRequest $request)
     {
         $payload = $request->validated();
-        $id = $this->salesLookupService->createPaymentMethod($payload);
+        try {
+            $id = $this->salesLookupService->createPaymentMethod($payload);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json(['message' => 'Payment method created', 'id' => (int) $id], 201);
     }
@@ -645,7 +649,11 @@ class MasterDataController extends Controller
         }
 
         if (!empty($updates)) {
-            $this->salesLookupService->updatePaymentMethod($id, $updates);
+            try {
+                $this->salesLookupService->updatePaymentMethod($id, $updates);
+            } catch (\RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
         }
 
         return response()->json(['message' => 'Payment method updated']);

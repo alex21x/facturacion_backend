@@ -15,6 +15,9 @@ use Illuminate\Support\Facades\Log;
  */
 class DailySummaryService
 {
+    private const DAY_START_SUFFIX = ' 00:00:00';
+    private const DAY_END_SUFFIX = ' 23:59:59.999999';
+
     // ─── summary_type constants ────────────────────────────────────────────────
     public const TYPE_DECLARATION  = 1;   // RC
     public const TYPE_CANCELLATION = 3;   // RA
@@ -56,7 +59,7 @@ class DailySummaryService
             ->orderByDesc('ds.id');
 
         if ($date !== null && $date !== '') {
-            $query->whereDate('ds.summary_date', $date);
+            $query->where('ds.summary_date', $date);
         }
 
         if ($status !== null && $status !== '') {
@@ -202,11 +205,14 @@ class DailySummaryService
             ->pluck('dsi.document_id')
             ->all();
 
+        $dateFrom = $date . self::DAY_START_SUFFIX;
+        $dateTo = $date . self::DAY_END_SUFFIX;
+
         $query = DB::table('sales.commercial_documents as cd')
             ->leftJoin('sales.customers as cu', 'cu.id', '=', 'cd.customer_id')
             ->where('cd.company_id', $companyId)
             ->where('cd.document_kind', 'RECEIPT')
-            ->whereDate('cd.issue_at', $date);
+            ->whereBetween('cd.issue_at', [$dateFrom, $dateTo]);
 
         if ($branchId !== null) {
             $query->where('cd.branch_id', $branchId);
@@ -315,7 +321,7 @@ class DailySummaryService
         $correlationNumber = (int) DB::table('sales.daily_summaries')
             ->where('company_id', $companyId)
             ->where('summary_type', $summaryType)
-            ->whereDate('summary_date', $summaryDate)
+            ->where('summary_date', $summaryDate)
             ->max('correlation_number') + 1;
 
         $prefix     = $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA';

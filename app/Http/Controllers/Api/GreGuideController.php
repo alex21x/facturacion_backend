@@ -3,11 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\GreGuide\CancelGreGuideRequest;
+use App\Http\Requests\GreGuide\IndexGreGuideRequest;
+use App\Http\Requests\GreGuide\PrefillGreGuideFromDocumentRequest;
+use App\Http\Requests\GreGuide\SearchUbigeosRequest;
+use App\Http\Requests\GreGuide\StoreGreGuideRequest;
+use App\Http\Requests\GreGuide\UpdateGreGuideRequest;
 use App\Services\Sales\TaxBridge\GreGuideService;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class GreGuideController extends Controller
 {
@@ -18,7 +23,7 @@ class GreGuideController extends Controller
     {
     }
 
-    public function index(Request $request)
+    public function index(IndexGreGuideRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
@@ -27,20 +32,7 @@ class GreGuideController extends Controller
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $validator = Validator::make($request->all(), [
-            'status' => 'nullable|string|max:30',
-            'issue_date' => 'nullable|date_format:Y-m-d',
-            'search' => 'nullable|string|max:120',
-            'page' => 'nullable|integer|min:1',
-            'per_page' => 'nullable|integer|min:5|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $request->validated();
 
         $data = $this->service->list(
             $companyId,
@@ -83,19 +75,9 @@ class GreGuideController extends Controller
         return response()->json($this->service->lookups($companyId, $branchId), 200);
     }
 
-    public function ubigeos(Request $request)
+    public function ubigeos(SearchUbigeosRequest $request)
     {
-        $validator = Validator::make($request->all(), [
-            'q' => 'required|string|min:2|max:80',
-            'limit' => 'nullable|integer|min:1|max:60',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $request->validated();
 
         $q = (string) $request->query('q');
         $limit = (int) $request->query('limit', 30);
@@ -105,7 +87,7 @@ class GreGuideController extends Controller
         ], 200);
     }
 
-    public function prefillFromDocument(Request $request)
+    public function prefillFromDocument(PrefillGreGuideFromDocumentRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->query('company_id', $authUser->company_id);
@@ -114,19 +96,7 @@ class GreGuideController extends Controller
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $validator = Validator::make($request->all(), [
-            'document_id' => 'nullable|integer|min:1',
-            'series' => 'nullable|string|max:8',
-            'number' => 'nullable|integer|min:1',
-            'document_kind' => 'nullable|string|in:INVOICE,RECEIPT',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $request->validated();
 
         try {
             $documentId = (int) $request->query('document_id', 0);
@@ -213,7 +183,7 @@ class GreGuideController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreGreGuideRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
@@ -222,49 +192,15 @@ class GreGuideController extends Controller
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'guide_type' => 'required|string|in:REMITENTE,TRANSPORTISTA',
-            'series' => 'required|string|max:8',
-            'issue_date' => 'required|date_format:Y-m-d',
-            'transfer_date' => 'nullable|date_format:Y-m-d',
-            'motivo_traslado' => 'required|string|max:4',
-            'transport_mode_code' => 'required|string|in:01,02',
-            'weight_kg' => 'required|numeric|gt:0',
-            'packages_count' => 'required|integer|min:1|max:100000',
-            'partida_ubigeo' => ['required', 'regex:/^\d{6}$/'],
-            'punto_partida' => 'required|string|max:500',
-            'llegada_ubigeo' => ['required', 'regex:/^\d{6}$/'],
-            'punto_llegada' => 'required|string|max:500',
-            'related_document_id' => 'nullable|integer|min:1',
-            'notes' => 'nullable|string|max:1000',
-            'destinatario' => 'required|array',
-            'transporter' => 'nullable|array',
-            'vehicle' => 'nullable|array',
-            'driver' => 'nullable|array',
-            'items' => 'required|array|min:1',
-            'items.*.description' => 'required|string|max:500',
-            'items.*.qty' => 'required|numeric|min:0.0001',
-            'items.*.code' => 'nullable|string|max:100',
-            'items.*.unit' => 'nullable|string|max:30',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
         try {
-            $guide = $this->service->create($companyId, $validator->validated(), (int) $authUser->id);
+            $guide = $this->service->create($companyId, $request->validated(), (int) $authUser->id);
             return response()->json(['message' => 'Guia GRE creada', 'data' => $guide], 201);
         } catch (TaxBridgeException $e) {
             return response()->json(['message' => $e->getMessage()], $e->httpStatus());
         }
     }
 
-    public function update(Request $request, int $id)
+    public function update(UpdateGreGuideRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
@@ -273,40 +209,8 @@ class GreGuideController extends Controller
             return response()->json(['message' => 'Invalid company scope'], 403);
         }
 
-        $validator = Validator::make($request->all(), [
-            'guide_type' => 'nullable|string|in:REMITENTE,TRANSPORTISTA',
-            'issue_date' => 'nullable|date_format:Y-m-d',
-            'transfer_date' => 'nullable|date_format:Y-m-d',
-            'motivo_traslado' => 'nullable|string|max:4',
-            'transport_mode_code' => 'nullable|string|in:01,02',
-            'weight_kg' => 'nullable|numeric|gt:0',
-            'packages_count' => 'nullable|integer|min:1|max:100000',
-            'partida_ubigeo' => ['nullable', 'regex:/^\d{6}$/'],
-            'punto_partida' => 'nullable|string|max:500',
-            'llegada_ubigeo' => ['nullable', 'regex:/^\d{6}$/'],
-            'punto_llegada' => 'nullable|string|max:500',
-            'related_document_id' => 'nullable|integer|min:1',
-            'notes' => 'nullable|string|max:1000',
-            'destinatario' => 'nullable|array',
-            'transporter' => 'nullable|array',
-            'vehicle' => 'nullable|array',
-            'driver' => 'nullable|array',
-            'items' => 'nullable|array|min:1',
-            'items.*.description' => 'required_with:items|string|max:500',
-            'items.*.qty' => 'required_with:items|numeric|min:0.0001',
-            'items.*.code' => 'nullable|string|max:100',
-            'items.*.unit' => 'nullable|string|max:30',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
         try {
-            $guide = $this->service->update($companyId, $id, $validator->validated(), (int) $authUser->id);
+            $guide = $this->service->update($companyId, $id, $request->validated(), (int) $authUser->id);
             return response()->json(['message' => 'Guia GRE actualizada', 'data' => $guide], 200);
         } catch (TaxBridgeException $e) {
             return response()->json(['message' => $e->getMessage()], $e->httpStatus());
@@ -369,24 +273,13 @@ class GreGuideController extends Controller
         }
     }
 
-    public function cancel(Request $request, int $id)
+    public function cancel(CancelGreGuideRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
 
         if ((int) $authUser->company_id !== $companyId) {
             return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'reason' => 'required|string|max:1000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
         }
 
         try {

@@ -9,6 +9,14 @@ use App\Http\Requests\Racing\CreateEventRequest;
 use App\Http\Requests\Racing\CreateInventoryAssignmentRequest;
 use App\Http\Requests\Racing\CreateMaintenanceRequest;
 use App\Http\Requests\Racing\CreateVehicleRequest;
+use App\Http\Requests\Racing\RacingAlertsRequest;
+use App\Http\Requests\Racing\RacingBootstrapRequest;
+use App\Http\Requests\Racing\RacingEventChecklistRequest;
+use App\Http\Requests\Racing\RacingEventCostsRequest;
+use App\Http\Requests\Racing\RacingEventCostSummaryRequest;
+use App\Http\Requests\Racing\RacingEventsRequest;
+use App\Http\Requests\Racing\RacingVehicleHistoryRequest;
+use App\Http\Requests\Racing\RacingVehiclesRequest;
 use App\Http\Requests\Racing\UpdateChecklistItemRequest;
 use App\Services\Racing\RacingOperationsService;
 use Illuminate\Http\Request;
@@ -20,7 +28,7 @@ class RacingOperationsController extends Controller
     ) {
     }
 
-    public function bootstrap(Request $request)
+    public function bootstrap(RacingBootstrapRequest $request)
     {
         if (!$this->service->schemaReady()) {
             return response()->json([
@@ -36,7 +44,7 @@ class RacingOperationsController extends Controller
         return response()->json($this->service->bootstrap($this->resolveCompanyId($request), $locale));
     }
 
-    public function vehicles(Request $request)
+    public function vehicles(RacingVehiclesRequest $request)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['vehicles' => []]);
@@ -62,7 +70,7 @@ class RacingOperationsController extends Controller
         );
     }
 
-    public function vehicleHistory(Request $request, int $vehicleId)
+    public function vehicleHistory(RacingVehicleHistoryRequest $request, int $vehicleId)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['message' => 'Racing schema not ready'], 409);
@@ -97,7 +105,7 @@ class RacingOperationsController extends Controller
         return $this->vehicleHistory($request, $vehicleId);
     }
 
-    public function events(Request $request)
+    public function events(RacingEventsRequest $request)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['events' => []]);
@@ -124,7 +132,7 @@ class RacingOperationsController extends Controller
         );
     }
 
-    public function eventChecklist(Request $request, int $eventId)
+    public function eventChecklist(RacingEventChecklistRequest $request, int $eventId)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['items' => []]);
@@ -193,7 +201,7 @@ class RacingOperationsController extends Controller
         return response()->json(['message' => 'Asignacion registrada'], 201);
     }
 
-    public function alerts(Request $request)
+    public function alerts(RacingAlertsRequest $request)
     {
         if (!$this->service->schemaReady()) {
             return response()->json([
@@ -208,7 +216,7 @@ class RacingOperationsController extends Controller
         return response()->json($this->service->alerts($this->resolveCompanyId($request), $upcomingDays));
     }
 
-    public function eventCosts(Request $request, int $eventId)
+    public function eventCosts(RacingEventCostsRequest $request, int $eventId)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['costs' => []]);
@@ -251,7 +259,7 @@ class RacingOperationsController extends Controller
         return $this->eventCosts($request, $eventId);
     }
 
-    public function eventCostSummary(Request $request)
+    public function eventCostSummary(RacingEventCostSummaryRequest $request)
     {
         if (!$this->service->schemaReady()) {
             return response()->json(['events' => []]);

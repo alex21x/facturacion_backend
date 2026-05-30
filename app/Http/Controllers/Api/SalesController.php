@@ -7,7 +7,6 @@ use App\Application\UseCases\Sales\UpdateCommercialDocumentDraftUseCase;
 use App\Application\UseCases\Sales\VoidCommercialDocumentUseCase;
 use App\Domain\Sales\Policies\CommercialDocumentPolicy;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\ApiFormRequest;
 use App\Http\Requests\Sales\BulkImportCustomersRequest;
 use App\Http\Requests\Sales\ConvertCommercialDocumentRequest;
 use App\Http\Requests\Sales\CreateCommercialDocumentRequest;
@@ -67,16 +66,6 @@ class SalesController extends Controller
         private SalesDocumentReadService $salesDocumentReadService
     )
     {
-    }
-
-    private function validateSalesRequest(Request $request, string $requestClass): ApiFormRequest
-    {
-        /** @var ApiFormRequest $formRequest */
-        $formRequest = $requestClass::createFrom($request, new $requestClass());
-        $formRequest->setContainer(app());
-        $formRequest->validateResolved();
-
-        return $formRequest;
     }
 
     public function bootstrap(Request $request)
@@ -509,7 +498,7 @@ class SalesController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function createCustomerVehicle(Request $request, int $id)
+    public function createCustomerVehicle(CreateCustomerVehicleRequest $request, int $id)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
@@ -527,8 +516,7 @@ class SalesController extends Controller
             return response()->json(['message' => 'Customer not found'], 404);
         }
 
-        $validatedRequest = $this->validateSalesRequest($request, CreateCustomerVehicleRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
 
         if (array_key_exists('doc_number', $payload)) {
             $normalizedDoc = trim((string) ($payload['doc_number'] ?? ''));
@@ -554,7 +542,7 @@ class SalesController extends Controller
         ], 201);
     }
 
-    public function updateCustomerVehicle(Request $request, int $id, int $vehicleId)
+    public function updateCustomerVehicle(UpdateCustomerVehicleRequest $request, int $id, int $vehicleId)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
@@ -572,8 +560,7 @@ class SalesController extends Controller
             return response()->json(['message' => 'Vehicle not found'], 404);
         }
 
-        $validatedRequest = $this->validateSalesRequest($request, UpdateCustomerVehicleRequest::class);
-        $changes = $validatedRequest->validated();
+        $changes = $request->validated();
         $update = [];
 
         if (array_key_exists('plate', $changes)) {
@@ -654,50 +641,46 @@ class SalesController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function createCustomer(Request $request)
+    public function createCustomer(CreateCustomerRequest $request)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        $validatedRequest = $this->validateSalesRequest($request, CreateCustomerRequest::class);
-        $result = $this->customerManagementService->createCustomer($companyId, $validatedRequest->validated());
+        $result = $this->customerManagementService->createCustomer($companyId, $request->validated());
 
         return response()->json($result['body'], (int) $result['status']);
     }
 
-    public function bulkImportCustomers(Request $request)
+    public function bulkImportCustomers(BulkImportCustomersRequest $request)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        $validatedRequest = $this->validateSalesRequest($request, BulkImportCustomersRequest::class);
-        $result = $this->customerManagementService->bulkImportCustomers($companyId, $validatedRequest->validated()['rows']);
+        $result = $this->customerManagementService->bulkImportCustomers($companyId, $request->validated()['rows']);
 
         return response()->json($result);
     }
 
-    public function updateCustomer(Request $request, int $id)
+    public function updateCustomer(UpdateCustomerRequest $request, int $id)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        $validatedRequest = $this->validateSalesRequest($request, UpdateCustomerRequest::class);
-        $result = $this->customerManagementService->updateCustomer($companyId, $id, $validatedRequest->validated());
+        $result = $this->customerManagementService->updateCustomer($companyId, $id, $request->validated());
 
         return response()->json($result['body'], (int) $result['status']);
     }
 
-    public function createCommercialDocument(Request $request)
+    public function createCommercialDocument(CreateCommercialDocumentRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $validatedRequest = $this->validateSalesRequest($request, CreateCommercialDocumentRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
         $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
         if ($documentKindId > 0) {
             $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
@@ -938,13 +921,12 @@ class SalesController extends Controller
         ]);
     }
 
-    public function updateCommercialDocument(Request $request, $id)
+    public function updateCommercialDocument(UpdateCommercialDocumentRequest $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
-        $validatedRequest = $this->validateSalesRequest($request, UpdateCommercialDocumentRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
         $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
         if ($documentKindId > 0) {
             $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
@@ -972,14 +954,13 @@ class SalesController extends Controller
         ]);
     }
 
-    public function voidCommercialDocument(Request $request, $id)
+    public function voidCommercialDocument(VoidCommercialDocumentRequest $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
 
-        $validatedRequest = $this->validateSalesRequest($request, VoidCommercialDocumentRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
 
         $featureBranchId = $this->salesLookupService->findCommercialDocumentBranchId($companyId, $documentId);
 
@@ -1303,12 +1284,11 @@ class SalesController extends Controller
         // Filtering is delegated to repository-level methods.
     }
 
-    public function convertCommercialDocument(Request $request, $id)
+    public function convertCommercialDocument(ConvertCommercialDocumentRequest $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
 
-        $validatedRequest = $this->validateSalesRequest($request, ConvertCommercialDocumentRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $sourceId = (int) $id;
         $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
@@ -4324,13 +4304,12 @@ HTML;
         }
     }
 
-    public function sunatVoidCommunication(Request $request, int $id)
+    public function sunatVoidCommunication(SunatVoidCommunicationRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        $validatedRequest = $this->validateSalesRequest($request, SunatVoidCommunicationRequest::class);
-        $payload = $validatedRequest->validated();
+        $payload = $request->validated();
 
         try {
             $result = $this->taxBridgeService->sendVoidCommunication($companyId, $id, $payload['reason'] ?? null);

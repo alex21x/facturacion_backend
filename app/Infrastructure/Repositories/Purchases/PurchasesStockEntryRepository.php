@@ -52,7 +52,6 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		$stockEntryColumns = $this->tableColumns('inventory.stock_entries');
 		$hasPaymentMethodId = in_array('payment_method_id', $stockEntryColumns, true);
 		$hasMetadata = in_array('metadata', $stockEntryColumns, true);
-		$hasStoredTotalAmount = in_array('total_amount', $stockEntryColumns, true);
 
 		$summarySubquery = DB::table('inventory.stock_entry_items as sei')
 			->selectRaw('sei.entry_id, COUNT(*) as total_items, COALESCE(SUM(sei.qty), 0) as total_qty, COALESCE(SUM(sei.qty * sei.unit_cost), 0) as total_amount')
@@ -83,9 +82,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 				$hasMetadata ? 'se.metadata' : DB::raw('NULL as metadata'),
 				DB::raw('COALESCE(s.total_items, 0) as total_items'),
 				DB::raw('COALESCE(s.total_qty, 0) as total_qty'),
-				$hasStoredTotalAmount
-					? DB::raw('COALESCE(se.total_amount, s.total_amount, 0) as total_amount')
-					: DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
+				DB::raw('COALESCE(s.total_amount, 0) as total_amount'),
 				'w.code as warehouse_code',
 				'w.name as warehouse_name'
 			)

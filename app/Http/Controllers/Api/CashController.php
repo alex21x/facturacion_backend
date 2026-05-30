@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Cash\CloseCashSessionRequest;
+use App\Http\Requests\Cash\CreateCashMovementRequest;
+use App\Http\Requests\Cash\OpenCashSessionRequest;
 use App\Services\Cash\CashMovementService;
 use App\Services\Cash\CashSessionService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class CashController extends Controller
 {
@@ -21,8 +23,7 @@ class CashController extends Controller
 
     public function sessions(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $cashRegId = $request->query('cash_register_id');
         $status = $request->query('status');
         $page = (int) $request->query('page', 1);
@@ -38,10 +39,6 @@ class CashController extends Controller
             $limit = 100;
         }
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
-        }
-
         $cashRegisterId = ($cashRegId !== null && $cashRegId !== '') ? (int) $cashRegId : null;
         $statusFilter = ($status !== null && $status !== '') ? (string) $status : null;
 
@@ -50,13 +47,8 @@ class CashController extends Controller
 
     public function currentSession(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $cashRegId = $request->query('cash_register_id');
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
-        }
 
         $cashRegisterId = ($cashRegId !== null && $cashRegId !== '') ? (int) $cashRegId : null;
 
@@ -65,27 +57,12 @@ class CashController extends Controller
         ]);
     }
 
-    public function openSession(Request $request)
+    public function openSession(OpenCashSessionRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'cash_register_id' => 'required|integer|min:1',
-            'opening_balance' => 'required|numeric|min:0',
-            'notes' => 'nullable|string|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
-        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
-        }
+        $payload = $request->validated();
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $existing = $this->cashSessionService->findOpenSessionByRegister($companyId, (int) $payload['cash_register_id']);
 
@@ -117,10 +94,10 @@ class CashController extends Controller
         return response()->json(['message' => 'Sesion de caja abierta', 'session' => $session], 201);
     }
 
-    public function closeSession(Request $request, $id)
+    public function closeSession(CloseCashSessionRequest $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $session = $this->cashSessionService->findSessionByIdAndCompany((int) $id, (int) $companyId);
 
@@ -132,16 +109,7 @@ class CashController extends Controller
             return response()->json(['message' => 'La sesion no esta abierta'], 409);
         }
 
-        $validator = Validator::make($request->all(), [
-            'closing_balance' => 'required|numeric|min:0',
-            'notes' => 'nullable|string|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         $this->ensureSessionCommercialDocumentMovements((int) $companyId, (int) $session->id);
 
@@ -177,15 +145,10 @@ class CashController extends Controller
 
     public function movements(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $sessionId = $request->query('session_id');
         $cashRegId = $request->query('cash_register_id');
         $limit = min((int) $request->query('limit', 50), 200);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
-        }
 
         $sessionId = ($sessionId !== null && $sessionId !== '') ? (int) $sessionId : null;
         $cashRegId = ($cashRegId !== null && $cashRegId !== '') ? (int) $cashRegId : null;
@@ -208,8 +171,7 @@ class CashController extends Controller
 
     public function sessionDetail(Request $request, $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $sessionId = (int) $id;
 
         $session = $this->cashMovementService->findSessionDetail($companyId, $sessionId);
@@ -251,25 +213,25 @@ class CashController extends Controller
                 'created_at' => $doc->created_at,
                 'user_name' => $doc->user_name,
                 'items' => array_map(function ($item) {
-                    $qty = round((float) $item['qty'], 3);
-                    $unitPrice = round((float) $item['unit_price'], 2);
-                    $lineSubtotal = round((float) ($item['line_subtotal'] ?? 0), 2);
-                    $lineTotal = round((float) $item['line_total'], 2);
+                    $qty = round((float) data_get($item, 'qty', 0), 3);
+                    $unitPrice = round((float) data_get($item, 'unit_price', 0), 2);
+                    $lineSubtotal = round((float) data_get($item, 'line_subtotal', 0), 2);
+                    $lineTotal = round((float) data_get($item, 'line_total', 0), 2);
                     $lineRevenueForMargin = $lineSubtotal > 0 ? $lineSubtotal : $lineTotal;
                     $costMeta = $this->resolveItemCostAndMargin(
                         $qty,
                         $lineRevenueForMargin,
                         $lineTotal,
                         $unitPrice,
-                        isset($item['unit_cost']) ? (float) $item['unit_cost'] : null,
-                        isset($item['product_cost_price']) ? (float) $item['product_cost_price'] : null
+                        data_get($item, 'unit_cost') !== null ? (float) data_get($item, 'unit_cost') : null,
+                        data_get($item, 'product_cost_price') !== null ? (float) data_get($item, 'product_cost_price') : null
                     );
 
                     return [
-                        'product_id' => $item['product_id'] ? (int) $item['product_id'] : null,
-                        'description' => $item['description'],
+                        'product_id' => data_get($item, 'product_id') ? (int) data_get($item, 'product_id') : null,
+                        'description' => (string) data_get($item, 'description', ''),
                         'quantity' => $qty,
-                        'unit_code' => $item['unit_code'],
+                        'unit_code' => (string) data_get($item, 'unit_code', ''),
                         'unit_price' => $unitPrice,
                         'line_subtotal' => $lineSubtotal,
                         'line_total' => $lineTotal,
@@ -327,29 +289,12 @@ class CashController extends Controller
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function createMovement(Request $request)
+    public function createMovement(CreateCashMovementRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'cash_register_id' => 'required|integer|min:1',
-            'cash_session_id' => 'nullable|integer|min:1',
-            'movement_type' => 'required|string|in:IN,OUT,INCOME,EXPENSE,ADJUSTMENT',
-            'amount' => 'required|numeric|min:0.01',
-            'description' => 'required|string|max:300',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validacion fallida', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
-        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Ambito de empresa invalido'], 403);
-        }
+        $payload = $request->validated();
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $sessionId = isset($payload['cash_session_id']) ? (int) $payload['cash_session_id'] : null;
 
@@ -386,11 +331,6 @@ class CashController extends Controller
         $this->recalcExpectedBalance((int) $sessionId);
 
         $movement = $this->cashMovementService->findMovementById((int) $movementId);
-
-        if ($movement) {
-            $movement->movement_type = $movement->movement_type_ui;
-            unset($movement->movement_type_ui);
-        }
 
         return response()->json(['message' => 'Movimiento registrado', 'movement' => $movement], 201);
     }

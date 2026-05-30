@@ -2,17 +2,8 @@
 
 namespace App\Services\Sales\TaxBridge;
 
-use RuntimeException;
+use App\Infrastructure\Repositories\Sales\TaxBridge\TaxBridgeException as BaseTaxBridgeException;
 
-class TaxBridgeException extends RuntimeException
+class TaxBridgeException extends BaseTaxBridgeException
 {
-    public function __construct(string $message, private int $httpStatus = 422)
-    {
-        parent::__construct($message);
-    }
-
-    public function httpStatus(): int
-    {
-        return $this->httpStatus;
-    }
 }

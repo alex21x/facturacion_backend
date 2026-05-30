@@ -1,19 +1,21 @@
 <?php
 
-namespace App\Services\Purchases;
+namespace App\Infrastructure\Repositories\Purchases;
 
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-class PurchasesPersistenceService
+class PurchasesPersistenceRepository
 {
-    public function findPurchaseOrderSource(int $id, int $companyId): ?object
+    public function findPurchaseOrderSource(int $id, int $companyId): ?\App\Application\DTOs\Purchases\PurchaseStockEntryDTO
     {
-        return DB::table('inventory.stock_entries')
+        $entry = DB::table('inventory.stock_entries')
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->where('entry_type', 'PURCHASE_ORDER')
             ->first();
+
+        return $entry ? \App\Application\DTOs\Purchases\PurchaseStockEntryDTO::fromRow($entry) : null;
     }
 
     public function listStockEntryItems(int $entryId): Collection
@@ -49,12 +51,14 @@ class PurchasesPersistenceService
             ->update($updates);
     }
 
-    public function findStockEntry(int $id, int $companyId): ?object
+    public function findStockEntry(int $id, int $companyId): ?\App\Application\DTOs\Purchases\PurchaseStockEntryDTO
     {
-        return DB::table('inventory.stock_entries')
+        $entry = DB::table('inventory.stock_entries')
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->first();
+
+        return $entry ? \App\Application\DTOs\Purchases\PurchaseStockEntryDTO::fromRow($entry) : null;
     }
 
     public function findProductsByCompanyAndIds(int $companyId, array $productIds): Collection
@@ -161,11 +165,13 @@ class PurchasesPersistenceService
         })->values()->all();
     }
 
-    public function getInventorySettingsRow(int $companyId): ?object
+    public function getInventorySettingsRow(int $companyId): ?\App\Application\DTOs\Inventory\InventorySettingsDTO
     {
-        return DB::table('inventory.inventory_settings')
+        $settings = DB::table('inventory.inventory_settings')
             ->where('company_id', $companyId)
             ->first();
+
+        return $settings ? \App\Application\DTOs\Inventory\InventorySettingsDTO::fromRow($settings) : null;
     }
 
     public function hasDuplicatePurchaseByReference(
@@ -212,48 +218,58 @@ class PurchasesPersistenceService
             ->delete();
     }
 
-    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?object
+    public function findCurrentStockRow(int $companyId, int $warehouseId, int $productId): ?\App\Application\DTOs\Inventory\InventoryStockLevelDTO
     {
-        return DB::table('inventory.current_stock')
+        $stock = DB::table('inventory.current_stock')
             ->where('company_id', $companyId)
             ->where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
             ->first();
+
+        return $stock ? \App\Application\DTOs\Inventory\InventoryStockLevelDTO::fromRow($stock) : null;
     }
 
-    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?object
+    public function findCurrentStockByLotRow(int $companyId, int $warehouseId, int $productId, int $lotId): ?\App\Application\DTOs\Inventory\InventoryStockLevelDTO
     {
-        return DB::table('inventory.current_stock_by_lot')
+        $stock = DB::table('inventory.current_stock_by_lot')
             ->where('company_id', $companyId)
             ->where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
             ->where('lot_id', $lotId)
             ->first();
+
+        return $stock ? \App\Application\DTOs\Inventory\InventoryStockLevelDTO::fromRow($stock) : null;
     }
 
-    public function findCompanySettingsBankAccounts(int $companyId): ?object
+    public function findCompanySettingsBankAccounts(int $companyId): ?\App\Application\DTOs\AppConfig\CompanySettingsDTO
     {
-        return DB::table('core.company_settings')
+        $settings = DB::table('core.company_settings')
             ->where('company_id', $companyId)
             ->select('bank_accounts')
             ->first();
+
+        return $settings ? \App\Application\DTOs\AppConfig\CompanySettingsDTO::fromRow($settings) : null;
     }
 
-    public function findCompanyFeatureToggle(int $companyId, string $featureCode): ?object
+    public function findCompanyFeatureToggle(int $companyId, string $featureCode): ?\App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO
     {
-        return DB::table('appcfg.company_feature_toggles')
+        $toggle = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->where('feature_code', $featureCode)
             ->first();
+
+        return $toggle ? \App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO::fromRow($toggle) : null;
     }
 
-    public function findBranchFeatureToggle(int $companyId, $branchId, string $featureCode): ?object
+    public function findBranchFeatureToggle(int $companyId, $branchId, string $featureCode): ?\App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO
     {
-        return DB::table('appcfg.branch_feature_toggles')
+        $toggle = DB::table('appcfg.branch_feature_toggles')
             ->where('company_id', $companyId)
             ->where('branch_id', $branchId)
             ->where('feature_code', $featureCode)
             ->first();
+
+        return $toggle ? \App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO::fromRow($toggle) : null;
     }
 
     public function listDetractionServiceCodes(): Collection
@@ -270,13 +286,15 @@ class PurchasesPersistenceService
         return DB::statement($sql, $bindings);
     }
 
-    public function findPurchaseSupplierByDocument(int $companyId, string $document): ?object
+    public function findPurchaseSupplierByDocument(int $companyId, string $document): ?\App\Application\DTOs\Purchases\PurchaseSupplierDTO
     {
-        return DB::table('inventory.purchase_suppliers')
+        $supplier = DB::table('inventory.purchase_suppliers')
             ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
             ->where('company_id', $companyId)
             ->where('doc_number', $document)
             ->first();
+
+        return $supplier ? \App\Application\DTOs\Purchases\PurchaseSupplierDTO::fromRow($supplier) : null;
     }
 
     public function upsertPurchaseSupplier(int $companyId, array $data): bool

@@ -2,6 +2,9 @@
 
 namespace App\Services\Inventory;
 
+use App\Application\DTOs\Inventory\InventoryReportRequestDTO;
+use App\Application\DTOs\Inventory\InventorySettingsDTO;
+use App\Application\DTOs\Inventory\InventoryStockSummaryDTO;
 use App\Infrastructure\Repositories\Inventory\InventoryReportsRepository;
 use Illuminate\Support\Collection;
 
@@ -20,9 +23,9 @@ class InventoryReportsService
 
     public function inventorySettingsForCompany(int $companyId): array
     {
-        $row = $this->repository->findInventorySettings($companyId);
+        $settings = $this->repository->findInventorySettings($companyId);
 
-        if (!$row) {
+        if (!$settings) {
             return [
                 'enable_inventory_pro' => false,
                 'enable_advanced_reporting' => false,
@@ -32,10 +35,10 @@ class InventoryReportsService
         }
 
         return [
-            'enable_inventory_pro' => (bool) ($row->enable_inventory_pro ?? false),
-            'enable_advanced_reporting' => (bool) ($row->enable_advanced_reporting ?? false),
-            'enable_graphical_dashboard' => (bool) ($row->enable_graphical_dashboard ?? false),
-            'enable_expiry_tracking' => (bool) ($row->enable_expiry_tracking ?? false),
+            'enable_inventory_pro' => $settings->enable_inventory_pro,
+            'enable_advanced_reporting' => $settings->enable_advanced_reporting,
+            'enable_graphical_dashboard' => $settings->enable_graphical_dashboard,
+            'enable_expiry_tracking' => $settings->enable_expiry_tracking,
         ];
     }
 
@@ -77,7 +80,7 @@ class InventoryReportsService
         return in_array($normalized, self::BASIC_ALLOWED_REPORT_TYPES, true);
     }
 
-    public function stockSummary(int $companyId, ?int $warehouseId): ?object
+    public function stockSummary(int $companyId, ?int $warehouseId): ?InventoryStockSummaryDTO
     {
         return $this->repository->findStockSummary($companyId, $warehouseId);
     }
@@ -143,12 +146,12 @@ class InventoryReportsService
         return $this->repository->createReportRequest($payload);
     }
 
-    public function findRequestById(int $id): ?object
+    public function findRequestById(int $id): ?InventoryReportRequestDTO
     {
         return $this->repository->findReportRequestById($id);
     }
 
-    public function findRequestByCompany(int $id, int $companyId): ?object
+    public function findRequestByCompany(int $id, int $companyId): ?InventoryReportRequestDTO
     {
         return $this->repository->findReportRequestByCompany($id, $companyId);
     }

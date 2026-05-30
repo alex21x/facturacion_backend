@@ -2,6 +2,12 @@
 
 namespace App\Domain\Auth\Repositories;
 
+use App\Application\DTOs\Auth\AuthAuthenticatedSessionDTO;
+use App\Application\DTOs\Auth\AuthAuthenticatedUserDTO;
+use App\Application\DTOs\Auth\AuthLoginUserDTO;
+use App\Application\DTOs\Auth\AuthRefreshSessionDTO;
+use App\Application\DTOs\Auth\AuthRefreshSessionRecordDTO;
+use App\Application\DTOs\Auth\AuthRoleContextDTO;
 use Illuminate\Support\Collection;
 
 interface AuthSessionRepositoryInterface
@@ -10,7 +16,7 @@ interface AuthSessionRepositoryInterface
 
     public function columnExists(string $schema, string $table, string $column): bool;
 
-    public function findActiveUserForLogin(string $username, ?string $accessSlug): ?object;
+    public function findActiveUserForLogin(string $username, ?string $accessSlug): ?AuthLoginUserDTO;
 
     public function revokeActiveRefreshTokensForDevice(int $userId, string $deviceHashPrefix): void;
 
@@ -18,7 +24,11 @@ interface AuthSessionRepositoryInterface
 
     public function touchUserLastLogin(int $userId): void;
 
-    public function findValidRefreshSession(string $refreshTokenHash): ?object;
+    public function findValidRefreshSession(string $refreshTokenHash): ?AuthRefreshSessionDTO;
+
+    public function findRefreshSessionById(int $sessionId): ?AuthRefreshSessionRecordDTO;
+
+    public function findAuthenticatedSessionByClaims(int $sessionId, int $userId): ?AuthAuthenticatedSessionDTO;
 
     public function revokeRefreshSession(int $sessionId): void;
 
@@ -39,7 +49,11 @@ interface AuthSessionRepositoryInterface
 
     public function ensureCompanyRoleProfilesTable(): void;
 
-    public function resolvePrimaryRoleContext(int $userId, int $companyId): ?object;
+    public function resolvePrimaryRoleContext(int $userId, int $companyId): ?AuthRoleContextDTO;
+
+    public function findAuthenticatedUserById(int $userId): ?AuthAuthenticatedUserDTO;
+
+    public function listActiveRefreshSessionIdsForDevice(int $userId, string $deviceHashPrefix): array;
 
     public function ensureAdminPortalUsersTable(): void;
 

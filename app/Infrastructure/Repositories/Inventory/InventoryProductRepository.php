@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryProductRepository implements InventoryProductRepositoryInterface
 {
+    private static ?bool $hasRestaurantRecipesTable = null;
+    private static ?bool $hasRestaurantRecipesDeletedAt = null;
+
     public function getProducts(int $companyId, string $search, $status, int $limit, bool $autocomplete): array
     {
         $limit = max(1, min($limit, 5000));
@@ -19,33 +22,13 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
             $limit,
             $autocomplete ? 1 : 0
         );
-        $ttlSeconds = $autocomplete ? 15 : 30;
+        $ttlSeconds = $autocomplete ? 45 : 60;
 
         return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), function () use ($companyId, $search, $status, $limit, $autocomplete) {
             $normalizedSearch = mb_strtolower(trim($search));
 
-            $hasRestaurantRecipesTable = DB::getSchemaBuilder()->hasTable('restaurant.product_recipes');
-            $recipeFlagSelect = $hasRestaurantRecipesTable
-                ? DB::raw('CASE WHEN rr.menu_product_id IS NULL THEN false ELSE true END as has_recipe')
-                : DB::raw('false as has_recipe');
-
-            $recipeHeadersSubquery = null;
-            if ($hasRestaurantRecipesTable) {
-                $recipeHeadersSubquery = DB::table('restaurant.product_recipes')
-                    ->select('menu_product_id');
-
-                if (DB::getSchemaBuilder()->hasColumn('restaurant.product_recipes', 'deleted_at')) {
-                    $recipeHeadersSubquery->whereNull('deleted_at');
-                }
-
-                $recipeHeadersSubquery->groupBy('menu_product_id');
-            }
-
             if ($autocomplete) {
                 $query = DB::table('inventory.products as p')
-                    ->leftJoin('inventory.categories as c', 'c.id', '=', 'p.category_id')
-                    ->leftJoin('core.units as u', 'u.id', '=', 'p.unit_id')
-                    ->leftJoin('inventory.product_lines as pl', 'pl.id', '=', 'p.line_id')
                     ->select([
                         'p.id',
                         'p.sku',
@@ -66,13 +49,13 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
                         'p.lot_tracking',
                         'p.has_expiration',
                         'p.status',
-                        DB::raw('c.name as category_name'),
-                        DB::raw('pl.name as line_name'),
+                        DB::raw('NULL::text as category_name'),
+                        DB::raw('NULL::text as line_name'),
                         DB::raw('NULL::text as brand_name'),
                         DB::raw('NULL::text as location_name'),
                         DB::raw('NULL::text as warranty_name'),
-                        DB::raw('u.code as unit_code'),
-                        DB::raw('u.name as unit_name'),
+                        DB::raw('NULL::text as unit_code'),
+                        DB::raw('NULL::text as unit_name'),
                     ])
                     ->where('p.company_id', $companyId)
                     ->whereNull('p.deleted_at');
@@ -105,6 +88,23 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
                     ->limit($limit);
 
                 return $query->get()->all();
+            }
+
+            $hasRestaurantRecipesTable = $this->hasRestaurantRecipesTable();
+            $recipeFlagSelect = $hasRestaurantRecipesTable
+                ? DB::raw('CASE WHEN rr.menu_product_id IS NULL THEN false ELSE true END as has_recipe')
+                : DB::raw('false as has_recipe');
+
+            $recipeHeadersSubquery = null;
+            if ($hasRestaurantRecipesTable) {
+                $recipeHeadersSubquery = DB::table('restaurant.product_recipes')
+                    ->select('menu_product_id');
+
+                if ($this->hasRestaurantRecipesDeletedAtColumn()) {
+                    $recipeHeadersSubquery->whereNull('deleted_at');
+                }
+
+                $recipeHeadersSubquery->groupBy('menu_product_id');
             }
 
             $query = DB::table('inventory.products as p')
@@ -171,5 +171,24 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
 
             return $query->get()->all();
         });
+    }
+
+    private function hasRestaurantRecipesTable(): bool
+    {
+        if (self::$hasRestaurantRecipesTable === null) {
+            self::$hasRestaurantRecipesTable = DB::getSchemaBuilder()->hasTable('restaurant.product_recipes');
+        }
+
+        return self::$hasRestaurantRecipesTable;
+    }
+
+    private function hasRestaurantRecipesDeletedAtColumn(): bool
+    {
+        if (self::$hasRestaurantRecipesDeletedAt === null) {
+            self::$hasRestaurantRecipesDeletedAt = $this->hasRestaurantRecipesTable()
+                && DB::getSchemaBuilder()->hasColumn('restaurant.product_recipes', 'deleted_at');
+        }
+
+        return self::$hasRestaurantRecipesDeletedAt;
     }
 }

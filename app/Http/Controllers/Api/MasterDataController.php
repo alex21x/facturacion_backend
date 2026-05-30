@@ -4,6 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Application\UseCases\Masters\GetMasterDataOptionsUseCase;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\MasterData\CashRegisterRequest;
+use App\Http\Requests\MasterData\DocumentKindRequest;
+use App\Http\Requests\MasterData\DocumentKindsRequest;
+use App\Http\Requests\MasterData\FunctionalProfileRequest;
+use App\Http\Requests\MasterData\InventorySettingsRequest;
+use App\Http\Requests\MasterData\LotRequest;
+use App\Http\Requests\MasterData\PaymentMethodRequest;
+use App\Http\Requests\MasterData\PosStationRequest;
+use App\Http\Requests\MasterData\PriceTierRequest;
+use App\Http\Requests\MasterData\RoleRequest;
+use App\Http\Requests\MasterData\SeriesRequest;
+use App\Http\Requests\MasterData\UnitsRequest;
+use App\Http\Requests\MasterData\UserRequest;
+use App\Http\Requests\MasterData\WarehouseRequest;
 use App\Services\AppConfig\AdminSettingsMatrixService;
 use App\Services\AppConfig\OperationalContextService;
 use App\Services\AppConfig\OperationalLimitsService;
@@ -13,8 +27,6 @@ use App\Services\Sales\SalesLookupService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
 
 class MasterDataController extends Controller
 {
@@ -105,23 +117,12 @@ class MasterDataController extends Controller
         ]);
     }
 
-    public function createFunctionalProfile(Request $request)
+    public function createFunctionalProfile(FunctionalProfileRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|string|max:40',
-            'label' => 'required|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-            'sort_order' => 'nullable|integer|min:0|max:9999',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $code = strtoupper(trim((string) $payload['code']));
         if ($code === '') {
             return response()->json(['message' => 'Functional profile code is required'], 422);
@@ -146,20 +147,10 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Functional profile created'], 201);
     }
 
-    public function updateFunctionalProfile(Request $request, string $code)
+    public function updateFunctionalProfile(FunctionalProfileRequest $request, string $code)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-
-        $validator = Validator::make($request->all(), [
-            'label' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-            'sort_order' => 'nullable|integer|min:0|max:9999',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
 
         $normalizedCode = strtoupper(trim((string) $code));
         if ($normalizedCode === '') {
@@ -175,7 +166,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Functional profile not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = ['updated_at' => now(), 'updated_by' => $authUser->id ?? null];
 
         foreach (['label', 'status', 'sort_order'] as $field) {
@@ -189,31 +180,12 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Functional profile updated']);
     }
 
-    public function createRole(Request $request)
+    public function createRole(RoleRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|string|max:40',
-            'name' => 'required|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-            'functional_profile' => 'nullable|string|max:40',
-            'permissions' => 'required|array|min:1',
-            'permissions.*.module_code' => 'required|string|max:40',
-            'permissions.*.can_view' => 'required|boolean',
-            'permissions.*.can_create' => 'required|boolean',
-            'permissions.*.can_update' => 'required|boolean',
-            'permissions.*.can_delete' => 'required|boolean',
-            'permissions.*.can_export' => 'required|boolean',
-            'permissions.*.can_approve' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $code = strtoupper(trim($payload['code']));
         $functionalProfileCodes = $this->salesLookupService->functionalProfileCodes($companyId);
         $normalizedFunctionalProfile = $this->salesLookupService->normalizeFunctionalProfile($payload['functional_profile'] ?? null, $functionalProfileCodes);
@@ -235,28 +207,10 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Role created', 'id' => (int) $roleId], 201);
     }
 
-    public function updateRole(Request $request, int $id)
+    public function updateRole(RoleRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-            'functional_profile' => 'nullable|string|max:40',
-            'permissions' => 'nullable|array|min:1',
-            'permissions.*.module_code' => 'required|string|max:40',
-            'permissions.*.can_view' => 'required|boolean',
-            'permissions.*.can_create' => 'required|boolean',
-            'permissions.*.can_update' => 'required|boolean',
-            'permissions.*.can_delete' => 'required|boolean',
-            'permissions.*.can_export' => 'required|boolean',
-            'permissions.*.can_approve' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
 
         $exists = $this->salesLookupService->roleExists($companyId, $id);
 
@@ -264,7 +218,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Role not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = [];
 
         if (array_key_exists('name', $payload)) {
@@ -296,29 +250,11 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Role updated']);
     }
 
-    public function createUser(Request $request)
+    public function createUser(UserRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'preferred_warehouse_id' => 'nullable|integer|min:1',
-            'preferred_cash_register_id' => 'nullable|integer|min:1',
-            'username' => 'required|string|max:80',
-            'password' => 'required|string|min:6|max:120',
-            'first_name' => 'required|string|max:80',
-            'last_name' => 'nullable|string|max:80',
-            'email' => 'nullable|email|max:120',
-            'phone' => 'nullable|string|max:40',
-            'status' => 'nullable|integer|in:0,1',
-            'role_id' => 'required|integer|min:1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         try {
             $userId = $this->salesLookupService->createCompanyUser($companyId, $payload);
         } catch (QueryException $e) {
@@ -330,26 +266,9 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'User created', 'id' => (int) $userId], 201);
     }
 
-    public function updateUser(Request $request, int $id)
+    public function updateUser(UserRequest $request, int $id)
     {
         $companyId = $this->resolveCompanyId($request);
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'preferred_warehouse_id' => 'nullable|integer|min:1',
-            'preferred_cash_register_id' => 'nullable|integer|min:1',
-            'password' => 'nullable|string|min:6|max:120',
-            'first_name' => 'nullable|string|max:80',
-            'last_name' => 'nullable|string|max:80',
-            'email' => 'nullable|email|max:120',
-            'phone' => 'nullable|string|max:40',
-            'status' => 'nullable|integer|in:0,1',
-            'role_id' => 'nullable|integer|min:1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
 
         $exists = $this->salesLookupService->companyUserExists($companyId, $id);
 
@@ -357,7 +276,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'User not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $this->salesLookupService->updateCompanyUser($companyId, $id, $payload);
@@ -368,24 +287,12 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'User updated']);
     }
 
-    public function createWarehouse(Request $request)
+    public function createWarehouse(WarehouseRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
-        $limits = $this->operationalLimitsService->resolveLimits($companyId);
+        $limits = $this->operationalLimitsService->getCompanyLimits($companyId);
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'code' => 'required|string|max:30',
-            'name' => 'required|string|max:120',
-            'address' => 'nullable|string|max:250',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         if (!empty($payload['branch_id'])) {
             $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
@@ -409,21 +316,9 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Warehouse created', 'id' => (int) $id], 201);
     }
 
-    public function updateWarehouse(Request $request, int $id)
+    public function updateWarehouse(WarehouseRequest $request, int $id)
     {
         $companyId = $this->resolveCompanyId($request);
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'code' => 'nullable|string|max:30',
-            'name' => 'nullable|string|max:120',
-            'address' => 'nullable|string|max:250',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
 
         $exists = $this->salesLookupService->warehouseExists($companyId, $id);
 
@@ -431,7 +326,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Warehouse not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         if (array_key_exists('branch_id', $payload) && $payload['branch_id'] !== null) {
             $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
 
@@ -486,24 +381,12 @@ class MasterDataController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function createCashRegister(Request $request)
+    public function createCashRegister(CashRegisterRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
         $limits = $this->resolveCompanyOperationalLimits($companyId);
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'code' => 'required|string|max:30',
-            'name' => 'required|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         if (!empty($payload['branch_id'])) {
             $branchExists = $this->salesLookupService->branchExists($companyId, (int) $payload['branch_id']);
@@ -554,21 +437,9 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Cash register created', 'id' => (int) $id], 201);
     }
 
-    public function updateCashRegister(Request $request, int $id)
+    public function updateCashRegister(CashRegisterRequest $request, int $id)
     {
         $companyId = $this->resolveCompanyId($request);
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'code' => 'nullable|string|max:30',
-            'name' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
 
         $exists = $this->salesLookupService->cashRegisterExists($companyId, $id);
 
@@ -576,7 +447,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'Cash register not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = [];
 
         if (array_key_exists('warehouse_id', $payload) && $payload['warehouse_id'] !== null) {
@@ -610,7 +481,7 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Cash register updated']);
     }
 
-    public function createPosStation(Request $request)
+    public function createPosStation(PosStationRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
 
@@ -618,22 +489,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'POS stations table not available'], 503);
         }
 
-        $validator = Validator::make($request->all(), [
-            'cash_register_id' => 'required|integer|min:1',
-            'code' => 'required|string|max:30',
-            'name' => 'required|string|max:120',
-            'device_id' => ['required', 'string', 'max:120', 'regex:/^CAJA-\d{3}$/i'],
-            'device_name' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-        ], [
-            'device_id.regex' => 'Device ID debe tener el formato CAJA-001.',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $cashRegisterId = (int) $payload['cash_register_id'];
         $normalizedCode = strtoupper(trim($payload['code']));
         $normalizedDeviceId = strtoupper(trim((string) $payload['device_id']));
@@ -672,27 +528,12 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'POS station created', 'id' => (int) $id], 201);
     }
 
-    public function updatePosStation(Request $request, int $id)
+    public function updatePosStation(PosStationRequest $request, int $id)
     {
         $companyId = $this->resolveCompanyId($request);
 
         if (!$this->salesLookupService->posStationsTableExists()) {
             return response()->json(['message' => 'POS stations table not available'], 503);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'cash_register_id' => 'nullable|integer|min:1',
-            'code' => 'nullable|string|max:30',
-            'name' => 'nullable|string|max:120',
-            'device_id' => ['nullable', 'string', 'max:120', 'regex:/^CAJA-\d{3}$/i'],
-            'device_name' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-        ], [
-            'device_id.regex' => 'Device ID debe tener el formato CAJA-001.',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
         $exists = $this->salesLookupService->posStationExists($companyId, $id);
@@ -701,7 +542,7 @@ class MasterDataController extends Controller
             return response()->json(['message' => 'POS station not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = [];
 
         if (array_key_exists('cash_register_id', $payload) && $payload['cash_register_id'] !== null) {
@@ -774,42 +615,22 @@ class MasterDataController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function createPaymentMethod(Request $request)
+    public function createPaymentMethod(PaymentMethodRequest $request)
     {
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|string|max:20',
-            'name' => 'required|string|max:100',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $id = $this->salesLookupService->createPaymentMethod($payload);
 
         return response()->json(['message' => 'Payment method created', 'id' => (int) $id], 201);
     }
 
-    public function updatePaymentMethod(Request $request, int $id)
+    public function updatePaymentMethod(PaymentMethodRequest $request, int $id)
     {
-        $validator = Validator::make($request->all(), [
-            'code' => 'nullable|string|max:20',
-            'name' => 'nullable|string|max:100',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
         $exists = $this->salesLookupService->paymentMethodExists($id);
         if (!$exists) {
             return response()->json(['message' => 'Payment method not found'], 404);
         }
 
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = [];
 
         if (!empty($payload['code'])) {
@@ -848,28 +669,12 @@ class MasterDataController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function createSeries(Request $request)
+    public function createSeries(SeriesRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $documentKindRule = 'required|string|in:' . implode(',', $this->documentKindCodes());
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'document_kind' => $documentKindRule,
-            'series' => 'required|string|max:10',
-            'current_number' => 'nullable|integer|min:0',
-            'number_padding' => 'nullable|integer|min:4|max:12',
-            'reset_policy' => 'nullable|string|in:NONE,YEARLY,MONTHLY',
-            'is_enabled' => 'nullable|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         try {
             $id = $this->salesLookupService->createSeries($companyId, (int) $authUser->id, $payload);
         } catch (\RuntimeException $e) {
@@ -879,28 +684,12 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Series created', 'id' => (int) $id], 201);
     }
 
-    public function updateSeries(Request $request, int $id)
+    public function updateSeries(SeriesRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
-        $documentKindRule = 'nullable|string|in:' . implode(',', $this->documentKindCodes());
 
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'document_kind' => $documentKindRule,
-            'series' => 'nullable|string|max:10',
-            'current_number' => 'nullable|integer|min:0',
-            'number_padding' => 'nullable|integer|min:4|max:12',
-            'reset_policy' => 'nullable|string|in:NONE,YEARLY,MONTHLY',
-            'is_enabled' => 'nullable|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         try {
             $this->salesLookupService->updateSeries($companyId, (int) $authUser->id, $id, $payload);
         } catch (\RuntimeException $e) {
@@ -910,24 +699,11 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Series updated']);
     }
 
-    public function createPriceTier(Request $request)
+    public function createPriceTier(PriceTierRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'code' => 'required|string|max:30',
-            'name' => 'required|string|max:120',
-            'min_qty' => 'required|numeric|gt:0',
-            'max_qty' => 'nullable|numeric|gt:0',
-            'priority' => 'nullable|integer|min:1',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $minQty = (float) $payload['min_qty'];
         $maxQty = array_key_exists('max_qty', $payload) && $payload['max_qty'] !== null ? (float) $payload['max_qty'] : null;
 
@@ -944,24 +720,11 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Price tier created', 'id' => (int) $id], 201);
     }
 
-    public function updatePriceTier(Request $request, int $id)
+    public function updatePriceTier(PriceTierRequest $request, int $id)
     {
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'code' => 'nullable|string|max:30',
-            'name' => 'nullable|string|max:120',
-            'min_qty' => 'nullable|numeric|gt:0',
-            'max_qty' => 'nullable|numeric|gt:0',
-            'priority' => 'nullable|integer|min:1',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         try {
             $this->referenceDocumentService->updatePriceTier($companyId, $id, $payload);
         } catch (\RuntimeException $e) {
@@ -1013,30 +776,12 @@ class MasterDataController extends Controller
         return response()->json(['data' => $row]);
     }
 
-    public function updateInventorySettings(Request $request)
+    public function updateInventorySettings(InventorySettingsRequest $request)
     {
         $companyId = $this->resolveCompanyId($request);
         $this->adminSettingsMatrixService->ensureInventorySettingsSchema();
 
-        $validator = Validator::make($request->all(), [
-            'complexity_mode' => 'nullable|string|in:BASIC,ADVANCED',
-            'inventory_mode' => 'nullable|string|in:KARDEX_SIMPLE,LOT_TRACKING',
-            'lot_outflow_strategy' => 'nullable|string|in:MANUAL,FIFO,FEFO',
-            'enable_inventory_pro' => 'nullable|boolean',
-            'enable_lot_tracking' => 'nullable|boolean',
-            'enable_expiry_tracking' => 'nullable|boolean',
-            'enable_advanced_reporting' => 'nullable|boolean',
-            'enable_graphical_dashboard' => 'nullable|boolean',
-            'enable_location_control' => 'nullable|boolean',
-            'allow_negative_stock' => 'nullable|boolean',
-            'enforce_lot_for_tracked' => 'nullable|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $updates = ['updated_at' => now()];
 
         foreach ([
@@ -1101,27 +846,12 @@ class MasterDataController extends Controller
         ]);
     }
 
-    public function createLot(Request $request)
+    public function createLot(LotRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'product_id' => 'required|integer|min:1',
-            'warehouse_id' => 'required|integer|min:1',
-            'lot_code' => 'required|string|max:60',
-            'manufacture_at' => 'nullable|date',
-            'expires_at' => 'nullable|date',
-            'unit_cost' => 'nullable|numeric|min:0',
-            'supplier_reference' => 'nullable|string|max:120',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         $productExists = $this->salesLookupService->companyProductExists($companyId, (int) $payload['product_id']);
         $warehouseExists = $this->salesLookupService->companyWarehouseExists($companyId, (int) $payload['warehouse_id']);
@@ -1142,25 +872,13 @@ class MasterDataController extends Controller
         return response()->json(['data' => $this->salesLookupService->listDocumentKindsForCompany($companyId)]);
     }
 
-    public function updateDocumentKinds(Request $request)
+    public function updateDocumentKinds(DocumentKindsRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
         $this->salesLookupService->ensureDocumentKindsTable();
 
-        $validator = Validator::make($request->all(), [
-            'kinds' => 'required|array|min:1',
-            'kinds.*.original_code' => 'nullable|string|max:30',
-            'kinds.*.code' => ['required', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
-            'kinds.*.label' => 'nullable|string|max:120',
-            'kinds.*.is_enabled' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $items = $validator->validated()['kinds'];
+        $items = $request->validated()['kinds'];
 
         try {
             $this->salesLookupService->updateDocumentKindsBulk($companyId, (int) $authUser->id, $items);
@@ -1171,24 +889,13 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Document kinds updated']);
     }
 
-    public function updateDocumentKind(Request $request, int $id)
+    public function updateDocumentKind(DocumentKindRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
         $this->ensureDocumentKindsTable();
 
-        $validator = Validator::make($request->all(), [
-            'code' => ['nullable', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
-            'label' => 'nullable|string|max:120',
-            'is_enabled' => 'nullable|boolean',
-            'sort_order' => 'nullable|integer|min:0|max:9999',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         try {
             $this->salesLookupService->updateDocumentKind($companyId, (int) $authUser->id, $id, $payload);
         } catch (\RuntimeException $e) {
@@ -1198,24 +905,13 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Document kind updated']);
     }
 
-    public function createDocumentKind(Request $request)
+    public function createDocumentKind(DocumentKindRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
         $this->salesLookupService->ensureDocumentKindsTable();
 
-        $validator = Validator::make($request->all(), [
-            'code' => ['required', 'string', 'max:30', 'regex:/^[A-Z0-9_]+$/'],
-            'label' => 'required|string|max:120',
-            'sort_order' => 'nullable|integer|min:0|max:9999',
-            'is_enabled' => 'nullable|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
 
         try {
             $this->salesLookupService->createDocumentKind($companyId, (int) $authUser->id, $payload);
@@ -1226,22 +922,12 @@ class MasterDataController extends Controller
         return response()->json(['message' => 'Document kind created'], 201);
     }
 
-    public function updateUnits(Request $request)
+    public function updateUnits(UnitsRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = $this->resolveCompanyId($request);
 
-        $validator = Validator::make($request->all(), [
-            'units' => 'required|array|min:1',
-            'units.*.id' => 'required|integer|min:1',
-            'units.*.is_enabled' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $items = $validator->validated()['units'];
+        $items = $request->validated()['units'];
         $unitIds = collect($items)->pluck('id')->map(function ($value) {
             return (int) $value;
         })->unique()->values();
@@ -1264,10 +950,9 @@ class MasterDataController extends Controller
 
     private function resolveCompanyId(Request $request): int
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ($companyId !== (int) $authUser->company_id) {
+        if ($companyId <= 0) {
             throw new HttpResponseException(response()->json(['message' => 'Invalid company scope'], 403));
         }
 
@@ -1284,38 +969,8 @@ class MasterDataController extends Controller
         return in_array($column, $this->salesLookupService->tableColumns($schema . '.' . $table), true);
     }
 
-    private function documentKindFeatureCodes(): array
-    {
-        return $this->documentKindCatalog()
-            ->map(function ($row) {
-                return 'DOC_KIND_' . (string) $row['code'];
-            })
-            ->values()
-            ->all();
-    }
-
-    private function documentKindCodes(): array
-    {
-        return $this->documentKindCatalog()
-            ->map(function ($row) {
-                return (string) $row['code'];
-            })
-            ->values()
-            ->all();
-    }
-
-    private function documentKindCatalog()
-    {
-        return collect($this->salesLookupService->listDocumentKindsCatalog());
-    }
-
     private function ensureDocumentKindsTable(): void
     {
         $this->salesLookupService->ensureDocumentKindsTable();
-    }
-
-    private function resolveDocumentKindIdByCode(string $code): ?int
-    {
-        return $this->salesLookupService->resolveDocumentKindIdByCode($code);
     }
 }

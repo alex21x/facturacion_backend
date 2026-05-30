@@ -18,7 +18,8 @@ class ModuleRbacAccess
             ], 401);
         }
 
-        $cacheKey = "rbac.{$authUser->id}.{$moduleCode}";
+        $companyId = isset($authUser->company_id) ? (int) $authUser->company_id : 0;
+        $cacheKey = "rbac.{$companyId}.{$authUser->id}.{$moduleCode}";
         $cached   = Cache::get($cacheKey);
 
         if ($cached === null) {
@@ -64,7 +65,7 @@ class ModuleRbacAccess
                     'approve' => $this->resolveFlag($userOverride, $roleAccess, 'can_approve'),
                 ],
             ];
-            Cache::put($cacheKey, $cached, 60);
+            Cache::put($cacheKey, $cached, 300);
         }
 
         $access = $cached['access'];

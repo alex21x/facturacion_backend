@@ -2,6 +2,7 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -36,12 +37,14 @@ class AdminSettingsMatrixRepository
             ->keyBy('company_id');
     }
 
-    public function getFeatureToggleRow(int $companyId, string $featureCode): ?object
+    public function getFeatureToggleRow(int $companyId, string $featureCode): ?CompanyFeatureToggleDTO
     {
-        return DB::table('appcfg.company_feature_toggles')
+        $toggle = DB::table('appcfg.company_feature_toggles')
             ->where('company_id', $companyId)
             ->where('feature_code', $featureCode)
             ->first(['is_enabled', 'config']);
+
+        return $toggle ? CompanyFeatureToggleDTO::fromRow($toggle) : null;
     }
 
     public function upsertCompanyFeatureTogglesBulk(int $companyId, array $valuesByCode): void

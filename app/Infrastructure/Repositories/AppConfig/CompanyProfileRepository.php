@@ -2,6 +2,9 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\CompanyBridgePayloadDTO;
+use App\Application\DTOs\AppConfig\CompanyProfileDTO;
+use App\Application\DTOs\AppConfig\CompanySettingsDTO;
 use Illuminate\Support\Facades\DB;
 
 class CompanyProfileRepository
@@ -11,23 +14,27 @@ class CompanyProfileRepository
         return DB::table('core.companies')->where('id', $companyId)->exists();
     }
 
-    public function findCompanyProfileRow(int $companyId): ?object
+    public function findCompanyProfileRow(int $companyId): ?CompanyProfileDTO
     {
-        return DB::table('core.companies')
+        $company = DB::table('core.companies')
             ->select('id', 'tax_id', 'legal_name', 'trade_name', 'status')
             ->where('id', $companyId)
             ->first();
+
+        return $company ? CompanyProfileDTO::fromRow($company) : null;
     }
 
-    public function findCompanyForBridgePayload(int $companyId): ?object
+    public function findCompanyForBridgePayload(int $companyId): ?CompanyBridgePayloadDTO
     {
-        return DB::table('core.companies')
+        $company = DB::table('core.companies')
             ->where('id', $companyId)
             ->select('tax_id', 'legal_name', 'trade_name')
             ->first();
+
+        return $company ? CompanyBridgePayloadDTO::fromRow($company) : null;
     }
 
-    public function findLatestCompanySettings(int $companyId, bool $hasLogoPath, bool $hasUpdatedAt, bool $hasCreatedAt): ?object
+    public function findLatestCompanySettings(int $companyId, bool $hasLogoPath, bool $hasUpdatedAt, bool $hasCreatedAt): ?CompanySettingsDTO
     {
         $query = DB::table('core.company_settings')->where('company_id', $companyId);
 
@@ -41,15 +48,19 @@ class CompanyProfileRepository
             $query->orderByDesc('created_at');
         }
 
-        return $query->first();
+        $settings = $query->first();
+
+        return $settings ? CompanySettingsDTO::fromRow($settings) : null;
     }
 
-    public function findBridgeSettings(int $companyId): ?object
+    public function findBridgeSettings(int $companyId): ?CompanySettingsDTO
     {
-        return DB::table('core.company_settings')
+        $settings = DB::table('core.company_settings')
             ->where('company_id', $companyId)
             ->select('address', 'phone', 'email', 'extra_data')
             ->first();
+
+        return $settings ? CompanySettingsDTO::fromRow($settings) : null;
     }
 
     public function updateCompanyBasic(int $companyId, array $updates): void

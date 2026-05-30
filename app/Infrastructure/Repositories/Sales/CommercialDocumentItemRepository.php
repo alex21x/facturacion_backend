@@ -30,6 +30,15 @@ class CommercialDocumentItemRepository implements CommercialDocumentItemReposito
         DB::table('inventory.inventory_ledger')->insert($data);
     }
 
+    public function createInventoryLedgerEntriesBatch(array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        DB::table('inventory.inventory_ledger')->insert($rows);
+    }
+
     public function getOrderedRowsByDocumentId(int $documentId)
     {
         return DB::table('sales.commercial_document_items')

@@ -135,7 +135,7 @@ class CustomerRepository implements CustomerRepositoryInterface
         ];
     }
 
-    public function findCustomerByDocument(int $companyId, string $document): ?object
+    public function findCustomerByDocument(int $companyId, string $document): ?\App\Application\DTOs\Sales\SalesCustomerProfileDTO
     {
         $row = DB::table('sales.customers as c')
             ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
@@ -172,10 +172,10 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->orderByDesc('c.id')
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesCustomerProfileDTO::fromRow($row) : null;
     }
 
-    public function findCustomerById(int $companyId, int $id): ?object
+    public function findCustomerById(int $companyId, int $id): ?\App\Application\DTOs\Sales\SalesCustomerProfileDTO
     {
         $row = DB::table('sales.customers as c')
             ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
@@ -211,10 +211,10 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->where('c.id', $id)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesCustomerProfileDTO::fromRow($row) : null;
     }
 
-    public function findCustomerIdentityByDocument(int $companyId, string $document): ?object
+    public function findCustomerIdentityByDocument(int $companyId, string $document): ?\App\Application\DTOs\Sales\SalesCustomerIdentityRecordDTO
     {
         $row = DB::table('sales.customers')
             ->select('id', 'status')
@@ -223,7 +223,7 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->orderByDesc('id')
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesCustomerIdentityRecordDTO::fromRow($row) : null;
     }
 
     public function insertCustomer(array $data): int
@@ -299,14 +299,14 @@ class CustomerRepository implements CustomerRepositoryInterface
             }, []);
     }
 
-    public function findCustomerPriceProfile(int $companyId, int $customerId): ?object
+    public function findCustomerPriceProfile(int $companyId, int $customerId): ?\App\Application\DTOs\Sales\SalesCustomerPriceProfileDTO
     {
         $row = DB::table('sales.customer_price_profiles')
             ->where('company_id', $companyId)
             ->where('customer_id', $customerId)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesCustomerPriceProfileDTO::fromRow($row) : null;
     }
 
     public function upsertCustomerPriceProfile(int $companyId, int $customerId, ?int $defaultTierId, float $discountPercent, int $status): void

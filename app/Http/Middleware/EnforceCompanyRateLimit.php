@@ -14,6 +14,10 @@ class EnforceCompanyRateLimit
 
     public function handle($request, Closure $next)
     {
+        if (strtoupper((string) $request->getMethod()) === 'OPTIONS') {
+            return $next($request);
+        }
+
         $authUser = $request->attributes->get('auth_user');
 
         if (!$authUser || !isset($authUser->company_id)) {

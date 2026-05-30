@@ -2,42 +2,41 @@
 
 namespace App\Services\AppConfig;
 
-use App\Infrastructure\Repositories\AppConfig\FeatureLabelRepository;
-
 class FeatureLabelService
 {
     public function __construct(
-        private FeatureLabelRepository $featureLabelRepository
+        private FeatureLabelQueryService $queryService,
+        private FeatureLabelCommandService $commandService
     ) {
     }
 
     public function tableExists(string $schema, string $table): bool
     {
-        return $this->featureLabelRepository->tableExists($schema, $table);
+        return $this->queryService->tableExists($schema, $table);
     }
 
     public function columnExists(string $schema, string $table, string $column): bool
     {
-        return $this->featureLabelRepository->columnExists($schema, $table, $column);
+        return $this->queryService->columnExists($schema, $table, $column);
     }
 
     public function listActiveFeatureCodes(): array
     {
-        return $this->featureLabelRepository->pluckActiveFeatureCodes();
+        return $this->queryService->listActiveFeatureCodes();
     }
 
     public function getActiveFeatureLabelRows(array $codes, array $columns)
     {
-        return $this->featureLabelRepository->getActiveRowsByCodes($codes, $columns);
+        return $this->queryService->getActiveFeatureLabelRows($codes, $columns);
     }
 
     public function getFeatureLabelRows(array $codes, array $columns)
     {
-        return $this->featureLabelRepository->getRowsByCodes($codes, $columns);
+        return $this->queryService->getFeatureLabelRows($codes, $columns);
     }
 
     public function upsertFeatureLabel(string $featureCode, array $values): void
     {
-        $this->featureLabelRepository->upsertByFeatureCode($featureCode, $values);
+        $this->commandService->upsertFeatureLabel($featureCode, $values);
     }
 }

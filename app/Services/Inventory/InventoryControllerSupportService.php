@@ -2,84 +2,30 @@
 
 namespace App\Services\Inventory;
 
+use App\Application\DTOs\Inventory\InventoryProductReferenceDTO;
 use App\Domain\Inventory\Repositories\InventoryControllerSupportRepositoryInterface;
 
 class InventoryControllerSupportService
 {
+    private ?array $unitLookupMapCache = null;
+
     public function __construct(private InventoryControllerSupportRepositoryInterface $repository)
     {
     }
 
-    public function ensureCompanyUnitsTable(): void
-    {
-        $this->repository->ensureCompanyUnitsTable();
-    }
-
     public function listCompanyUnits(int $companyId): array
     {
-        $this->repository->ensureCompanyUnitsTable();
-
         return $this->repository->listCompanyUnits($companyId);
     }
 
     public function updateCompanyUnits(int $companyId, array $items, int $updatedBy): void
     {
-        $this->repository->ensureCompanyUnitsTable();
-
-        foreach ($items as $item) {
-            $this->repository->upsertCompanyUnit(
-                $companyId,
-                (int) $item['id'],
-                (bool) $item['is_enabled'],
-                $updatedBy
-            );
-        }
+        $this->repository->upsertCompanyUnitsBatch($companyId, $items, $updatedBy);
     }
 
     public function existingUnitIds(array $unitIds): array
     {
         return $this->repository->existingUnitIds($unitIds);
-    }
-
-    public function ensureProductCatalogSchema(): void
-    {
-        $this->repository->ensureProductCatalogSchema();
-    }
-
-    public function isAllowedByProfileFeature($authUser, int $companyId, string $featureCode): bool
-    {
-        $row = $this->repository->findCompanyFeatureToggle($companyId, $featureCode);
-
-        if (!$row || !(bool) $row->is_enabled) {
-            return true;
-        }
-
-        $config = [];
-        if ($row->config !== null) {
-            $decoded = json_decode((string) $row->config, true);
-            if (is_array($decoded)) {
-                $config = $decoded;
-            }
-        }
-
-        $allowSeller = (bool) ($config['allow_seller'] ?? true);
-        $allowCashier = (bool) ($config['allow_cashier'] ?? true);
-        $allowAdmin = (bool) ($config['allow_admin'] ?? true);
-
-        $roleProfile = strtoupper((string) ($authUser->role_profile ?? ''));
-        $roleCode = strtoupper((string) ($authUser->role_code ?? ''));
-
-        if ($roleProfile === 'SELLER') {
-            return $allowSeller;
-        }
-        if ($roleProfile === 'CASHIER') {
-            return $allowCashier;
-        }
-        if ($roleCode === 'ADMIN' || $roleProfile === 'GENERAL') {
-            return $allowAdmin;
-        }
-
-        return $allowAdmin;
     }
 
     public function productMasterExists(string $table, int $id, int $companyId): bool
@@ -104,20 +50,29 @@ class InventoryControllerSupportService
 
     public function buildUnitLookupMap(): array
     {
+        if ($this->unitLookupMapCache !== null) {
+            return $this->unitLookupMapCache;
+        }
+
         $rows = $this->repository->listActiveUnits();
         $map = [];
 
         foreach ($rows as $row) {
             $id = (int) ($row->id ?? 0);
-            foreach ([(string) ($row->code ?? ''), (string) ($row->sunat_uom_code ?? ''), (string) ($row->name ?? '')] as $key) {
-                $normalized = strtoupper(trim($key));
+            foreach ([
+                (string) ($row->normalized_code ?? ''),
+                (string) ($row->normalized_sunat_uom_code ?? ''),
+                (string) ($row->normalized_name ?? ''),
+            ] as $normalized) {
                 if ($normalized !== '') {
                     $map[$normalized] = $id;
                 }
             }
         }
 
-        return $map;
+        $this->unitLookupMapCache = $map;
+
+        return $this->unitLookupMapCache;
     }
 
     public function resolveWarehouseIdFromCode(int $companyId, string $warehouseCode, array &$cache): ?int
@@ -162,18 +117,18 @@ class InventoryControllerSupportService
         ?int $unitId,
         string $nature,
         ?int $excludeProductId = null
-    ): ?object {
+    ): ?InventoryProductReferenceDTO {
         if ($sku !== null) {
-            $row = $this->repository->findActiveProductBySku($companyId, $sku, $excludeProductId);
-            if ($row) {
-                return $row;
+            $product = $this->repository->findActiveProductBySku($companyId, $sku, $excludeProductId);
+            if ($product) {
+                return $product;
             }
         }
 
         if ($barcode !== null) {
-            $row = $this->repository->findActiveProductByBarcode($companyId, $barcode, $excludeProductId);
-            if ($row) {
-                return $row;
+            $product = $this->repository->findActiveProductByBarcode($companyId, $barcode, $excludeProductId);
+            if ($product) {
+                return $product;
             }
         }
 

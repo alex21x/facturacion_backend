@@ -9,22 +9,26 @@ use Illuminate\Support\Facades\DB;
 
 class CommercialDocumentRepository implements CommercialDocumentRepositoryInterface
 {
-    public function findById(int $documentId, int $companyId): ?object
+    public function findById(int $documentId, int $companyId): ?\App\Application\DTOs\Sales\SalesSourceDocumentDTO
     {
-        return CommercialDocument::forCompany($companyId)
+        $document = CommercialDocument::forCompany($companyId)
             ->where('id', $documentId)
             ->first();
+
+        return $document ? \App\Application\DTOs\Sales\SalesSourceDocumentDTO::fromRow($document) : null;
     }
 
-    public function findByIdWithCompany(int $documentId, int $companyId): ?object
+    public function findByIdWithCompany(int $documentId, int $companyId): ?array
     {
-        return CommercialDocument::forCompany($companyId)
+        $document = CommercialDocument::forCompany($companyId)
             ->where('id', $documentId)
             ->with('items.lots', 'payments')
             ->first();
+
+        return $document ? $document->toArray() : null;
     }
 
-    public function findDocumentForShow(int $companyId, int $documentId): ?object
+    public function findDocumentForShow(int $companyId, int $documentId): ?\App\Application\DTOs\Sales\SalesDocumentShowDTO
     {
         $row = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
@@ -64,7 +68,7 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ->where('d.company_id', $companyId)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesDocumentShowDTO::fromRow($row) : null;
     }
 
     public function getActiveConversions(int $companyId, int $sourceDocumentId): bool
@@ -98,18 +102,20 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ]);
     }
 
-    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId, ?int $documentKindId = null): ?object
+    public function getSeriesNumber(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $warehouseId, ?int $documentKindId = null): ?\App\Application\DTOs\Sales\SalesSeriesNumberDTO
     {
-        return SeriesNumber::query()
+        $seriesNumber = SeriesNumber::query()
             ->forCompany($companyId)
             ->forDocumentSeries($documentKind, $series, $documentKindId)
             ->enabled()
             ->forBranchAndWarehouse($branchId, $warehouseId)
             ->lockForUpdate()
             ->first();
+
+        return $seriesNumber ? \App\Application\DTOs\Sales\SalesSeriesNumberDTO::fromRow($seriesNumber) : null;
     }
 
-    public function getSeriesNumberAnyWarehouse(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $documentKindId = null): ?object
+    public function getSeriesNumberAnyWarehouse(int $companyId, string $documentKind, string $series, ?int $branchId, ?int $documentKindId = null): ?\App\Application\DTOs\Sales\SalesSeriesNumberDTO
     {
         $query = SeriesNumber::query()
             ->forCompany($companyId)
@@ -122,7 +128,9 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             $query->whereNull('branch_id');
         }
 
-        return $query->lockForUpdate()->first();
+        $seriesNumber = $query->lockForUpdate()->first();
+
+        return $seriesNumber ? \App\Application\DTOs\Sales\SalesSeriesNumberDTO::fromRow($seriesNumber) : null;
     }
 
     public function deleteItemsAndPayments(int $documentId): void
@@ -204,7 +212,7 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
         int $targetDocumentKindId,
         ?int $branchId,
         ?int $warehouseId
-    ): ?object {
+    ): ?\App\Application\DTOs\Sales\SalesSeriesCandidateDTO {
         $row = DB::table('sales.series_numbers')
             ->where('company_id', $companyId)
             ->where(function ($query) use ($targetDocumentKindId, $targetDocumentKindCode) {
@@ -237,7 +245,7 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ->orderBy('series')
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Sales\SalesSeriesCandidateDTO::fromRow($row) : null;
     }
 
     public function findUserFullNameById(int $userId): string

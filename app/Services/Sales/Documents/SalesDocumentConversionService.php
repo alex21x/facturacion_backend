@@ -2,6 +2,8 @@
 
 namespace App\Services\Sales\Documents;
 
+use App\Application\DTOs\Sales\SalesSeriesCandidateDTO;
+use App\Application\DTOs\Sales\SalesSourceDocumentDTO;
 use App\Domain\Sales\Repositories\CommercialDocumentItemLotRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
@@ -15,7 +17,7 @@ class SalesDocumentConversionService
     ) {
     }
 
-    public function findSourceDocument(int $companyId, int $sourceId): ?object
+    public function findSourceDocument(int $companyId, int $sourceId): ?SalesSourceDocumentDTO
     {
         return $this->commercialDocumentRepository->findById($sourceId, $companyId);
     }
@@ -41,7 +43,7 @@ class SalesDocumentConversionService
         int $targetDocumentKindId,
         ?int $branchId,
         ?int $warehouseId
-    ): ?object {
+    ): ?SalesSeriesCandidateDTO {
         return $this->commercialDocumentRepository->findFirstEnabledSeriesForTargetKind(
             $companyId,
             $targetDocumentKindCode,

@@ -39,7 +39,6 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
-            'throttle:12000,1',
             \App\Http\Middleware\CaptureEndpointLatency::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
@@ -55,6 +54,7 @@ class Kernel extends HttpKernel
     protected $routeMiddleware = [
         'auth' => \App\Http\Middleware\Authenticate::class,
         'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
+        'company.scope' => \App\Http\Middleware\EnsureCompanyScope::class,
         'tenant.rate' => \App\Http\Middleware\EnforceCompanyRateLimit::class,
         'rbac.module' => \App\Http\Middleware\ModuleRbacAccess::class,
         'admin.only' => \App\Http\Middleware\RequireAdminRole::class,

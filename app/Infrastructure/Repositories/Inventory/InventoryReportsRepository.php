@@ -2,19 +2,24 @@
 
 namespace App\Infrastructure\Repositories\Inventory;
 
+use App\Application\DTOs\Inventory\InventoryReportRequestDTO;
+use App\Application\DTOs\Inventory\InventorySettingsDTO;
+use App\Application\DTOs\Inventory\InventoryStockSummaryDTO;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class InventoryReportsRepository
 {
-    public function findInventorySettings(int $companyId): ?object
+    public function findInventorySettings(int $companyId): ?InventorySettingsDTO
     {
-        return DB::table('inventory.inventory_settings')
+        $settings = DB::table('inventory.inventory_settings')
             ->where('company_id', $companyId)
             ->first();
+
+        return $settings ? InventorySettingsDTO::fromRow($settings) : null;
     }
 
-    public function findStockSummary(int $companyId, ?int $warehouseId): ?object
+    public function findStockSummary(int $companyId, ?int $warehouseId): ?InventoryStockSummaryDTO
     {
         $query = DB::table('inventory.current_stock as cs')
             ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
@@ -24,9 +29,11 @@ class InventoryReportsRepository
             $query->where('cs.warehouse_id', $warehouseId);
         }
 
-        return $query
+        $summary = $query
             ->selectRaw('COUNT(*) as rows, COALESCE(SUM(cs.stock), 0) as total_qty, COALESCE(SUM(cs.stock * p.cost_price), 0) as total_value')
             ->first();
+
+        return $summary ? InventoryStockSummaryDTO::fromRow($summary) : null;
     }
 
     public function listExpiryBuckets(int $companyId, ?int $warehouseId): Collection
@@ -279,9 +286,9 @@ class InventoryReportsRepository
         return (int) DB::table('inventory.report_requests')->insertGetId($payload);
     }
 
-    public function findReportRequestById(int $id): ?object
+    public function findReportRequestById(int $id): ?InventoryReportRequestDTO
     {
-        return DB::table('inventory.report_requests')
+        $request = DB::table('inventory.report_requests')
             ->select([
                 'id',
                 'company_id',
@@ -296,11 +303,13 @@ class InventoryReportsRepository
             ])
             ->where('id', $id)
             ->first();
+
+        return $request ? InventoryReportRequestDTO::fromRow($request) : null;
     }
 
-    public function findReportRequestByCompany(int $id, int $companyId): ?object
+    public function findReportRequestByCompany(int $id, int $companyId): ?InventoryReportRequestDTO
     {
-        return DB::table('inventory.report_requests')
+        $request = DB::table('inventory.report_requests')
             ->select([
                 'id',
                 'company_id',
@@ -318,5 +327,7 @@ class InventoryReportsRepository
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->first();
+
+        return $request ? InventoryReportRequestDTO::fromRow($request) : null;
     }
 }

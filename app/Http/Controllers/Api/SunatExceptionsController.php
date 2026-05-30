@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\SunatExceptions\AuditSunatExceptionsRequest;
+use App\Http\Requests\SunatExceptions\IndexSunatExceptionsRequest;
+use App\Http\Requests\SunatExceptions\ManualConfirmSunatExceptionRequest;
 use App\Services\Sales\TaxBridge\SunatExceptionService;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\TaxBridgeService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class SunatExceptionsController extends Controller
 {
@@ -17,31 +19,9 @@ class SunatExceptionsController extends Controller
     ) {
     }
 
-    public function index(Request $request)
+    public function index(IndexSunatExceptionsRequest $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'status' => 'nullable|string|max:40',
-            'min_age_hours' => 'nullable|integer|min:0|max:720',
-            'min_attempts' => 'nullable|integer|min:0|max:100',
-            'only_manual_needed' => 'nullable|boolean',
-            'page' => 'nullable|integer|min:1',
-            'per_page' => 'nullable|integer|min:5|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $data = $this->service->list(
             $companyId,
@@ -57,28 +37,9 @@ class SunatExceptionsController extends Controller
         return response()->json($data, 200);
     }
 
-    public function audit(Request $request)
+    public function audit(AuditSunatExceptionsRequest $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'nullable|integer|min:1',
-            'date_from' => 'nullable|date_format:Y-m-d',
-            'date_to' => 'nullable|date_format:Y-m-d',
-            'limit' => 'nullable|integer|min:1|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $data = $this->service->auditPendingVsInventory(
             $companyId,
@@ -91,28 +52,10 @@ class SunatExceptionsController extends Controller
         return response()->json($data, 200);
     }
 
-    public function manualConfirm(Request $request, int $id)
+    public function manualConfirm(ManualConfirmSunatExceptionRequest $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'resolution' => 'required|string|in:ACCEPTED,REJECTED',
-            'evidence_type' => 'required|string|in:TICKET,CDR,OBSERVATION,WHATSAPP,EMAIL,OTHER',
-            'evidence_ref' => 'nullable|string|max:500',
-            'evidence_note' => 'nullable|string|max:1000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $data = $this->service->manualConfirm(
@@ -133,12 +76,7 @@ class SunatExceptionsController extends Controller
 
     public function reconcileStats(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $stats = $this->taxBridgeService->getReconcileStats($companyId);
 

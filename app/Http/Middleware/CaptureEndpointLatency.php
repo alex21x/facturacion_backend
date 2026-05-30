@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Jobs\PersistEndpointLatencySampleJob;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,10 @@ class CaptureEndpointLatency
 
     private function persistSample(Request $request, int $statusCode, float $start): void
     {
+        if (!$this->isCaptureEnabled()) {
+            return;
+        }
+
         if (!$this->canCapture($request)) {
             return;
         }
@@ -45,7 +50,7 @@ class CaptureEndpointLatency
             : null;
 
         try {
-            DB::table('ops.http_endpoint_latency_samples')->insert([
+            PersistEndpointLatencySampleJob::dispatch([
                 'company_id' => $companyId,
                 'method' => $method,
                 'route_uri' => $routeUri,
@@ -55,7 +60,7 @@ class CaptureEndpointLatency
                 'requested_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ])->onQueue('ops-latency');
         } catch (\Throwable $e) {
             // Keep observability best-effort and never fail the request.
         }
@@ -63,6 +68,10 @@ class CaptureEndpointLatency
 
     private function canCapture(Request $request): bool
     {
+        if (strtoupper((string) $request->method()) === 'OPTIONS') {
+            return false;
+        }
+
         $path = '/' . ltrim((string) $request->path(), '/');
 
         if (!str_starts_with($path, '/api/')) {
@@ -74,6 +83,18 @@ class CaptureEndpointLatency
         }
 
         return true;
+    }
+
+    private function isCaptureEnabled(): bool
+    {
+        $flag = env('OPS_CAPTURE_ENDPOINT_LATENCY');
+        if ($flag === null) {
+            return !app()->environment('local');
+        }
+
+        $normalized = strtolower(trim((string) $flag));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     private static function isTableAvailable(): bool

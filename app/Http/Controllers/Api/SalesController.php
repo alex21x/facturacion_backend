@@ -5,7 +5,19 @@ namespace App\Http\Controllers\Api;
 use App\Application\UseCases\Sales\CreateCommercialDocumentUseCase;
 use App\Application\UseCases\Sales\UpdateCommercialDocumentDraftUseCase;
 use App\Application\UseCases\Sales\VoidCommercialDocumentUseCase;
+use App\Domain\Sales\Policies\CommercialDocumentPolicy;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\ApiFormRequest;
+use App\Http\Requests\Sales\BulkImportCustomersRequest;
+use App\Http\Requests\Sales\ConvertCommercialDocumentRequest;
+use App\Http\Requests\Sales\CreateCommercialDocumentRequest;
+use App\Http\Requests\Sales\CreateCustomerRequest;
+use App\Http\Requests\Sales\CreateCustomerVehicleRequest;
+use App\Http\Requests\Sales\SunatVoidCommunicationRequest;
+use App\Http\Requests\Sales\UpdateCommercialDocumentRequest;
+use App\Http\Requests\Sales\UpdateCustomerRequest;
+use App\Http\Requests\Sales\UpdateCustomerVehicleRequest;
+use App\Http\Requests\Sales\VoidCommercialDocumentRequest;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\CustomerManagementService;
 use App\Services\Sales\CustomerQueryService;
@@ -25,7 +37,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
 
 class SalesController extends Controller
 {    
@@ -58,6 +69,16 @@ class SalesController extends Controller
     {
     }
 
+    private function validateSalesRequest(Request $request, string $requestClass): ApiFormRequest
+    {
+        /** @var ApiFormRequest $formRequest */
+        $formRequest = $requestClass::createFrom($request, new $requestClass());
+        $formRequest->setContainer(app());
+        $formRequest->validateResolved();
+
+        return $formRequest;
+    }
+
     public function bootstrap(Request $request)
     {
         $includeDocuments = filter_var($request->query('include_documents', false), FILTER_VALIDATE_BOOLEAN);
@@ -88,19 +109,13 @@ class SalesController extends Controller
     public function lookups(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
 
         if ($branchId !== null && $branchId !== '') {
             $branchId = (int) $branchId;
         } else {
             $branchId = null;
-        }
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
         }
 
         if ($branchId !== null) {
@@ -337,18 +352,12 @@ class SalesController extends Controller
     public function referenceDocuments(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $customerId = (int) $request->query('customer_id', 0);
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $documentKindId = (int) $request->query('document_kind_id', 0);
         $noteKind = strtoupper(trim((string) $request->query('note_kind', '')));
         $limit = (int) $request->query('limit', 1000);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
 
         if ($customerId <= 0) {
             return response()->json([
@@ -397,12 +406,7 @@ class SalesController extends Controller
 
     public function priceTiers(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $rows = $this->referenceDocumentService->listPriceTiers($companyId);
 
@@ -411,8 +415,7 @@ class SalesController extends Controller
 
     public function customerAutocomplete(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
         $this->ensureCustomerPriceProfilesTable();
@@ -437,12 +440,7 @@ class SalesController extends Controller
 
     public function resolveCustomerByDocument(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $document = preg_replace('/\D+/', '', (string) $request->query('document', ''));
         if (!is_string($document)) {
@@ -464,8 +462,7 @@ class SalesController extends Controller
 
     public function customers(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
 
@@ -491,12 +488,7 @@ class SalesController extends Controller
 
     public function customerVehicles(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
             return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
@@ -519,12 +511,7 @@ class SalesController extends Controller
 
     public function createCustomerVehicle(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
             return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
@@ -540,22 +527,8 @@ class SalesController extends Controller
             return response()->json(['message' => 'Customer not found'], 404);
         }
 
-        $validator = Validator::make($request->all(), [
-            'plate' => 'required|string|max:20',
-            'brand' => 'nullable|string|max:80',
-            'model' => 'nullable|string|max:80',
-            'year' => 'nullable|integer|min:1900|max:2100',
-            'color' => 'nullable|string|max:40',
-            'vin' => 'nullable|string|max:50',
-            'is_default' => 'nullable|boolean',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, CreateCustomerVehicleRequest::class);
+        $payload = $validatedRequest->validated();
 
         if (array_key_exists('doc_number', $payload)) {
             $normalizedDoc = trim((string) ($payload['doc_number'] ?? ''));
@@ -583,12 +556,7 @@ class SalesController extends Controller
 
     public function updateCustomerVehicle(Request $request, int $id, int $vehicleId)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
             return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
@@ -604,22 +572,8 @@ class SalesController extends Controller
             return response()->json(['message' => 'Vehicle not found'], 404);
         }
 
-        $validator = Validator::make($request->all(), [
-            'plate' => 'nullable|string|max:20',
-            'brand' => 'nullable|string|max:80',
-            'model' => 'nullable|string|max:80',
-            'year' => 'nullable|integer|min:1900|max:2100',
-            'color' => 'nullable|string|max:40',
-            'vin' => 'nullable|string|max:50',
-            'is_default' => 'nullable|boolean',
-            'status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $changes = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, UpdateCustomerVehicleRequest::class);
+        $changes = $validatedRequest->validated();
         $update = [];
 
         if (array_key_exists('plate', $changes)) {
@@ -665,12 +619,7 @@ class SalesController extends Controller
 
     public function deleteCustomerVehicle(Request $request, int $id, int $vehicleId)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         if (!$this->isWorkshopMultiVehicleEnabledForRequest($request, $companyId)) {
             return response()->json(['message' => 'Funcionalidad no habilitada para esta empresa'], 404);
@@ -698,12 +647,7 @@ class SalesController extends Controller
 
     public function customerTypes(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $rows = $this->customerVehicleService->listCustomerTypes();
 
@@ -712,128 +656,39 @@ class SalesController extends Controller
 
     public function createCustomer(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'doc_type' => 'nullable|string|max:20',
-            'customer_type_id' => [
-                'required',
-                'integer',
-                function ($attribute, $value, $fail) {
-                    if (!$this->customerVehicleService->customerTypeExists((int) $value)) {
-                        $fail('El tipo de cliente seleccionado no es válido.');
-                    }
-                },
-            ],
-            'doc_number' => 'nullable|string|max:40',
-            'legal_name' => 'nullable|string|max:180',
-            'trade_name' => 'nullable|string|max:180',
-            'first_name' => 'nullable|string|max:120',
-            'last_name' => 'nullable|string|max:120',
-            'plate' => 'nullable|string|max:20',
-            'address' => 'nullable|string|max:250',
-            'phone' => 'nullable|string|max:40',
-            'status' => 'nullable|integer|in:0,1',
-            'default_tier_id' => 'nullable|integer|min:1',
-            'discount_percent' => 'nullable|numeric|min:0|max:100',
-            'price_profile_status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $result = $this->customerManagementService->createCustomer($companyId, $validator->validated());
+        $validatedRequest = $this->validateSalesRequest($request, CreateCustomerRequest::class);
+        $result = $this->customerManagementService->createCustomer($companyId, $validatedRequest->validated());
 
         return response()->json($result['body'], (int) $result['status']);
     }
 
     public function bulkImportCustomers(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'rows' => 'required|array|min:1|max:20000',
-            'rows.*.doc_type' => 'nullable|string|max:20',
-            'rows.*.customer_type_id' => 'nullable|integer',
-            'rows.*.doc_number' => 'required|string|max:40',
-            'rows.*.legal_name' => 'required|string|max:180',
-            'rows.*.trade_name' => 'nullable|string|max:180',
-            'rows.*.first_name' => 'nullable|string|max:120',
-            'rows.*.last_name' => 'nullable|string|max:120',
-            'rows.*.plate' => 'nullable|string|max:20',
-            'rows.*.address' => 'nullable|string|max:250',
-            'rows.*.phone' => 'nullable|string|max:40',
-            'rows.*.status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $result = $this->customerManagementService->bulkImportCustomers($companyId, $validator->validated()['rows']);
+        $validatedRequest = $this->validateSalesRequest($request, BulkImportCustomersRequest::class);
+        $result = $this->customerManagementService->bulkImportCustomers($companyId, $validatedRequest->validated()['rows']);
 
         return response()->json($result);
     }
 
     public function updateCustomer(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->input('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $this->ensureCustomerPriceProfilesTable();
         $this->ensureCustomersPhoneColumn();
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'doc_type' => 'nullable|string|max:20',
-            'customer_type_id' => [
-                'nullable',
-                'integer',
-                function ($attribute, $value, $fail) {
-                    if ($value !== null && !$this->customerVehicleService->customerTypeExists((int) $value)) {
-                        $fail('El tipo de cliente seleccionado no es válido.');
-                    }
-                },
-            ],
-            'doc_number' => 'nullable|string|max:40',
-            'legal_name' => 'nullable|string|max:180',
-            'trade_name' => 'nullable|string|max:180',
-            'first_name' => 'nullable|string|max:120',
-            'last_name' => 'nullable|string|max:120',
-            'plate' => 'nullable|string|max:20',
-            'address' => 'nullable|string|max:250',
-            'phone' => 'nullable|string|max:40',
-            'status' => 'nullable|integer|in:0,1',
-            'default_tier_id' => 'nullable|integer|min:1',
-            'discount_percent' => 'nullable|numeric|min:0|max:100',
-            'price_profile_status' => 'nullable|integer|in:0,1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $result = $this->customerManagementService->updateCustomer($companyId, $id, $validator->validated());
+        $validatedRequest = $this->validateSalesRequest($request, UpdateCustomerRequest::class);
+        $result = $this->customerManagementService->updateCustomer($companyId, $id, $validatedRequest->validated());
 
         return response()->json($result['body'], (int) $result['status']);
     }
@@ -841,67 +696,8 @@ class SalesController extends Controller
     public function createCommercialDocument(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $documentKindRule = 'required_without:document_kind_id|string|in:' . implode(',', $this->documentKindCodes());
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'cash_register_id' => 'nullable|integer|min:1',
-            'document_kind_id' => 'nullable|integer|min:1',
-            'document_kind' => $documentKindRule,
-            'series' => 'required|string|max:10',
-            'issue_at' => 'nullable|date',
-            'due_at' => 'nullable|date',
-            'customer_id' => 'required|integer|min:1',
-            'customer_vehicle_id' => 'nullable|integer|min:1',
-            'currency_id' => 'required|integer|min:1',
-            'payment_method_id' => 'nullable|integer|min:1',
-            'exchange_rate' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-            'metadata' => 'nullable|array',
-            'status' => 'nullable|string|in:DRAFT,APPROVED,ISSUED,VOID,CANCELED',
-            'items' => 'required|array|min:1',
-            'items.*.line_no' => 'nullable|integer|min:1',
-            'items.*.product_id' => 'nullable|integer|min:1',
-            'items.*.unit_id' => 'nullable|integer|min:1',
-            'items.*.price_tier_id' => 'nullable|integer|min:1',
-            'items.*.tax_category_id' => 'nullable|integer|min:1',
-            'items.*.description' => 'required|string|max:500',
-            'items.*.qty' => 'required|numeric|min:0.001',
-            'items.*.qty_base' => 'nullable|numeric|min:0',
-            'items.*.conversion_factor' => 'nullable|numeric|min:0.00000001',
-            'items.*.base_unit_price' => 'nullable|numeric|min:0',
-            'items.*.unit_price' => 'required|numeric|min:0',
-            'items.*.unit_cost' => 'nullable|numeric|min:0',
-            'items.*.wholesale_discount_percent' => 'nullable|numeric|min:0',
-            'items.*.price_source' => 'nullable|string|in:MANUAL,TIER,PROFILE',
-            'items.*.discount_total' => 'nullable|numeric|min:0',
-            'items.*.tax_total' => 'nullable|numeric|min:0',
-            'items.*.subtotal' => 'nullable|numeric|min:0',
-            'items.*.total' => 'nullable|numeric|min:0',
-            'items.*.metadata' => 'nullable|array',
-            'items.*.lots' => 'nullable|array',
-            'items.*.lots.*.lot_id' => 'required_with:items.*.lots|integer|min:1',
-            'items.*.lots.*.qty' => 'required_with:items.*.lots|numeric|min:0.001',
-            'payments' => 'nullable|array',
-            'payments.*.payment_method_id' => 'required_with:payments|integer|min:1',
-            'payments.*.amount' => 'required_with:payments|numeric|min:0.01',
-            'payments.*.due_at' => 'nullable|date',
-            'payments.*.paid_at' => 'nullable|date',
-            'payments.*.status' => 'nullable|string|in:PENDING,PAID,CANCELED',
-            'payments.*.notes' => 'nullable|string|max:300',
-        ]);
-
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            return response()->json([
-                'message' => $errors->first() ?: 'Validation failed',
-                'errors' => $errors,
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, CreateCommercialDocumentRequest::class);
+        $payload = $validatedRequest->validated();
         $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
         if ($documentKindId > 0) {
             $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
@@ -914,7 +710,7 @@ class SalesController extends Controller
             $payload['document_kind'] = (string) ($catalogRow['code'] ?? '');
             $payload['document_kind_id'] = $documentKindId;
         }
-        $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = array_key_exists('branch_id', $payload) ? $payload['branch_id'] : $authUser->branch_id;
         $warehouseId = $payload['warehouse_id'] ?? null;
         $cashRegisterId = $payload['cash_register_id'] ?? null;
@@ -928,12 +724,6 @@ class SalesController extends Controller
             if ($fallbackWarehouse !== null) {
                 $warehouseId = $fallbackWarehouse;
             }
-        }
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
         }
 
         if ($branchId !== null) {
@@ -1102,7 +892,7 @@ class SalesController extends Controller
     public function seriesNumbers(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
         $documentKind = $request->query('document_kind');
@@ -1151,56 +941,10 @@ class SalesController extends Controller
     public function updateCommercialDocument(Request $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
-        $documentKindRule = 'sometimes|string|in:' . implode(',', $this->documentKindCodes());
-
-        $validator = Validator::make($request->all(), [
-            'document_kind_id' => 'nullable|integer|min:1',
-            'document_kind' => $documentKindRule,
-            'branch_id' => 'nullable|integer|min:1',
-            'warehouse_id' => 'nullable|integer|min:1',
-            'cash_register_id' => 'nullable|integer|min:1',
-            'due_at' => 'nullable|date',
-            'customer_id' => 'nullable|integer|min:1',
-            'currency_id' => 'nullable|integer|min:1',
-            'payment_method_id' => 'nullable|integer|min:1',
-            'notes' => 'nullable|string',
-            'metadata' => 'nullable|array',
-            'items' => 'nullable|array|min:1',
-            'items.*.line_no' => 'nullable|integer|min:1',
-            'items.*.product_id' => 'nullable|integer|min:1',
-            'items.*.unit_id' => 'nullable|integer|min:1',
-            'items.*.price_tier_id' => 'nullable|integer|min:1',
-            'items.*.tax_category_id' => 'nullable|integer|min:1',
-            'items.*.description' => 'required_with:items|string|max:500',
-            'items.*.qty' => 'required_with:items|numeric|min:0.001',
-            'items.*.qty_base' => 'nullable|numeric|min:0',
-            'items.*.conversion_factor' => 'nullable|numeric|min:0.00000001',
-            'items.*.base_unit_price' => 'nullable|numeric|min:0',
-            'items.*.unit_price' => 'required_with:items|numeric|min:0',
-            'items.*.unit_cost' => 'nullable|numeric|min:0',
-            'items.*.wholesale_discount_percent' => 'nullable|numeric|min:0',
-            'items.*.price_source' => 'nullable|string|in:MANUAL,TIER,PROFILE',
-            'items.*.discount_total' => 'nullable|numeric|min:0',
-            'items.*.tax_total' => 'nullable|numeric|min:0',
-            'items.*.subtotal' => 'nullable|numeric|min:0',
-            'items.*.total' => 'nullable|numeric|min:0',
-            'items.*.metadata' => 'nullable|array',
-            'items.*.lots' => 'nullable|array',
-            'items.*.lots.*.lot_id' => 'required_with:items.*.lots|integer|min:1',
-            'items.*.lots.*.qty' => 'required_with:items.*.lots|numeric|min:0.001',
-        ]);
-
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            return response()->json([
-                'message' => $errors->first() ?: 'Validation failed',
-                'errors' => $errors,
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, UpdateCommercialDocumentRequest::class);
+        $payload = $validatedRequest->validated();
         $documentKindId = array_key_exists('document_kind_id', $payload) ? (int) $payload['document_kind_id'] : 0;
         if ($documentKindId > 0) {
             $catalogRow = $this->findDocumentKindCatalogRowById($documentKindId);
@@ -1231,26 +975,11 @@ class SalesController extends Controller
     public function voidCommercialDocument(Request $request, $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
 
-        $validator = Validator::make($request->all(), [
-            'reason' => 'nullable|string|max:500',
-            'notes' => 'nullable|string|max:500',
-            'void_at' => 'nullable|date',
-            'sunat_void_status' => 'nullable|string|max:40',
-            'void_password' => 'nullable|string|max:120',
-        ]);
-
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            return response()->json([
-                'message' => $errors->first() ?: 'Validation failed',
-                'errors' => $errors,
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, VoidCommercialDocumentRequest::class);
+        $payload = $validatedRequest->validated();
 
         $featureBranchId = $this->salesLookupService->findCommercialDocumentBranchId($companyId, $documentId);
 
@@ -1297,7 +1026,7 @@ class SalesController extends Controller
     public function commercialDocuments(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
@@ -1364,7 +1093,7 @@ class SalesController extends Controller
     public function exportCommercialDocuments(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
         $resolvedBranchId = ($branchIdFilter !== null && $branchIdFilter !== '') ? (int) $branchIdFilter : null;
         $format = strtolower(trim((string) $request->query('format', 'csv')));
@@ -1578,28 +1307,9 @@ class SalesController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'target_document_kind' => 'required|string|in:INVOICE,RECEIPT,SALES_ORDER',
-            'series' => 'nullable|string|max:10',
-            'issue_at' => 'nullable|date',
-            'due_at' => 'nullable|date',
-            'cash_register_id' => 'nullable|integer|min:1',
-            'payment_method_id' => 'nullable|integer|min:1',
-            'defer_sunat_send' => 'nullable|boolean',
-            'notes' => 'nullable|string',
-            'status' => 'nullable|string|in:ISSUED,DRAFT',
-        ]);
-
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            return response()->json([
-                'message' => $errors->first() ?: 'Validation failed',
-                'errors' => $errors,
-            ], 422);
-        }
-
-        $payload = $validator->validated();
-        $companyId = (int) $authUser->company_id;
+        $validatedRequest = $this->validateSalesRequest($request, ConvertCommercialDocumentRequest::class);
+        $payload = $validatedRequest->validated();
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $sourceId = (int) $id;
         $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
         $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
@@ -1828,7 +1538,7 @@ class SalesController extends Controller
             'document_kind' => $targetDocumentKind,
             'series' => $series,
             'issue_at' => $this->resolveIssueAtForStorage($payload['issue_at'] ?? null),
-            'due_at' => $payload['due_at'] ?? $source->due_at,
+            'due_at' => $this->resolveDueAtForStorage($payload['due_at'] ?? $source->due_at),
             'customer_id' => (int) $source->customer_id,
             'currency_id' => (int) $source->currency_id,
             'payment_method_id' => $resolvedPaymentMethodId,
@@ -1855,14 +1565,14 @@ class SalesController extends Controller
 
         $forwardRequest = Request::create('/api/sales/commercial-documents', 'POST', $forwardPayload);
         $forwardRequest->attributes->set('auth_user', $authUser);
+        $forwardRequest->attributes->set('resolved_company_id', $companyId);
 
         return $this->createCommercialDocument($forwardRequest);
     }
 
     public function showCommercialDocument(Request $request, $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $authUser->company_id;
+        $companyId = (int) $request->attributes->get('resolved_company_id');
         $documentId = (int) $id;
 
         $doc = $this->salesDocumentReadService->findDocumentForShow($companyId, $documentId);
@@ -3898,18 +3608,51 @@ HTML;
         }
     }
 
+    private function resolveDueAtForStorage($dueAt)
+    {
+        if ($dueAt === null || $dueAt === '') {
+            return null;
+        }
+
+        $text = trim((string) $dueAt);
+        if ($text === '' || in_array(strtolower($text), ['invalid date', 'undefined', 'null', 'nan'], true)) {
+            return null;
+        }
+
+        $normalized = str_replace(',', '', $text);
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $normalized) === 1) {
+            return $normalized . ' 00:00:00';
+        }
+
+        foreach (['d/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y', 'd-m-Y H:i:s', 'd-m-Y H:i', 'd-m-Y'] as $format) {
+            $parsed = \DateTimeImmutable::createFromFormat($format, $normalized);
+            if ($parsed !== false) {
+                return $parsed->format('Y-m-d H:i:s');
+            }
+        }
+
+        try {
+            return Carbon::parse($normalized)->format('Y-m-d H:i:s');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     private function documentKindCatalog()
     {
-        $rows = $this->salesLookupService->listDocumentKindsCatalog();
+        $rows = collect($this->salesLookupService->listDocumentKindsCatalog());
         if (!$rows->isEmpty()) {
             return $rows
                 ->map(function ($row) {
-                    $meta = $this->documentKindMeta((string) $row->code, (string) $row->label);
+                    $code = (string) data_get($row, 'code', '');
+                    $label = (string) data_get($row, 'label', '');
+                    $meta = $this->documentKindMeta($code, $label);
                     return [
-                        'id' => (int) $row->id,
-                        'code' => (string) $row->code,
-                        'label' => (string) $row->label,
-                        'is_enabled' => (bool) $row->is_enabled,
+                        'id' => (int) data_get($row, 'id', 0),
+                        'code' => $code,
+                        'label' => $label,
+                        'is_enabled' => (bool) data_get($row, 'is_enabled', true),
                         'base_kind' => $meta['base_kind'],
                         'kind_group' => $meta['kind_group'],
                         'note_target_kind' => $meta['note_target_kind'],
@@ -4456,6 +4199,11 @@ HTML;
         return (float) $this->lotStockProjection[$projectionKey];
     }
 
+    private function shouldAffectStock(string $documentKind, string $status): bool
+    {
+        return CommercialDocumentPolicy::shouldAffectStock($documentKind, $status);
+    }
+
     private function applyLotStockDelta(
         int $companyId,
         int $warehouseId,
@@ -4484,13 +4232,7 @@ HTML;
     public function taxBridgeDebug(Request $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json([
-                'message' => 'Invalid company scope',
-            ], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $document = $this->salesLookupService->findTaxBridgeDocumentForDebug($companyId, $id);
 
@@ -4525,16 +4267,41 @@ HTML;
 
     public function retryTaxBridgeSend(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->taxBridgeService->retry($companyId, $id);
             $diagnostic = $this->taxBridgeService->summarizeBridgeDiagnostic($result['response'] ?? null);
+            $status = strtoupper((string) ($result['status'] ?? ''));
+            $isWafBlocked = (bool) ($result['waf_blocked'] ?? false);
+
+            if ($isWafBlocked || $status === 'WAF_BLOCKED') {
+                return response()->json([
+                    'message' => 'Tax bridge retry blocked by Imunify360 bot-protection. Solicite whitelist de IP/automatizacion en el puente SUNAT.',
+                    'document_id' => $id,
+                    'sunat_status' => $result['status'],
+                    'sunat_status_label' => $result['label'],
+                    'bridge_http_code' => $result['bridge_http_code'] ?? null,
+                    'bridge_response' => $result['response'] ?? null,
+                    'sunat_error_code' => $diagnostic['code'] ?? null,
+                    'sunat_error_message' => $diagnostic['message'] ?? null,
+                    'debug' => $result['debug'] ?? null,
+                ], 422);
+            }
+
+            if (in_array($status, ['REJECTED', 'ERROR', 'HTTP_ERROR'], true)) {
+                return response()->json([
+                    'message' => 'Tax bridge retry failed',
+                    'document_id' => $id,
+                    'sunat_status' => $result['status'],
+                    'sunat_status_label' => $result['label'],
+                    'bridge_http_code' => $result['bridge_http_code'] ?? null,
+                    'bridge_response' => $result['response'] ?? null,
+                    'sunat_error_code' => $diagnostic['code'] ?? null,
+                    'sunat_error_message' => $diagnostic['message'] ?? null,
+                    'debug' => $result['debug'] ?? null,
+                ], 422);
+            }
 
             return response()->json([
                 'message' => 'Tax bridge retry sent successfully',
@@ -4560,26 +4327,10 @@ HTML;
     public function sunatVoidCommunication(Request $request, int $id)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'reason' => 'nullable|string|max:500',
-            'notes' => 'nullable|string|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            $errors = $validator->errors();
-            return response()->json([
-                'message' => $errors->first() ?: 'Validation failed',
-                'errors' => $errors,
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $validatedRequest = $this->validateSalesRequest($request, SunatVoidCommunicationRequest::class);
+        $payload = $validatedRequest->validated();
 
         try {
             $result = $this->taxBridgeService->sendVoidCommunication($companyId, $id, $payload['reason'] ?? null);
@@ -4619,12 +4370,7 @@ HTML;
 
     public function previewTaxBridgePayload(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $preview = $this->taxBridgeService->preview($companyId, $id);
@@ -4649,8 +4395,7 @@ HTML;
 
     public function downloadSunatXml(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) ($authUser->company_id ?? 0);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->taxBridgeService->downloadDocument($companyId, $id, 'dowload_xml');
@@ -4671,8 +4416,7 @@ HTML;
 
     public function downloadSunatCdr(Request $request, int $id)
     {
-        $authUser  = $request->attributes->get('auth_user');
-        $companyId = (int) ($authUser->company_id ?? 0);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         try {
             $result = $this->taxBridgeService->downloadDocument($companyId, $id, 'dowload_cdr');

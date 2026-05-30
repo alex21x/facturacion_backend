@@ -81,24 +81,24 @@ class OperationalLimitsRepository
             ->all();
     }
 
-    public function findPlatformLimitsRow(): ?object
+    public function findPlatformLimitsRow(): ?\App\Application\DTOs\AppConfig\AppConfigPlatformLimitsDTO
     {
         $row = DB::table('appcfg.platform_limits')
             ->select('max_companies_enabled')
             ->where('id', 1)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\AppConfig\AppConfigPlatformLimitsDTO::fromRow($row) : null;
     }
 
-    public function findCompanyOperationalLimitsRow(int $companyId): ?object
+    public function findCompanyOperationalLimitsRow(int $companyId): ?\App\Application\DTOs\AppConfig\AppConfigCompanyOperationalLimitsDTO
     {
         $row = DB::table('appcfg.company_operational_limits')
             ->select('max_branches_enabled', 'max_warehouses_enabled', 'max_cash_registers_enabled', 'max_cash_registers_per_warehouse')
             ->where('company_id', $companyId)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\AppConfig\AppConfigCompanyOperationalLimitsDTO::fromRow($row) : null;
     }
 
     public function updateOrInsertPlatformLimit(int $maxCompaniesEnabled, int $updatedBy): void
@@ -138,7 +138,7 @@ class OperationalLimitsRepository
         DB::table('appcfg.company_rate_limit_audit')->insert($values);
     }
 
-    public function findActiveCompanyVerticalRow(int $companyId): ?object
+    public function findActiveCompanyVerticalRow(int $companyId): ?\App\Application\DTOs\AppConfig\AppConfigVerticalReferenceDTO
     {
         $row = DB::table('appcfg.company_verticals as cv')
             ->join('appcfg.verticals as v', 'v.id', '=', 'cv.vertical_id')
@@ -149,6 +149,6 @@ class OperationalLimitsRepository
             ->select('v.id', 'v.code', 'v.name')
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\AppConfig\AppConfigVerticalReferenceDTO::fromRow($row) : null;
     }
 }

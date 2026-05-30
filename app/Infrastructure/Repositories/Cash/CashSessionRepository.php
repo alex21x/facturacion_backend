@@ -2,6 +2,8 @@
 
 namespace App\Infrastructure\Repositories\Cash;
 
+use App\Application\DTOs\Cash\CashSessionDetailDTO;
+use App\Application\DTOs\Cash\CashSessionRecordDTO;
 use App\Domain\Cash\Repositories\CashSessionRepositoryInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +59,7 @@ class CashSessionRepository implements CashSessionRepositoryInterface
         ];
     }
 
-    public function findCurrentOpenSession(int $companyId, ?int $cashRegisterId): ?object
+    public function findCurrentOpenSession(int $companyId, ?int $cashRegisterId): ?CashSessionDetailDTO
     {
         $query = DB::table('sales.cash_sessions as cs')
             ->leftJoin('sales.cash_registers as cr', 'cr.id', '=', 'cs.cash_register_id')
@@ -80,16 +82,20 @@ class CashSessionRepository implements CashSessionRepositoryInterface
             $query->where('cs.cash_register_id', $cashRegisterId);
         }
 
-        return $query->first();
+        $session = $query->first();
+
+        return $session ? CashSessionDetailDTO::fromRow($session) : null;
     }
 
-    public function findOpenSessionByRegister(int $companyId, int $cashRegisterId): ?object
+    public function findOpenSessionByRegister(int $companyId, int $cashRegisterId): ?CashSessionRecordDTO
     {
-        return DB::table('sales.cash_sessions')
+        $session = DB::table('sales.cash_sessions')
             ->where('company_id', $companyId)
             ->where('cash_register_id', $cashRegisterId)
             ->where('status', 'OPEN')
             ->first();
+
+        return $session ? CashSessionRecordDTO::fromRow($session) : null;
     }
 
     public function createSession(array $payload): int
@@ -97,17 +103,21 @@ class CashSessionRepository implements CashSessionRepositoryInterface
         return (int) DB::table('sales.cash_sessions')->insertGetId($payload);
     }
 
-    public function findSessionById(int $sessionId): ?object
+    public function findSessionById(int $sessionId): ?CashSessionRecordDTO
     {
-        return DB::table('sales.cash_sessions')->where('id', $sessionId)->first();
+        $session = DB::table('sales.cash_sessions')->where('id', $sessionId)->first();
+
+        return $session ? CashSessionRecordDTO::fromRow($session) : null;
     }
 
-    public function findSessionByIdAndCompany(int $sessionId, int $companyId): ?object
+    public function findSessionByIdAndCompany(int $sessionId, int $companyId): ?CashSessionRecordDTO
     {
-        return DB::table('sales.cash_sessions')
+        $session = DB::table('sales.cash_sessions')
             ->where('id', $sessionId)
             ->where('company_id', $companyId)
             ->first();
+
+        return $session ? CashSessionRecordDTO::fromRow($session) : null;
     }
 
     public function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses): float

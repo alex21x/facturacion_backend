@@ -2,6 +2,7 @@
 
 namespace App\Infrastructure\Repositories\AppConfig;
 
+use App\Application\DTOs\AppConfig\AppConfigStationContextDTO;
 use Illuminate\Support\Facades\DB;
 
 class StationContextRepository
@@ -36,7 +37,7 @@ class StationContextRepository
         return (string) $value;
     }
 
-    public function findStationByDevice(int $companyId, string $normalizedDeviceId): ?object
+    public function findStationByDevice(int $companyId, string $normalizedDeviceId): ?AppConfigStationContextDTO
     {
         $row = DB::table('appcfg.pos_stations as ps')
             ->join('sales.cash_registers as cr', function ($join) use ($companyId) {
@@ -64,6 +65,6 @@ class StationContextRepository
             ->orderByDesc('ps.id')
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? AppConfigStationContextDTO::fromRow($row) : null;
     }
 }

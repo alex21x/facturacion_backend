@@ -2,60 +2,56 @@
 
 namespace App\Services\AppConfig;
 
-use App\Infrastructure\Repositories\AppConfig\CompanyProfileRepository;
+use App\Application\DTOs\AppConfig\CompanyBridgePayloadDTO;
+use App\Application\DTOs\AppConfig\CompanyProfileDTO;
+use App\Application\DTOs\AppConfig\CompanySettingsDTO;
 
 class CompanyProfileService
 {
-    public function __construct(private CompanyProfileRepository $repository)
+    public function __construct(
+        private CompanyProfileQueryService $queryService,
+        private CompanyProfileCommandService $commandService
+    )
     {
     }
 
     public function companyExists(int $companyId): bool
     {
-        return $this->repository->companyExistsById($companyId);
+        return $this->queryService->companyExists($companyId);
     }
 
-    public function findCompanyProfileRow(int $companyId): ?object
+    public function findCompanyProfileRow(int $companyId): ?CompanyProfileDTO
     {
-        return $this->repository->findCompanyProfileRow($companyId);
+        return $this->queryService->findCompanyProfileRow($companyId);
     }
 
-    public function findCompanyForBridgePayload(int $companyId): ?object
+    public function findCompanyForBridgePayload(int $companyId): ?CompanyBridgePayloadDTO
     {
-        return $this->repository->findCompanyForBridgePayload($companyId);
+        return $this->queryService->findCompanyForBridgePayload($companyId);
     }
 
-    public function findLatestSettings(int $companyId, bool $hasLogoPath, bool $hasUpdatedAt, bool $hasCreatedAt): ?object
+    public function findLatestSettings(int $companyId, bool $hasLogoPath, bool $hasUpdatedAt, bool $hasCreatedAt): ?CompanySettingsDTO
     {
-        return $this->repository->findLatestCompanySettings($companyId, $hasLogoPath, $hasUpdatedAt, $hasCreatedAt);
+        return $this->queryService->findLatestSettings($companyId, $hasLogoPath, $hasUpdatedAt, $hasCreatedAt);
     }
 
-    public function findBridgeSettings(int $companyId): ?object
+    public function findBridgeSettings(int $companyId): ?CompanySettingsDTO
     {
-        return $this->repository->findBridgeSettings($companyId);
+        return $this->queryService->findBridgeSettings($companyId);
     }
 
     public function updateCompanyBasic(int $companyId, array $updates): void
     {
-        $this->repository->updateCompanyBasic($companyId, $updates);
+        $this->commandService->updateCompanyBasic($companyId, $updates);
     }
 
     public function updateCompanySettings(int $companyId, array $updates): int
     {
-        return $this->repository->updateCompanySettings($companyId, $updates);
+        return $this->commandService->updateCompanySettings($companyId, $updates);
     }
 
     public function upsertCompanySettings(int $companyId, array $updates, bool $hasCreatedAt): void
     {
-        $affectedRows = $this->repository->updateCompanySettings($companyId, $updates);
-        if ($affectedRows > 0) {
-            return;
-        }
-
-        $insertValues = $hasCreatedAt
-            ? array_merge(['created_at' => now()], $updates)
-            : $updates;
-
-        $this->repository->insertCompanySettings($companyId, $insertValues);
+        $this->commandService->upsertCompanySettings($companyId, $updates, $hasCreatedAt);
     }
 }

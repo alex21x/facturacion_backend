@@ -2,6 +2,8 @@
 
 namespace App\Services\Sales;
 
+use App\Application\DTOs\Sales\SalesSourceDocumentDTO;
+use App\Application\DTOs\Sales\SalesVehicleSnapshotDTO;
 use App\Infrastructure\Repositories\Sales\SalesDocumentValidationRepository;
 
 class SalesDocumentValidationService
@@ -30,12 +32,12 @@ class SalesDocumentValidationService
         return $this->repository->cashRegisterExists($companyId, $cashRegisterId, $branchId);
     }
 
-    public function findActiveVehicle(int $companyId, int $customerId, int $vehicleId): ?object
+    public function findActiveVehicle(int $companyId, int $customerId, int $vehicleId): ?SalesVehicleSnapshotDTO
     {
         return $this->repository->findActiveVehicle($companyId, $customerId, $vehicleId);
     }
 
-    public function findSourceDocument(int $companyId, int $sourceDocumentId): ?object
+    public function findSourceDocument(int $companyId, int $sourceDocumentId): ?SalesSourceDocumentDTO
     {
         return $this->repository->findSourceDocument($companyId, $sourceDocumentId);
     }

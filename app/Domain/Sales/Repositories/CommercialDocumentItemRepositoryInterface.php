@@ -12,6 +12,8 @@ interface CommercialDocumentItemRepositoryInterface
 
     public function createInventoryLedgerEntry(array $data): void;
 
+    public function createInventoryLedgerEntriesBatch(array $rows): void;
+
     public function getOrderedRowsByDocumentId(int $documentId);
 
     public function getDetailedRowsByDocumentId(int $documentId, bool $includeProductCode = false, ?string $productCodeColumn = null);

@@ -2,7 +2,24 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Application\DTOs\AppConfig\BackupCompanyDTO;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AppConfig\CreateAdminCompanyRequest;
+use App\Http\Requests\AppConfig\RestoreSystemDatabaseBackupRequest;
+use App\Http\Requests\AppConfig\UpdateCommerceSettingsRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyCommerceAdminMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyInventorySettingsAdminMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyOperationalLimitMatrixBulkRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyOperationalLimitMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyProfileRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyRateLimitMatrixBulkRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyRateLimitMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanySunatReconcileAdminMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyVerticalAdminMatrixBulkRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyVerticalAdminMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanyVerticalSettingsRequest;
+use App\Http\Requests\AppConfig\UpdateIgvSettingsRequest;
+use App\Http\Requests\AppConfig\UpdateOperationalLimitsRequest;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\AppConfig\AdminCompanyProvisioningService;
 use App\Services\AppConfig\AdminSettingsMatrixService;
@@ -26,8 +43,6 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
 
@@ -107,7 +122,8 @@ class AppConfigController extends Controller
         private StationContextService $stationContextService,
         private CompanyAccessLinkService $companyAccessLinkService,
         private VerticalAdminMatrixService $verticalAdminMatrixService,
-        private CompanyRateLimitService $companyRateLimitService
+        private CompanyRateLimitService $companyRateLimitService,
+        private FeatureConfigService $featureConfigService
     ) {
     }
 
@@ -342,7 +358,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyVerticalSettings(Request $request)
+    public function updateCompanyVerticalSettings(UpdateCompanyVerticalSettingsRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -352,20 +368,7 @@ class AppConfigController extends Controller
             ], 409);
         }
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'vertical_code' => 'required|string|max:50',
-            'effective_from' => 'nullable|date_format:Y-m-d',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
         if ($companyId !== (int) $authUser->company_id) {
             return response()->json([
@@ -417,7 +420,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyVerticalAdminMatrix(Request $request)
+    public function updateCompanyVerticalAdminMatrix(UpdateCompanyVerticalAdminMatrixRequest $request)
     {
         if (!$this->verticalAdminMatrixService->hasRequiredTables()) {
             return response()->json([
@@ -427,22 +430,7 @@ class AppConfigController extends Controller
 
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'vertical_code' => 'required|string|max:50',
-            'is_enabled' => 'required|boolean',
-            'make_primary' => 'nullable|boolean',
-            'effective_from' => 'nullable|date_format:Y-m-d',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
         $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
         $isEnabled = (bool) $payload['is_enabled'];
@@ -477,7 +465,7 @@ class AppConfigController extends Controller
         return $this->companyVerticalAdminMatrix($request);
     }
 
-    public function updateCompanyVerticalAdminMatrixBulk(Request $request)
+    public function updateCompanyVerticalAdminMatrixBulk(UpdateCompanyVerticalAdminMatrixBulkRequest $request)
     {
         if (!$this->verticalAdminMatrixService->hasRequiredTables()) {
             return response()->json([
@@ -487,23 +475,7 @@ class AppConfigController extends Controller
 
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_ids' => 'required|array|min:1',
-            'company_ids.*' => 'required|integer|min:1',
-            'vertical_code' => 'required|string|max:50',
-            'is_enabled' => 'required|boolean',
-            'make_primary' => 'nullable|boolean',
-            'effective_from' => 'nullable|date_format:Y-m-d',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
         $verticalCode = strtoupper(trim((string) $payload['vertical_code']));
         $isEnabled = (bool) $payload['is_enabled'];
@@ -570,7 +542,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyRateLimitMatrix(Request $request)
+    public function updateCompanyRateLimitMatrix(UpdateCompanyRateLimitMatrixRequest $request)
     {
         if (!$this->companyRateLimitService->hasTable()) {
             return response()->json([
@@ -580,24 +552,7 @@ class AppConfigController extends Controller
 
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'is_enabled' => 'required|boolean',
-            'requests_per_minute_read' => 'required|integer|min:100|max:60000',
-            'requests_per_minute_write' => 'required|integer|min:100|max:60000',
-            'requests_per_minute_reports' => 'required|integer|min:100|max:60000',
-            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
-            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = $this->companyRateLimitService->companyExists($companyId);
@@ -624,7 +579,7 @@ class AppConfigController extends Controller
         return $this->companyRateLimitMatrix($request);
     }
 
-    public function updateCompanyRateLimitMatrixBulk(Request $request)
+    public function updateCompanyRateLimitMatrixBulk(UpdateCompanyRateLimitMatrixBulkRequest $request)
     {
         if (!$this->companyRateLimitService->hasTable()) {
             return response()->json([
@@ -634,25 +589,7 @@ class AppConfigController extends Controller
 
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_ids' => 'required|array|min:1',
-            'company_ids.*' => 'required|integer|min:1',
-            'is_enabled' => 'required|boolean',
-            'requests_per_minute_read' => 'required|integer|min:100|max:60000',
-            'requests_per_minute_write' => 'required|integer|min:100|max:60000',
-            'requests_per_minute_reports' => 'required|integer|min:100|max:60000',
-            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
-            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
 
         $existingCompanies = $this->companyRateLimitService->existingCompanyIds($companyIds);
@@ -699,7 +636,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyOperationalLimitMatrix(Request $request)
+    public function updateCompanyOperationalLimitMatrix(UpdateCompanyOperationalLimitMatrixRequest $request)
     {
         if (!$this->tableExists('appcfg', 'company_operational_limits')) {
             return response()->json([
@@ -708,22 +645,7 @@ class AppConfigController extends Controller
         }
 
         $authUser = $request->attributes->get('auth_user');
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'max_branches_enabled' => 'required|integer|min:1|max:10000',
-            'max_warehouses_enabled' => 'required|integer|min:1|max:10000',
-            'max_cash_registers_enabled' => 'required|integer|min:1|max:10000',
-            'max_cash_registers_per_warehouse' => 'required|integer|min:1|max:10000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
         $companyExists = $this->operationalLimitsService->companyExists($companyId);
         if (!$companyExists) {
@@ -737,7 +659,7 @@ class AppConfigController extends Controller
         return $this->companyOperationalLimitMatrix($request);
     }
 
-    public function updateCompanyOperationalLimitMatrixBulk(Request $request)
+    public function updateCompanyOperationalLimitMatrixBulk(UpdateCompanyOperationalLimitMatrixBulkRequest $request)
     {
         if (!$this->tableExists('appcfg', 'company_operational_limits')) {
             return response()->json([
@@ -746,23 +668,7 @@ class AppConfigController extends Controller
         }
 
         $authUser = $request->attributes->get('auth_user');
-        $validator = Validator::make($request->all(), [
-            'company_ids' => 'required|array|min:1',
-            'company_ids.*' => 'required|integer|min:1',
-            'max_branches_enabled' => 'required|integer|min:1|max:10000',
-            'max_warehouses_enabled' => 'required|integer|min:1|max:10000',
-            'max_cash_registers_enabled' => 'required|integer|min:1|max:10000',
-            'max_cash_registers_per_warehouse' => 'required|integer|min:1|max:10000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyIds = collect($payload['company_ids'] ?? [])->map(fn ($id) => $this->normalizeLegacyCompanyId((int) $id))->unique()->values()->all();
 
         $existingCompanies = $this->operationalLimitsService->existingCompanyIds($companyIds);
@@ -779,7 +685,7 @@ class AppConfigController extends Controller
         return $this->companyOperationalLimitMatrix($request);
     }
 
-    public function createAdminCompany(Request $request)
+    public function createAdminCompany(CreateAdminCompanyRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -789,43 +695,7 @@ class AppConfigController extends Controller
             ], 409);
         }
 
-        $validator = Validator::make($request->all(), [
-            'tax_id' => 'required|string|min:8|max:20',
-            'legal_name' => 'required|string|min:3|max:200',
-            'trade_name' => 'nullable|string|max:200',
-            'email' => 'nullable|email|max:200',
-            'phone' => 'nullable|string|max:60',
-            'address' => 'nullable|string|max:500',
-            'vertical_code' => 'nullable|string|max:50',
-            'main_branch_code' => 'nullable|string|max:20',
-            'main_branch_name' => 'nullable|string|max:120',
-            'create_default_warehouse' => 'nullable|boolean',
-            'default_warehouse_code' => 'nullable|string|max:20',
-            'default_warehouse_name' => 'nullable|string|max:120',
-            'create_default_cash_register' => 'nullable|boolean',
-            'default_cash_register_code' => 'nullable|string|max:20',
-            'default_cash_register_name' => 'nullable|string|max:120',
-            'admin_username' => 'required|string|min:4|max:80',
-            'admin_password' => 'required|string|min:8|max:120',
-            'admin_first_name' => 'required|string|min:2|max:80',
-            'admin_last_name' => 'nullable|string|max:80',
-            'admin_email' => 'nullable|email|max:120',
-            'admin_phone' => 'nullable|string|max:40',
-            'plan_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE,CUSTOM',
-            'preset_code' => 'nullable|string|in:BASIC,PRO,ENTERPRISE',
-            'requests_per_minute_read' => 'nullable|integer|min:100|max:60000',
-            'requests_per_minute_write' => 'nullable|integer|min:100|max:60000',
-            'requests_per_minute_reports' => 'nullable|integer|min:100|max:60000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $taxId = trim((string) $payload['tax_id']);
         $adminUsername = trim((string) $payload['admin_username']);
 
@@ -1135,7 +1005,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function restoreSystemDatabaseBackup(Request $request)
+    public function restoreSystemDatabaseBackup(RestoreSystemDatabaseBackupRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -1145,19 +1015,8 @@ class AppConfigController extends Controller
             ], 403);
         }
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'backup_file' => 'required|file|max:51200',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $company = $this->resolveBackupCompanyFromRequest($request);
+        $payload = $request->validated();
+        $company = $this->resolveBackupCompanyById((int) $payload['company_id']);
         if ($company === null) {
             return response()->json([
                 'message' => 'Empresa invalida para restauracion.',
@@ -1233,17 +1092,19 @@ class AppConfigController extends Controller
         return storage_path('app/backups/company_' . $companyId);
     }
 
-    private function resolveBackupCompanyFromRequest(Request $request): ?object
+    private function resolveBackupCompanyFromRequest(Request $request): ?BackupCompanyDTO
     {
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-        ]);
-
-        if ($validator->fails()) {
+        $companyId = $request->input('company_id');
+        if ($companyId === null || $companyId === '' || filter_var($companyId, FILTER_VALIDATE_INT) === false) {
             return null;
         }
 
-        $companyId = $this->normalizeLegacyCompanyId((int) ($validator->validated()['company_id'] ?? 0));
+        return $this->resolveBackupCompanyById((int) $companyId);
+    }
+
+    private function resolveBackupCompanyById(int $companyId): ?BackupCompanyDTO
+    {
+        $companyId = $this->normalizeLegacyCompanyId($companyId);
         if ($companyId <= 0 || $companyId === self::SYSTEM_COMPANY_ID) {
             return null;
         }
@@ -1879,7 +1740,7 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateOperationalLimits(Request $request)
+    public function updateOperationalLimits(UpdateOperationalLimitsRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -1890,23 +1751,7 @@ class AppConfigController extends Controller
             ], 409);
         }
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'max_companies_enabled' => 'nullable|integer|min:1|max:10000',
-            'max_branches_enabled' => 'nullable|integer|min:1|max:10000',
-            'max_warehouses_enabled' => 'nullable|integer|min:1|max:10000',
-            'max_cash_registers_enabled' => 'nullable|integer|min:1|max:10000',
-            'max_cash_registers_per_warehouse' => 'nullable|integer|min:1|max:10000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
 
         if ($companyId !== (int) $authUser->company_id) {
@@ -1959,31 +1804,13 @@ class AppConfigController extends Controller
         }
 
         // Use optimized service (2 queries, Redis cached)
-        $service = new FeatureConfigService();
-        return response()->json($service->getCommerceSettings($companyId, $branchId));
+        return response()->json($this->featureConfigService->getCommerceSettings($companyId, $branchId));
     }
 
-    public function updateCommerceSettings(Request $request)
+    public function updateCommerceSettings(UpdateCommerceSettingsRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'branch_id' => 'nullable|integer|min:1',
-            'features' => 'required|array|min:1',
-            'features.*.feature_code' => ['required', 'string', 'max:100', Rule::in($this->resolveAllowedFeatureCodes())],
-            'features.*.is_enabled' => 'required|boolean',
-            'features.*.config' => 'nullable',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
         $branchId = isset($payload['branch_id']) ? (int) $payload['branch_id'] : null;
 
@@ -2032,8 +1859,7 @@ class AppConfigController extends Controller
         }
 
         // Use optimized service (config merge + cache invalidation)
-        $service = new FeatureConfigService();
-        $result = $service->updateCommerceSettings($companyId, $branchId, $payload['features'], $authUser->id);
+        $result = $this->featureConfigService->updateCommerceSettings($companyId, $branchId, $payload['features'], $authUser->id);
 
         return response()->json($result);
     }
@@ -2248,28 +2074,6 @@ class AppConfigController extends Controller
     private function columnExists(string $schema, string $table, string $column): bool
     {
         return $this->featureLabelService->columnExists($schema, $table, $column);
-    }
-
-    /**
-     * Resolve the allowed feature codes for validation.
-     * Source of truth: appcfg.feature_labels (status=1).
-     * Fallback: config('features.commerce_feature_codes').
-     */
-    private function resolveAllowedFeatureCodes(): array
-    {
-        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $codes = collect($this->featureLabelService->listActiveFeatureCodes())
-                ->map(fn ($c) => strtoupper(trim((string) $c)))
-                ->filter(fn ($c) => $c !== '')
-                ->values()
-                ->all();
-
-            if (!empty($codes)) {
-                return $codes;
-            }
-        }
-
-        return config('features.commerce_feature_codes', []);
     }
 
     private function resolveFeatureLabels(array $featureCodes): array
@@ -2755,46 +2559,10 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyProfile(Request $request, CompanyIgvRateService $companyIgvRateService)
+    public function updateCompanyProfile(UpdateCompanyProfileRequest $request, CompanyIgvRateService $companyIgvRateService)
     {
         $authUser = $request->attributes->get('auth_user');
-
-        $validator = Validator::make($request->all(), [
-            'company_id'    => 'nullable|integer|min:1',
-            'tax_id'        => 'nullable|string|max:20',
-            'legal_name'    => 'nullable|string|max:200',
-            'trade_name'    => 'nullable|string|max:200',
-            'address'       => 'nullable|string|max:500',
-            'phone'         => 'nullable|string|max:60',
-            'telefono_movil'=> 'nullable|string|max:60',
-            'telefono_fijo' => 'nullable|string|max:60',
-            'company_description' => 'nullable|string|max:600',
-            'email'         => 'nullable|email|max:200',
-            'website'       => 'nullable|url|max:300',
-            'ubigeo'        => 'nullable|string|max:6',
-            'departamento'  => 'nullable|string|max:100',
-            'provincia'     => 'nullable|string|max:100',
-            'distrito'      => 'nullable|string|max:100',
-            'urbanizacion'  => 'nullable|string|max:100',
-            'sunat_secondary_user' => 'nullable|string|max:100',
-            'sunat_secondary_pass' => 'nullable|string|max:100',
-            'client_id'     => 'nullable|string|max:200',
-            'client_secret' => 'nullable|string|max:500',
-            'show_payment_brand_icons' => 'nullable|boolean',
-            'bank_accounts' => 'nullable|array',
-            'bank_accounts.*.bank_name'     => 'required_with:bank_accounts.*|string|max:100',
-            'bank_accounts.*.account_number'=> 'required_with:bank_accounts.*|string|max:50',
-            'bank_accounts.*.cci'           => 'nullable|string|max:50',
-            'bank_accounts.*.account_holder'=> 'nullable|string|max:120',
-            'bank_accounts.*.currency'      => 'nullable|string|max:10',
-            'bank_accounts.*.account_type'  => 'nullable|string|max:50',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload   = $validator->validated();
+        $payload   = $request->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
 
         if ($companyId !== (int) $authUser->company_id) {
@@ -2895,20 +2663,10 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateIgvSettings(Request $request, CompanyIgvRateService $companyIgvRateService)
+    public function updateIgvSettings(UpdateIgvSettingsRequest $request, CompanyIgvRateService $companyIgvRateService)
     {
         $authUser = $request->attributes->get('auth_user');
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'nullable|integer|min:1',
-            'active_igv_rate_percent' => 'required|numeric|min:0|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = (int) ($payload['company_id'] ?? $authUser->company_id);
 
         if ($companyId !== (int) $authUser->company_id) {
@@ -3199,23 +2957,13 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanyCommerceAdminMatrix(Request $request)
+    public function updateCompanyCommerceAdminMatrix(UpdateCompanyCommerceAdminMatrixRequest $request)
     {
         $ADMIN_FEATURE_CODES = self::ADMIN_COMMERCE_FEATURE_CODES;
 
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'features' => 'required|array|min:1',
-            'features.*' => 'required|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = $this->adminSettingsMatrixService->companyExists($companyId);
@@ -3301,29 +3049,11 @@ class AppConfigController extends Controller
         ]);
     }
 
-    public function updateCompanySunatReconcileAdminMatrix(Request $request)
+    public function updateCompanySunatReconcileAdminMatrix(UpdateCompanySunatReconcileAdminMatrixRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'tax_bridge_enabled' => 'nullable|boolean',
-            'auto_reconcile_enabled' => 'nullable|boolean',
-            'reconcile_batch_size' => 'nullable|integer|min:5|max:200',
-            'reconcile_retry_base_minutes' => 'nullable|integer|min:1|max:180',
-            'reconcile_retry_max_minutes' => 'nullable|integer|min:5|max:1440',
-            'reconcile_warn_attempts' => 'nullable|integer|min:1|max:50',
-            'sunat_exception_notify_enabled' => 'nullable|boolean',
-            'sunat_exception_notify_hours' => 'nullable|integer|min:1|max:168',
-            'sunat_alert_repeat_minutes' => 'nullable|integer|min:10|max:1440',
-            'sunat_exception_notify_limit' => 'nullable|integer|min:1|max:500',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         if ($companyId === self::SYSTEM_COMPANY_ID) {
@@ -3431,7 +3161,7 @@ class AppConfigController extends Controller
         return response()->json(['companies' => $rows]);
     }
 
-    public function updateCompanyInventorySettingsAdminMatrix(Request $request)
+    public function updateCompanyInventorySettingsAdminMatrix(UpdateCompanyInventorySettingsAdminMatrixRequest $request)
     {
         if (!$this->tableExists('inventory', 'inventory_settings')) {
             return response()->json(['message' => 'Inventory settings table not found'], 409);
@@ -3440,28 +3170,7 @@ class AppConfigController extends Controller
         $hasLowStockAlertThreshold = $this->columnExists('inventory', 'inventory_settings', 'low_stock_alert_threshold');
 
         $authUser = $request->attributes->get('auth_user');
-
-        $validator = Validator::make($request->all(), [
-            'company_id' => 'required|integer|min:1',
-            'complexity_mode' => 'nullable|string|in:BASIC,ADVANCED',
-            'inventory_mode' => 'nullable|string|in:KARDEX_SIMPLE,LOT_TRACKING',
-            'lot_outflow_strategy' => 'nullable|string|in:MANUAL,FIFO,FEFO',
-            'enable_inventory_pro' => 'nullable|boolean',
-            'enable_lot_tracking' => 'nullable|boolean',
-            'enable_expiry_tracking' => 'nullable|boolean',
-            'enable_advanced_reporting' => 'nullable|boolean',
-            'enable_graphical_dashboard' => 'nullable|boolean',
-            'enable_location_control' => 'nullable|boolean',
-            'allow_negative_stock' => 'nullable|boolean',
-            'enforce_lot_for_tracked' => 'nullable|boolean',
-            'low_stock_alert_threshold' => $hasLowStockAlertThreshold ? 'nullable|integer|min:0|max:9999' : 'nullable',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $companyId = $this->normalizeLegacyCompanyId((int) $payload['company_id']);
 
         $companyExists = $this->adminSettingsMatrixService->companyExists($companyId);

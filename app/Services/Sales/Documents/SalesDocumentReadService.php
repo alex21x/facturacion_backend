@@ -2,12 +2,15 @@
 
 namespace App\Services\Sales\Documents;
 
+use App\Application\DTOs\Sales\SalesDocumentShowDTO;
 use App\Domain\Sales\Repositories\CommercialDocumentItemLotRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
 
 class SalesDocumentReadService
 {
+    private ?bool $inventoryProductsTableExists = null;
+
     public function __construct(
         private CommercialDocumentRepositoryInterface $commercialDocumentRepository,
         private CommercialDocumentItemRepositoryInterface $commercialDocumentItemRepository,
@@ -15,7 +18,7 @@ class SalesDocumentReadService
     ) {
     }
 
-    public function findDocumentForShow(int $companyId, int $documentId): ?object
+    public function findDocumentForShow(int $companyId, int $documentId): ?SalesDocumentShowDTO
     {
         return $this->commercialDocumentRepository->findDocumentForShow($companyId, $documentId);
     }
@@ -24,7 +27,7 @@ class SalesDocumentReadService
     {
         $visited = [];
         $currentDocumentId = $documentId;
-        $productTableExists = $this->commercialDocumentRepository->tableExists('inventory.products');
+        $productTableExists = $this->inventoryProductsTableExists();
         $productCodeColumn = null;
 
         if ($productTableExists) {
@@ -57,6 +60,15 @@ class SalesDocumentReadService
         }
 
         return collect();
+    }
+
+    private function inventoryProductsTableExists(): bool
+    {
+        if ($this->inventoryProductsTableExists === null) {
+            $this->inventoryProductsTableExists = $this->commercialDocumentRepository->tableExists('inventory.products');
+        }
+
+        return $this->inventoryProductsTableExists;
     }
 
     public function getLotsGroupedByItemIds(array $itemIds)

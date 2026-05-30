@@ -71,4 +71,45 @@ class CompanyRateLimitRepository
             ]
         );
     }
+
+    public function upsertCompanyRateLimitsBatch(array $companyIds, array $payload, ?int $updatedBy): void
+    {
+        if ($companyIds === []) {
+            return;
+        }
+
+        $now = now();
+        $rows = [];
+        foreach ($companyIds as $companyId) {
+            $rows[] = [
+                'company_id' => (int) $companyId,
+                'is_enabled' => (bool) $payload['is_enabled'],
+                'requests_per_minute' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
+                'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
+                'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
+                'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
+                'last_preset_code' => $payload['preset_code'] ?? null,
+                'updated_by' => $updatedBy,
+                'updated_at' => $now,
+                'created_at' => $now,
+            ];
+        }
+
+        DB::table('appcfg.company_rate_limits')->upsert(
+            $rows,
+            ['company_id'],
+            [
+                'is_enabled',
+                'requests_per_minute',
+                'requests_per_minute_read',
+                'requests_per_minute_write',
+                'requests_per_minute_reports',
+                'plan_code',
+                'last_preset_code',
+                'updated_by',
+                'updated_at',
+            ]
+        );
+    }
 }

@@ -24,8 +24,13 @@ class SupplierRepository implements SupplierRepositoryInterface
             $query = DB::table('inventory.purchase_suppliers')
                 ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
                 ->where('company_id', $companyId)
-                ->orderBy($autocomplete ? DB::raw('COALESCE(last_used_at, updated_at, created_at) DESC') : 'legal_name')
                 ->limit($limit);
+
+            if ($autocomplete) {
+                $query->orderByRaw('COALESCE(last_used_at, updated_at, created_at) DESC');
+            } else {
+                $query->orderBy('legal_name');
+            }
 
             if ($search !== '') {
                 $like = '%' . $search . '%';
@@ -64,7 +69,7 @@ class SupplierRepository implements SupplierRepositoryInterface
         ];
     }
 
-    public function findSupplierByDocument(int $companyId, string $document): ?object
+    public function findSupplierByDocument(int $companyId, string $document): ?\App\Application\DTOs\Purchases\PurchaseSupplierDTO
     {
         $row = DB::table('inventory.purchase_suppliers')
             ->select(['id', 'doc_type', 'doc_number', 'legal_name', 'address', 'phone', 'source'])
@@ -72,7 +77,7 @@ class SupplierRepository implements SupplierRepositoryInterface
             ->where('doc_number', $document)
             ->first();
 
-        return $row ? (object) $row : null;
+        return $row ? \App\Application\DTOs\Purchases\PurchaseSupplierDTO::fromRow($row) : null;
     }
 
     public function getExistingSupplierDocumentSet(int $companyId): array

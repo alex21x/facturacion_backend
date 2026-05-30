@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Reports\IndexReportRequest;
+use App\Http\Requests\Reports\StoreReportRequest;
 use App\Support\Reports\ReportRequestService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class ReportsController extends Controller
 {
@@ -15,40 +16,16 @@ class ReportsController extends Controller
 
     public function catalog(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         return response()->json([
             'data' => $this->reportRequestService->availableCatalog(),
         ], 200);
     }
 
-    public function index(Request $request)
+    public function index(IndexReportRequest $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'status' => 'nullable|string|in:PENDING,PROCESSING,COMPLETED,FAILED',
-            'report_code' => 'nullable|string|max:80',
-            'page' => 'nullable|integer|min:1',
-            'per_page' => 'nullable|integer|min:5|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $data = $this->reportRequestService->listRequests(
             $companyId,
@@ -63,12 +40,7 @@ class ReportsController extends Controller
 
     public function show(Request $request, int $id)
     {
-        $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) $request->query('company_id', $authUser->company_id);
-
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
         $row = $this->reportRequestService->showRequest($companyId, $id);
         if ($row === null) {
@@ -78,29 +50,12 @@ class ReportsController extends Controller
         return response()->json($row, 200);
     }
 
-    public function store(Request $request)
+    public function store(StoreReportRequest $request)
     {
         $authUser = $request->attributes->get('auth_user');
-        $companyId = (int) ($request->input('company_id') ?? $authUser->company_id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
 
-        if ((int) $authUser->company_id !== $companyId) {
-            return response()->json(['message' => 'Invalid company scope'], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'report_code' => 'required|string|max:80',
-            'branch_id' => 'nullable|integer',
-            'filters' => 'nullable|array',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => $validator->errors()->first(),
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $payload = $validator->validated();
+        $payload = $request->validated();
         $reportCode = strtoupper(trim((string) $payload['report_code']));
 
         if (!$this->reportRequestService->isSupportedCode($reportCode)) {

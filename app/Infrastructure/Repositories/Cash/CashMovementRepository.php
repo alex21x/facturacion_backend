@@ -110,6 +110,14 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         return (int) DB::table('sales.cash_movements')->insertGetId($payload);
     }
 
+    public function updateMovementById(int $companyId, int $movementId, array $changes): void
+    {
+        DB::table('sales.cash_movements')
+            ->where('id', $movementId)
+            ->where('company_id', $companyId)
+            ->update($changes);
+    }
+
     public function findSessionScopeForCommercialDocuments(int $companyId, int $sessionId): ?CashSessionScopeDTO
     {
         $session = DB::table('sales.cash_sessions')

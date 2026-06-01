@@ -94,7 +94,11 @@ class InventoryController extends Controller
             return response()->json(['message' => 'No tienes permiso para guardar productos.'], 403);
         }
 
-        $result = $this->inventoryProductService->createProduct($companyId, $request->validated());
+        $result = $this->inventoryProductService->createProduct(
+            $companyId,
+            $request->validated(),
+            (int) ($authUser->id ?? 0)
+        );
         if (!$result['ok']) {
             $payload = ['message' => $result['message']];
             if (isset($result['duplicate_product_id'])) {
@@ -119,7 +123,12 @@ class InventoryController extends Controller
             return response()->json(['message' => 'No tienes permiso para guardar productos.'], 403);
         }
 
-        $result = $this->inventoryProductService->updateProduct($companyId, $id, $request->validated());
+        $result = $this->inventoryProductService->updateProduct(
+            $companyId,
+            $id,
+            $request->validated(),
+            (int) ($authUser->id ?? 0)
+        );
         if (!$result['ok']) {
             $payload = ['message' => $result['message']];
             if (isset($result['duplicate_product_id'])) {

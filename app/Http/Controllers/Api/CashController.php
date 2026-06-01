@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Cash\CloseCashSessionRequest;
 use App\Http\Requests\Cash\CreateCashMovementRequest;
 use App\Http\Requests\Cash\OpenCashSessionRequest;
+use App\Http\Requests\Cash\UpdateCashMovementRequest;
 use App\Services\Cash\CashMovementService;
 use App\Services\Cash\CashSessionService;
 use Illuminate\Http\Request;
@@ -333,6 +334,56 @@ class CashController extends Controller
         $movement = $this->cashMovementService->findMovementById((int) $movementId);
 
         return response()->json(['message' => 'Movimiento registrado', 'movement' => $movement], 201);
+    }
+
+    public function updateMovement(UpdateCashMovementRequest $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+
+        $movement = $this->cashMovementService->findMovementById($id);
+        if (!$movement || (int) $movement->company_id !== $companyId) {
+            return response()->json(['message' => 'Movimiento no encontrado'], 404);
+        }
+
+        $refType = strtoupper(trim((string) ($movement->ref_type ?? '')));
+        if ($refType !== 'MANUAL' && $refType !== '') {
+            return response()->json([
+                'message' => 'Solo se pueden editar movimientos manuales.',
+            ], 422);
+        }
+
+        if ((int) ($movement->cash_session_id ?? 0) > 0) {
+            $session = $this->cashSessionService->findSessionById((int) $movement->cash_session_id);
+            if (!$session || strtoupper((string) ($session->status ?? '')) !== 'OPEN') {
+                return response()->json([
+                    'message' => 'Solo se pueden editar movimientos de sesiones abiertas.',
+                ], 422);
+            }
+        }
+
+        $payload = $request->validated();
+        $movementType = $this->toDbMovementType((string) $payload['movement_type']);
+
+        $this->cashMovementService->updateMovementById($companyId, $id, [
+            'movement_type' => $movementType,
+            'amount' => round((float) $payload['amount'], 4),
+            'description' => $payload['description'],
+            'notes' => $payload['description'],
+            'updated_at' => now(),
+            'user_id' => $authUser->id,
+        ]);
+
+        if ((int) ($movement->cash_session_id ?? 0) > 0) {
+            $this->recalcExpectedBalance((int) $movement->cash_session_id);
+        }
+
+        $updated = $this->cashMovementService->findMovementById((int) $id);
+
+        return response()->json([
+            'message' => 'Movimiento actualizado',
+            'movement' => $updated,
+        ]);
     }
 
     private function ensureSessionCommercialDocumentMovements(int $companyId, int $sessionId): void

@@ -16,6 +16,11 @@ class CashMovementCommandService
         return $this->repository->createMovement($payload);
     }
 
+    public function updateMovementById(int $companyId, int $movementId, array $changes): void
+    {
+        $this->repository->updateMovementById($companyId, $movementId, $changes);
+    }
+
     public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
     {
         $this->repository->upsertSessionCommercialDocumentMovement($companyId, $sessionId, $document, $session);

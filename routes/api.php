@@ -172,6 +172,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
             Route::get('/cash/movements', 'Api\\CashController@movements');
             Route::post('/cash/movements', 'Api\\CashController@createMovement');
+            Route::put('/cash/movements/{id}', 'Api\\CashController@updateMovement');
         });
 
         // Restaurant operations (comandas & orders)

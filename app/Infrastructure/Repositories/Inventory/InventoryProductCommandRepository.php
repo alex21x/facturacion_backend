@@ -862,7 +862,7 @@ class InventoryProductCommandRepository
         ];
     }
 
-    public function createProduct(int $companyId, array $payload): array
+    public function createProduct(int $companyId, array $payload, ?int $userId = null): array
     {
         foreach ([
             ['line_id', 'inventory.product_lines'],
@@ -908,41 +908,117 @@ class InventoryProductCommandRepository
             ];
         }
 
-        $id = DB::table('inventory.products')->insertGetId([
-            'company_id' => $companyId,
-            'category_id' => $payload['category_id'] ?? null,
-            'unit_id' => $normalizedUnitId,
-            'line_id' => $payload['line_id'] ?? null,
-            'brand_id' => $payload['brand_id'] ?? null,
-            'location_id' => $payload['location_id'] ?? null,
-            'warranty_id' => $payload['warranty_id'] ?? null,
-            'product_nature' => $normalizedNature,
-            'sku' => $normalizedSku,
-            'barcode' => $normalizedBarcode,
-            'sunat_code' => $payload['sunat_code'] ?? null,
-            'image_url' => $payload['image_url'] ?? null,
-            'seller_commission_percent' => $payload['seller_commission_percent'] ?? 0,
-            'name' => $normalizedName,
-            'sale_price' => $payload['sale_price'] ?? 0,
-            'cost_price' => $payload['cost_price'] ?? 0,
-            'is_stockable' => (bool) ($payload['is_stockable'] ?? true),
-            'lot_tracking' => (bool) ($payload['lot_tracking'] ?? false),
-            'has_expiration' => (bool) ($payload['has_expiration'] ?? false),
-            'status' => (int) ($payload['status'] ?? 1),
-        ]);
+        $initialQty = round(max(0, $this->normalizeNumeric($payload['initial_qty'] ?? null, 0)), 3);
+        $initialCost = round(max(0, $this->normalizeNumeric($payload['initial_cost'] ?? ($payload['cost_price'] ?? 0), 0)), 4);
+        $stockNote = $this->nullIfBlank((string) ($payload['stock_note'] ?? ''));
+        $warehouseId = null;
 
-        return ['ok' => true, 'status' => 201, 'message' => 'Product created', 'id' => (int) $id];
+        if ($initialQty > 0) {
+            if (!empty($payload['warehouse_id'])) {
+                $warehouseRow = DB::table('inventory.warehouses')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where('id', (int) $payload['warehouse_id'])
+                    ->select('id')
+                    ->first();
+
+                if (!$warehouseRow) {
+                    return ['ok' => false, 'status' => 422, 'message' => 'warehouse_id no existe o está inactivo.'];
+                }
+
+                $warehouseId = (int) $warehouseRow->id;
+            } else {
+                $warehouseCode = strtoupper(trim((string) ($payload['warehouse_code'] ?? '')));
+                if ($warehouseCode !== '') {
+                    $warehouseCache = [];
+                    $warehouseId = $this->resolveWarehouseIdFromCode($companyId, $warehouseCode, $warehouseCache);
+                    if ($warehouseId === null) {
+                        return ['ok' => false, 'status' => 422, 'message' => 'warehouse_code no existe o está inactivo.'];
+                    }
+                } else {
+                    $defaultWarehouse = $this->resolveDefaultWarehouseForImport($companyId);
+                    $warehouseId = $defaultWarehouse['id'] ?? null;
+                    if (!$warehouseId) {
+                        return ['ok' => false, 'status' => 422, 'message' => 'No existe almacén activo para aplicar stock inicial.'];
+                    }
+                }
+            }
+        }
+
+        $id = DB::transaction(function () use (
+            $companyId,
+            $payload,
+            $normalizedUnitId,
+            $normalizedNature,
+            $normalizedSku,
+            $normalizedBarcode,
+            $normalizedName,
+            $initialQty,
+            $initialCost,
+            $stockNote,
+            $warehouseId,
+            $userId
+        ) {
+            $newId = DB::table('inventory.products')->insertGetId([
+                'company_id' => $companyId,
+                'category_id' => $payload['category_id'] ?? null,
+                'unit_id' => $normalizedUnitId,
+                'line_id' => $payload['line_id'] ?? null,
+                'brand_id' => $payload['brand_id'] ?? null,
+                'location_id' => $payload['location_id'] ?? null,
+                'warranty_id' => $payload['warranty_id'] ?? null,
+                'product_nature' => $normalizedNature,
+                'sku' => $normalizedSku,
+                'barcode' => $normalizedBarcode,
+                'sunat_code' => $payload['sunat_code'] ?? null,
+                'image_url' => $payload['image_url'] ?? null,
+                'seller_commission_percent' => $payload['seller_commission_percent'] ?? 0,
+                'name' => $normalizedName,
+                'sale_price' => $payload['sale_price'] ?? 0,
+                'cost_price' => $payload['cost_price'] ?? 0,
+                'is_stockable' => (bool) ($payload['is_stockable'] ?? true),
+                'lot_tracking' => (bool) ($payload['lot_tracking'] ?? false),
+                'has_expiration' => (bool) ($payload['has_expiration'] ?? false),
+                'status' => (int) ($payload['status'] ?? 1),
+            ]);
+
+            if ($initialQty > 0 && $warehouseId !== null) {
+                DB::table('inventory.inventory_ledger')->insert([
+                    'company_id' => $companyId,
+                    'warehouse_id' => $warehouseId,
+                    'product_id' => (int) $newId,
+                    'lot_id' => null,
+                    'movement_type' => 'IN',
+                    'quantity' => $initialQty,
+                    'unit_cost' => $initialCost,
+                    'ref_type' => 'PRODUCT_CREATE',
+                    'ref_id' => (int) $newId,
+                    'notes' => $stockNote ?? 'Stock inicial desde creación de producto',
+                    'moved_at' => now(),
+                    'created_by' => ($userId !== null && $userId > 0) ? $userId : null,
+                ]);
+            }
+
+            return (int) $newId;
+        });
+
+        $message = $initialQty > 0
+            ? 'Product created with initial stock'
+            : 'Product created';
+
+        return ['ok' => true, 'status' => 201, 'message' => $message, 'id' => (int) $id];
     }
 
-    public function updateProduct(int $companyId, int $id, array $payload): array
+    public function updateProduct(int $companyId, int $id, array $payload, ?int $userId = null): array
     {
-        $exists = DB::table('inventory.products')
+        $productRow = DB::table('inventory.products')
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->whereNull('deleted_at')
-            ->exists();
+            ->select('id', 'cost_price')
+            ->first();
 
-        if (!$exists) {
+        if (!$productRow) {
             return ['ok' => false, 'status' => 404, 'message' => 'Product not found'];
         }
 
@@ -1002,7 +1078,46 @@ class InventoryProductCommandRepository
             $changes['status'] = (int) $payload['status'];
         }
 
-        if (empty($changes)) {
+        $stockAdjustQty = $this->normalizeNumeric($payload['stock_adjust_qty'] ?? null, 0);
+        $hasStockAdjustment = abs($stockAdjustQty) > 0.0000001;
+        $stockAdjustCost = round(max(0, $this->normalizeNumeric($payload['stock_adjust_cost'] ?? ($payload['cost_price'] ?? $productRow->cost_price ?? 0), 0)), 4);
+        $stockNote = $this->nullIfBlank((string) ($payload['stock_note'] ?? ''));
+        $warehouseId = null;
+
+        if ($hasStockAdjustment) {
+            if (!empty($payload['warehouse_id'])) {
+                $warehouseRow = DB::table('inventory.warehouses')
+                    ->where('company_id', $companyId)
+                    ->where('status', 1)
+                    ->where('id', (int) $payload['warehouse_id'])
+                    ->select('id')
+                    ->first();
+
+                if (!$warehouseRow) {
+                    return ['ok' => false, 'status' => 422, 'message' => 'warehouse_id no existe o está inactivo.'];
+                }
+
+                $warehouseId = (int) $warehouseRow->id;
+            } else {
+                $warehouseCode = strtoupper(trim((string) ($payload['warehouse_code'] ?? '')));
+                if ($warehouseCode !== '') {
+                    $warehouseCache = [];
+                    $warehouseId = $this->resolveWarehouseIdFromCode($companyId, $warehouseCode, $warehouseCache);
+                    if ($warehouseId === null) {
+                        return ['ok' => false, 'status' => 422, 'message' => 'warehouse_code no existe o está inactivo.'];
+                    }
+                } else {
+                    $defaultWarehouse = $this->resolveDefaultWarehouseForImport($companyId);
+                    $warehouseId = $defaultWarehouse['id'] ?? null;
+                }
+            }
+
+            if (!$warehouseId) {
+                return ['ok' => false, 'status' => 422, 'message' => 'No existe almacén activo para aplicar ajuste de stock.'];
+            }
+        }
+
+        if (empty($changes) && !$hasStockAdjustment) {
             return ['ok' => false, 'status' => 422, 'message' => 'No changes provided'];
         }
 
@@ -1069,12 +1184,68 @@ class InventoryProductCommandRepository
             }
         }
 
-        DB::table('inventory.products')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->update($changes);
+        try {
+            DB::transaction(function () use (
+                $companyId,
+                $id,
+                $changes,
+                $hasStockAdjustment,
+                $stockAdjustQty,
+                $stockAdjustCost,
+                $stockNote,
+                $warehouseId,
+                $userId
+            ) {
+                if (!empty($changes)) {
+                    DB::table('inventory.products')
+                        ->where('id', $id)
+                        ->where('company_id', $companyId)
+                        ->update($changes);
+                }
 
-        return ['ok' => true, 'status' => 200, 'message' => 'Product updated'];
+                if ($hasStockAdjustment && $warehouseId !== null) {
+                    $movementType = $stockAdjustQty > 0 ? 'IN' : 'OUT';
+                    $quantity = round(abs($stockAdjustQty), 3);
+
+                    if ($movementType === 'OUT') {
+                        $currentStockRow = DB::table('inventory.current_stock')
+                            ->where('company_id', $companyId)
+                            ->where('warehouse_id', $warehouseId)
+                            ->where('product_id', $id)
+                            ->select('stock')
+                            ->first();
+
+                        $currentStock = $currentStockRow ? (float) ($currentStockRow->stock ?? 0) : 0.0;
+                        if (($currentStock + 0.0000001) < $quantity) {
+                            throw new \RuntimeException('Stock insuficiente para salida. Disponible: ' . number_format($currentStock, 3, '.', '') . ', solicitado: ' . number_format($quantity, 3, '.', ''));
+                        }
+                    }
+
+                    DB::table('inventory.inventory_ledger')->insert([
+                        'company_id' => $companyId,
+                        'warehouse_id' => $warehouseId,
+                        'product_id' => $id,
+                        'lot_id' => null,
+                        'movement_type' => $movementType,
+                        'quantity' => $quantity,
+                        'unit_cost' => $stockAdjustCost,
+                        'ref_type' => 'PRODUCT_EDIT',
+                        'ref_id' => $id,
+                        'notes' => $stockNote ?? 'Ajuste de stock desde edición de producto',
+                        'moved_at' => now(),
+                        'created_by' => ($userId !== null && $userId > 0) ? $userId : null,
+                    ]);
+                }
+            });
+        } catch (\RuntimeException $e) {
+            return ['ok' => false, 'status' => 422, 'message' => $e->getMessage()];
+        }
+
+        $message = $hasStockAdjustment
+            ? 'Product updated with stock adjustment'
+            : 'Product updated';
+
+        return ['ok' => true, 'status' => 200, 'message' => $message];
     }
 
     public function listProductMasters(int $companyId): array

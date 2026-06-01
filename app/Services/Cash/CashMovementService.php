@@ -37,6 +37,11 @@ class CashMovementService
         return $this->commandService->createMovement($payload);
     }
 
+    public function updateMovementById(int $companyId, int $movementId, array $changes): void
+    {
+        $this->commandService->updateMovementById($companyId, $movementId, $changes);
+    }
+
     public function findSessionScopeForCommercialDocuments(int $companyId, int $sessionId): ?CashSessionScopeDTO
     {
         return $this->queryService->findSessionScopeForCommercialDocuments($companyId, $sessionId);

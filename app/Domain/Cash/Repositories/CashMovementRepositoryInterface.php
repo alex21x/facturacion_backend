@@ -16,6 +16,8 @@ interface CashMovementRepositoryInterface
 
     public function createMovement(array $payload): int;
 
+    public function updateMovementById(int $companyId, int $movementId, array $changes): void;
+
     public function findSessionScopeForCommercialDocuments(int $companyId, int $sessionId): ?CashSessionScopeDTO;
 
     public function listSessionCommercialDocuments(int $companyId, int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): Collection;

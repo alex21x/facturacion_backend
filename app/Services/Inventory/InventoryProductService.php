@@ -16,14 +16,14 @@ class InventoryProductService
 		return $this->repository->listProducts($companyId, $search, $status, $limit, $autocomplete);
 	}
 
-	public function createProduct(int $companyId, array $validated): array
+	public function createProduct(int $companyId, array $validated, ?int $userId = null): array
 	{
-		return $this->repository->createProduct($companyId, $validated);
+		return $this->repository->createProduct($companyId, $validated, $userId);
 	}
 
-	public function updateProduct(int $companyId, int $id, array $validated): array
+	public function updateProduct(int $companyId, int $id, array $validated, ?int $userId = null): array
 	{
-		return $this->repository->updateProduct($companyId, $id, $validated);
+		return $this->repository->updateProduct($companyId, $id, $validated, $userId);
 	}
 
 	public function bulkImportProducts(int $companyId, int $userId, array $validated): array

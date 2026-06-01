@@ -28,6 +28,11 @@ class StoreProductRequest extends ApiFormRequest
             'lot_tracking' => 'nullable|boolean',
             'has_expiration' => 'nullable|boolean',
             'status' => 'nullable|integer|in:0,1',
+            'initial_qty' => 'nullable|numeric|min:0',
+            'initial_cost' => 'nullable|numeric|min:0',
+            'warehouse_id' => 'nullable|integer|min:1',
+            'warehouse_code' => 'nullable|string|max:80',
+            'stock_note' => 'nullable|string|max:255',
         ];
     }
 }

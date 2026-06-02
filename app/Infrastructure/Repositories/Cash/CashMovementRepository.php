@@ -93,13 +93,13 @@ class CashMovementRepository implements CashMovementRepositoryInterface
     public function findMovementById(int $movementId): ?CashMovementDTO
     {
         $movement = DB::table('sales.cash_movements as cm')
-            ->leftJoin('auth.users as u', 'u.id', '=', 'sales.cash_movements.user_id')
+            ->leftJoin('auth.users as u', 'u.id', '=', 'cm.user_id')
             ->select([
-                'sales.cash_movements.*',
-                DB::raw("CASE WHEN sales.cash_movements.movement_type = 'INCOME' THEN 'IN' WHEN sales.cash_movements.movement_type = 'EXPENSE' THEN 'OUT' ELSE sales.cash_movements.movement_type END as movement_type_ui"),
+                'cm.*',
+                DB::raw("CASE WHEN cm.movement_type = 'INCOME' THEN 'IN' WHEN cm.movement_type = 'EXPENSE' THEN 'OUT' ELSE cm.movement_type END as movement_type_ui"),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
             ])
-            ->where('sales.cash_movements.id', $movementId)
+            ->where('cm.id', $movementId)
             ->first();
 
             return $movement ? CashMovementDTO::fromRow($movement) : null;

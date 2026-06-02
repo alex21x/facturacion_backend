@@ -12,6 +12,7 @@ class InventoryReportsService
 {
     private const BASIC_ALLOWED_REPORT_TYPES = [
         'STOCK_SNAPSHOT',
+        'LOW_STOCK',
         'KARDEX_PHYSICAL',
         'KARDEX_VALUED',
         'INVENTORY_CUT',

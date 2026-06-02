@@ -9,6 +9,7 @@ class ReportRequestService
 {
     private const REPORT_MAP = [
         'INVENTORY_STOCK_SNAPSHOT' => 'STOCK_SNAPSHOT',
+        'INVENTORY_LOW_STOCK' => 'LOW_STOCK',
         'INVENTORY_KARDEX_PHYSICAL' => 'KARDEX_PHYSICAL',
         'INVENTORY_KARDEX_VALUED' => 'KARDEX_VALUED',
         'INVENTORY_LOT_EXPIRY' => 'LOT_EXPIRY',
@@ -25,6 +26,13 @@ class ReportRequestService
                 'module' => 'INVENTORY',
                 'label' => 'Stock Snapshot',
                 'description' => 'Stock actual por almacen y producto',
+                'async' => true,
+            ],
+            [
+                'code' => 'INVENTORY_LOW_STOCK',
+                'module' => 'INVENTORY',
+                'label' => 'Stock minimo',
+                'description' => 'Productos en stock igual o menor al minimo configurado',
                 'async' => true,
             ],
             [

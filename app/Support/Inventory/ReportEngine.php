@@ -89,6 +89,8 @@ class ReportEngine
         switch ($reportType) {
             case 'STOCK_SNAPSHOT':
                 return self::stockSnapshot($companyId, $filters);
+            case 'LOW_STOCK':
+                return self::lowStock($companyId, $filters);
             case 'KARDEX_PHYSICAL':
                 return self::kardexPhysical($companyId, $filters);
             case 'KARDEX_VALUED':
@@ -241,6 +243,56 @@ class ReportEngine
                 'total_rows' => $rows->count(),
                 'total_qty' => (float) $rows->sum('qty'),
                 'total_value' => (float) $rows->sum('total_value'),
+            ],
+        ];
+    }
+
+    private static function lowStock(int $companyId, array $filters): array
+    {
+        $threshold = self::resolveLowStockThreshold($companyId, $filters);
+
+        $query = DB::table('inventory.current_stock as cs')
+            ->join('inventory.products as p', 'p.id', '=', 'cs.product_id')
+            ->leftJoin('inventory.warehouses as w', 'w.id', '=', 'cs.warehouse_id')
+            ->select([
+                'cs.warehouse_id',
+                DB::raw('w.code as warehouse_code'),
+                DB::raw('w.name as warehouse_name'),
+                'cs.product_id',
+                DB::raw('p.sku as product_sku'),
+                DB::raw('p.name as product_name'),
+                DB::raw('cs.stock as qty'),
+                DB::raw('p.cost_price as unit_cost'),
+                DB::raw('(cs.stock * p.cost_price) as total_value'),
+                DB::raw($threshold . '::numeric as min_stock_threshold'),
+                DB::raw('GREATEST(' . $threshold . '::numeric - cs.stock, 0) as qty_gap'),
+            ])
+            ->where('cs.company_id', $companyId)
+            ->where('cs.stock', '<=', $threshold)
+            ->orderByDesc('qty_gap')
+            ->orderBy('cs.stock')
+            ->orderBy('p.name')
+            ->limit(30000);
+
+        if (!empty($filters['warehouse_id'])) {
+            $query->where('cs.warehouse_id', (int) $filters['warehouse_id']);
+        }
+        if (!empty($filters['product_id'])) {
+            $query->where('cs.product_id', (int) $filters['product_id']);
+        }
+
+        $rows = $query->get();
+
+        return [
+            'type' => 'LOW_STOCK',
+            'generated_at' => now()->toIso8601String(),
+            'rows' => $rows,
+            'summary' => [
+                'threshold' => $threshold,
+                'total_rows' => $rows->count(),
+                'total_qty' => (float) $rows->sum('qty'),
+                'total_value' => (float) $rows->sum('total_value'),
+                'total_gap' => (float) $rows->sum('qty_gap'),
             ],
         ];
     }
@@ -435,6 +487,29 @@ class ReportEngine
         if (!empty($filters['date_to'])) {
             $query->where('il.moved_at', '<=', (string) $filters['date_to'] . ' 23:59:59');
         }
+    }
+
+    private static function resolveLowStockThreshold(int $companyId, array $filters): int
+    {
+        if (isset($filters['threshold']) && is_numeric($filters['threshold'])) {
+            return max(0, (int) $filters['threshold']);
+        }
+
+        $hasThresholdColumn = DB::table('information_schema.columns')
+            ->where('table_schema', 'inventory')
+            ->where('table_name', 'inventory_settings')
+            ->where('column_name', 'low_stock_alert_threshold')
+            ->exists();
+
+        if (!$hasThresholdColumn) {
+            return 5;
+        }
+
+        $settings = DB::table('inventory.inventory_settings')
+            ->where('company_id', $companyId)
+            ->first(['low_stock_alert_threshold']);
+
+        return max(0, (int) ($settings->low_stock_alert_threshold ?? 5));
     }
 
     private static function applySalesFilters($query, array $filters): void

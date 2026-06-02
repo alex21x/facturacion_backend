@@ -12,6 +12,7 @@ class StoreReportRequest extends ApiFirstErrorFormRequest
             'report_code' => 'required|string|max:80',
             'branch_id' => 'nullable|integer',
             'filters' => 'nullable|array',
+            'run_async' => 'nullable|boolean',
         ];
     }
 }

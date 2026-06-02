@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Reports\IndexReportRequest;
 use App\Http\Requests\Reports\StoreReportRequest;
+use App\Jobs\GenerateInventoryReportJob;
+use App\Support\Inventory\ReportEngine;
 use App\Support\Reports\ReportRequestService;
 use Illuminate\Http\Request;
 
@@ -70,10 +72,23 @@ class ReportsController extends Controller
             is_array($payload['filters'] ?? null) ? $payload['filters'] : []
         );
 
+        $runAsync = (bool) ($payload['run_async'] ?? true);
+        $queueConnection = (string) config('queue.default', 'sync');
+
+        if ($runAsync && $queueConnection !== 'sync') {
+            GenerateInventoryReportJob::dispatch((int) $requestId)->onQueue('inventory-reports');
+            $mode = 'async';
+        } else {
+            ReportEngine::process((int) $requestId);
+            $mode = 'inline';
+        }
+
         return response()->json([
-            'message' => 'Reporte encolado para procesamiento',
+            'message' => $mode === 'async' ? 'Reporte encolado para procesamiento' : 'Reporte procesado en linea',
             'request_id' => $requestId,
             'status' => 'PENDING',
+            'mode' => $mode,
+            'queue_connection' => $queueConnection,
         ], 202);
     }
 }

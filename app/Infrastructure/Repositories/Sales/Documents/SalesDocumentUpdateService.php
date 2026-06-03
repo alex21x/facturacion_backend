@@ -329,6 +329,31 @@ class SalesDocumentUpdateService
                         $commercialCostFactor = $itemSubtotal > 0 && $itemTotal > 0
                             ? max(1.0, $itemTotal / $itemSubtotal)
                             : 1.0;
+                        $hasInventoryStock = true;
+                        if (
+                            $stockDirection < 0
+                            && $warehouseId !== null
+                            && $processedItem['product']
+                            && (bool) ($processedItem['product']->is_stockable ?? false)
+                        ) {
+                            $currentProjectedStock = $this->stockProjectionService->projectedCurrentStock(
+                                $companyId,
+                                (int) $warehouseId,
+                                (int) $processedItem['product']->id
+                            );
+                            $hasInventoryStock = $currentProjectedStock > 0.00000001;
+                        }
+
+                        if (
+                            isset($item['unit_cost'])
+                            && (float) $item['unit_cost'] > 0
+                            && $stockDirection < 0
+                            && (bool) ($processedItem['product']->is_stockable ?? false)
+                            && !$hasInventoryStock
+                        ) {
+                            $item['unit_cost'] = null;
+                        }
+
                         $historicalUnitCost = 0.0;
                         if (isset($item['unit_cost']) && (float) $item['unit_cost'] > 0) {
                             $historicalUnitCost = (float) $item['unit_cost'];
@@ -342,7 +367,7 @@ class SalesDocumentUpdateService
                                 }
 
                                 $lotUnitCost = (float) ($lot['unit_cost'] ?? 0);
-                                if ($lotUnitCost <= 0 && isset($processedItem['product']->cost_price)) {
+                                if ($lotUnitCost <= 0 && $hasInventoryStock && isset($processedItem['product']->cost_price)) {
                                     $lotUnitCost = (float) $processedItem['product']->cost_price;
                                     if ($lotUnitCost > 0) {
                                         $lotUnitCost = $lotUnitCost / $commercialCostFactor;
@@ -356,7 +381,12 @@ class SalesDocumentUpdateService
                             if ($lotQtyTotal > 0) {
                                 $historicalUnitCost = $lotCostTotal / $lotQtyTotal;
                             }
-                        } elseif ($stockDirection < 0 && isset($processedItem['product']->cost_price)) {
+                        } elseif (
+                            $stockDirection < 0
+                            && (bool) ($processedItem['product']->is_stockable ?? false)
+                            && $hasInventoryStock
+                            && isset($processedItem['product']->cost_price)
+                        ) {
                             $historicalUnitCost = (float) $processedItem['product']->cost_price;
                             if ($historicalUnitCost > 0) {
                                 $historicalUnitCost = $historicalUnitCost / $commercialCostFactor;
@@ -613,7 +643,15 @@ class SalesDocumentUpdateService
             $payloadUnitCost = isset($item['unit_cost']) && (float) $item['unit_cost'] > 0
                 ? (float) $item['unit_cost']
                 : null;
-            if ($payloadUnitCost === null && $stockDirection < 0) {
+            $hasInventoryStock = $this->stockProjectionService->projectedCurrentStock(
+                $companyId,
+                $warehouseId,
+                (int) $product->id
+            ) > 0.00000001;
+            if ($payloadUnitCost !== null && $stockDirection < 0 && !$hasInventoryStock) {
+                $payloadUnitCost = null;
+            }
+            if ($payloadUnitCost === null && $stockDirection < 0 && $hasInventoryStock) {
                 $payloadUnitCost = (float) ($product->cost_price ?? 0);
                 if ($payloadUnitCost > 0) {
                     $payloadUnitCost = $payloadUnitCost / $commercialCostFactor;

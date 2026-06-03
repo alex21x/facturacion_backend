@@ -85,7 +85,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
             $taxCategoryCompanyColumn
         ) {
             $entryType = strtoupper((string) $payload['entry_type']);
-            $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true);
+            $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'NON_TAX_IN', 'NON_TAX_OUT'], true);
             $isPurchaseOrder = $entryType === 'PURCHASE_ORDER';
             $entryStatus = $isPurchaseOrder ? 'OPEN' : 'APPLIED';
             $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? null);
@@ -168,6 +168,14 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                     throw new \RuntimeException('Purchase order line quantity must be positive for line ' . ($index + 1));
                 }
 
+                if ($entryType === 'NON_TAX_IN' && $qty <= 0) {
+                    throw new \RuntimeException('Non-tax inbound quantity must be positive for line ' . ($index + 1));
+                }
+
+                if ($entryType === 'NON_TAX_OUT' && $qty <= 0) {
+                    throw new \RuntimeException('Non-tax outbound quantity must be positive for line ' . ($index + 1));
+                }
+
                 $lotId = $lotTrackingEnabled && isset($item['lot_id']) ? (int) $item['lot_id'] : null;
                 $lotCode = $lotTrackingEnabled && isset($item['lot_code']) ? trim((string) $item['lot_code']) : null;
                 $manufactureAt = $expiryTrackingEnabled ? ($item['manufacture_at'] ?? null) : null;
@@ -238,7 +246,15 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                     ]);
                 }
 
+                $stockDeltaQty = $qty;
                 $movementType = $entryType === 'PURCHASE' ? 'IN' : ($qty >= 0 ? 'IN' : 'OUT');
+                if ($entryType === 'NON_TAX_IN') {
+                    $stockDeltaQty = abs($qty);
+                    $movementType = 'IN';
+                } elseif ($entryType === 'NON_TAX_OUT') {
+                    $stockDeltaQty = -abs($qty);
+                    $movementType = 'OUT';
+                }
                 $unitCost = isset($item['unit_cost']) ? (float) $item['unit_cost'] : 0.0;
 
                 if ($appliesStock) {
@@ -246,7 +262,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                         $companyId,
                         $warehouseId,
                         $productId,
-                        $qty,
+                        $stockDeltaQty,
                         (bool) $settings['allow_negative_stock']
                     );
 
@@ -256,7 +272,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                             $warehouseId,
                             $productId,
                             (int) $lotId,
-                            $qty,
+                            $stockDeltaQty,
                             (bool) $settings['allow_negative_stock']
                         );
                     }
@@ -294,7 +310,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                         'product_id' => $productId,
                         'lot_id' => $lotId,
                         'movement_type' => $movementType,
-                        'quantity' => round(abs($qty), 8),
+                        'quantity' => round(abs($stockDeltaQty), 8),
                         'unit_cost' => $unitCost,
                         'ref_type' => 'STOCK_ENTRY',
                         'ref_id' => $entryId,
@@ -324,7 +340,7 @@ class InventoryStockEntryRepository implements InventoryStockEntryRepositoryInte
                             'product_id' => $productId,
                             'lot_id' => $lotId,
                             'movement_type' => $movementType,
-                            'quantity' => round(abs($qty), 8),
+                            'quantity' => round(abs($stockDeltaQty), 8),
                             'unit_cost' => $unitCost,
                             'tax_rate' => $taxRate,
                             'ref_type' => 'STOCK_ENTRY',

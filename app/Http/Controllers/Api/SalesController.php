@@ -155,6 +155,7 @@ class SalesController extends Controller
             'SALES_SELLER_TO_CASHIER' => false,
             'SALES_CUSTOMER_PRICE_PROFILE' => false,
             'SALES_WORKSHOP_MULTI_VEHICLE' => false,
+            'SALES_ORDER_MULTI_PAYMENT_ENABLED' => false,
             'SALES_ALLOW_ISSUED_EDIT_BEFORE_SUNAT_FINAL' => true,
             'SALES_ANTICIPO_ENABLED' => false,
             'SALES_TAX_BRIDGE' => false,
@@ -1118,6 +1119,9 @@ class SalesController extends Controller
                 'customerName' => (string) ($doc->customer_name ?? '-'),
                 'customerDocNumber' => (string) ($doc->customer_doc_number ?? '-'),
                 'customerAddress' => (string) ($doc->customer_address ?? '-'),
+                'customerPhone' => isset($docMetadata['customer_phone'])
+                    ? (string) $docMetadata['customer_phone']
+                    : (isset($docMetadata['customerPhone']) ? (string) $docMetadata['customerPhone'] : ''),
                 'notes' => isset($doc->notes) ? (trim((string) $doc->notes) !== '' ? (string) $doc->notes : null) : null,
                 'subtotal' => (float) (($doc->subtotal ?? 0) ?: ($gravadaTotal + $inafectaTotal + $exoneradaTotal)),
                 'taxTotal' => (float) $taxTotal,
@@ -1286,8 +1290,12 @@ class SalesController extends Controller
                 $workshopMultiVehicleEnabled = $companyId > 0
                     ? $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
                     : false;
+                $salesOrderMultiPaymentEnabled = $companyId > 0
+                    ? $this->isSalesOrderMultiPaymentEnabledForContext($companyId, $branchId)
+                    : false;
 
                 $docKindRaw = strtoupper(trim((string) ($doc['documentKind'] ?? 'DOCUMENTO')));
+                $isSalesOrderDocument = $docKindRaw === 'SALES_ORDER';
                 $docKindLabel = [
                         'INVOICE' => 'FACTURA ELECTRONICA',
                         'RECEIPT' => 'BOLETA ELECTRONICA',
@@ -1318,11 +1326,55 @@ class SalesController extends Controller
                 $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
                 $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
                 $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+                $customerPhone = trim((string) (
+                    $doc['customerPhone']
+                    ?? $metaData['customer_phone']
+                    ?? $metaData['customerPhone']
+                    ?? ''
+                ));
+                $customerPhoneEscaped = $this->escapeHtml($customerPhone !== '' ? $customerPhone : '-');
+                $customerPhoneLine = $workshopMultiVehicleEnabled
+                    ? '<div class="line"><span class="k">TELEFONO:</span><span class="v">' . $customerPhoneEscaped . '</span></div>'
+                    : '';
                 $documentNotes = trim((string) ($doc['notes'] ?? ''));
                 $documentNotesLine = $documentNotes !== ''
                     ? '<div class="line"><span class="k">OBSERVACIONES:</span><span class="v">' . $this->escapeHtml($documentNotes) . '</span></div>'
                     : '';
                 $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
+                $paymentBreakdownRows = is_array($metaData['payment_breakdown'] ?? null)
+                    ? $metaData['payment_breakdown']
+                    : [];
+                $paymentBreakdownLines = '';
+                foreach ($paymentBreakdownRows as $paymentRow) {
+                    if (!is_array($paymentRow)) {
+                        continue;
+                    }
+
+                    $amount = round((float) ($paymentRow['amount'] ?? 0), 2);
+                    if ($amount <= 0) {
+                        continue;
+                    }
+
+                    $methodName = trim((string) (
+                        $paymentRow['payment_method_name']
+                        ?? $paymentRow['method_name']
+                        ?? $paymentRow['name']
+                        ?? ''
+                    ));
+                    if ($methodName === '') {
+                        $methodId = isset($paymentRow['payment_method_id']) ? (int) $paymentRow['payment_method_id'] : 0;
+                        $methodName = $methodId > 0 ? ('Metodo #' . $methodId) : 'Metodo de pago';
+                    }
+
+                    $paymentBreakdownLines .= '<div class="line"><span class="k">PAGO ' . $this->escapeHtml($methodName) . ':</span><span class="v">' . $this->escapeHtml((string) ($doc['currencySymbol'] ?? 'S/')) . ' ' . $this->formatAmount($amount) . '</span></div>';
+                }
+                $hideGenericPaymentLine = $isSalesOrderDocument && $salesOrderMultiPaymentEnabled;
+                $paymentConditionLine = $hideGenericPaymentLine
+                    ? ''
+                    : '<div class="line"><span class="k">COND. DE PAGO:</span><span class="v">' . $paymentMethod . '</span></div>';
+                if ($hideGenericPaymentLine === false) {
+                    $paymentBreakdownLines = '';
+                }
                 $currencyCode = strtoupper((string) ($doc['currencyCode'] ?? 'PEN'));
                 $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? ($currencyCode === 'PEN' ? 'S/' : $currencyCode)));
                 $currencyLabel = $currencyCode === 'PEN' ? 'SOLES' : $currencyCode;
@@ -1627,7 +1679,7 @@ class SalesController extends Controller
                     <td>
                         <div class="line"><span class="k">R.U.C:</span><span class="v">{$customerDoc}</span></div>
                         <div class="line"><span class="k">SENOR(ES):</span><span class="v">{$customer}</span></div>
-                        <div class="line"><span class="k">TELEFONO:</span><span class="v">-</span></div>
+                        {$customerPhoneLine}
                         <div class="line"><span class="k">DIRECCION:</span><span class="v">{$customerAddress}</span></div>
                         {$documentNotesLine}
                         {$vehicleBlock}
@@ -1647,8 +1699,9 @@ class SalesController extends Controller
                 <tr>
                     <td>
                         <div class="line"><span class="k">NRO GUIA:</span><span class="v">{$guideNo}</span></div>
-                        <div class="line"><span class="k">COND. DE PAGO:</span><span class="v">{$paymentMethod}</span></div>
+                        {$paymentConditionLine}
                         <div class="line"><span class="k">VENDEDOR:</span><span class="v">{$seller}</span></div>
+                        {$paymentBreakdownLines}
                     </td>
                     <td>
                         <div class="line"><span class="k">ORDEN COMPRA:</span><span class="v">{$orderPurchase}</span></div>
@@ -1730,6 +1783,7 @@ HTML;
             ? '<div class="company-description">' . $this->escapeHtml($companyDescription) . '</div>'
             : '';
         $docKindRaw = strtoupper(trim((string) ($doc['documentKind'] ?? 'DOCUMENTO')));
+        $isSalesOrderDocument = $docKindRaw === 'SALES_ORDER';
         $docKindLabel = [
             'INVOICE' => 'FACTURA ELECTRONICA',
             'RECEIPT' => 'BOLETA DE VENTA ELECTRONICA',
@@ -1742,18 +1796,30 @@ HTML;
         $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
         $number = str_pad((string) ((int) ($doc['number'] ?? 0)), 6, '0', STR_PAD_LEFT);
         $issueAt = $this->escapeHtml($this->formatIssueDateTime((string) ($doc['issueDate'] ?? '')));
+        $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
         $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
         $customerAddress = $this->escapeHtml((string) ($doc['customerAddress'] ?? '-'));
+        $customerPhone = $this->escapeHtml((string) (
+            $doc['customerPhone']
+            ?? $docMetadata['customer_phone']
+            ?? $docMetadata['customerPhone']
+            ?? ''
+        ));
+        $customerPhoneRow = $workshopMultiVehicleEnabled && $customerPhone !== ''
+            ? '<div class="info-row"><div class="info-label">TEL.:</div><div class="info-value">' . $customerPhone . '</div></div>'
+            : '';
         $documentNotes = trim((string) ($doc['notes'] ?? ''));
         $documentNotesRow = $documentNotes !== ''
             ? '<div class="info-row"><div class="info-label">OBSERVACIONES:</div><div class="info-value">' . $this->escapeHtml($documentNotes) . '</div></div>'
             : '';
-        $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
         $companyId = (int) ($company['company_id'] ?? $company['id'] ?? 0);
         $branchId = isset($doc['branchId']) && $doc['branchId'] !== null
             ? (int) $doc['branchId']
             : null;
+        $salesOrderMultiPaymentEnabled = $companyId > 0
+            ? $this->isSalesOrderMultiPaymentEnabledForContext($companyId, $branchId)
+            : false;
         $workshopMultiVehicleEnabled = $companyId > 0
             ? $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
             : false;
@@ -1782,6 +1848,42 @@ HTML;
             : '';
         $paymentMethod = $this->escapeHtml((string) ($doc['paymentMethodName'] ?? '-'));
         $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? 'S/'));
+        $paymentBreakdownRows = is_array($docMetadata['payment_breakdown'] ?? null)
+            ? $docMetadata['payment_breakdown']
+            : [];
+        $paymentBreakdownHtml = '';
+        foreach ($paymentBreakdownRows as $paymentRow) {
+            if (!is_array($paymentRow)) {
+                continue;
+            }
+
+            $amount = round((float) ($paymentRow['amount'] ?? 0), 2);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $methodName = trim((string) (
+                $paymentRow['payment_method_name']
+                ?? $paymentRow['method_name']
+                ?? $paymentRow['name']
+                ?? ''
+            ));
+            if ($methodName === '') {
+                $methodId = isset($paymentRow['payment_method_id']) ? (int) $paymentRow['payment_method_id'] : 0;
+                $methodName = $methodId > 0 ? ('Metodo #' . $methodId) : 'Metodo de pago';
+            }
+
+            $status = strtoupper(trim((string) ($paymentRow['status'] ?? 'PAID')));
+            $statusSuffix = $status !== '' && $status !== 'PAID' ? ' (' . $status . ')' : '';
+            $paymentBreakdownHtml .= '<div class="summary-row"><span class="summary-label">Pago ' . $this->escapeHtml($methodName) . $this->escapeHtml($statusSuffix) . '</span><span class="summary-value">' . $currency . ' ' . $this->formatAmount($amount) . '</span></div>';
+        }
+        $hideGenericPaymentSummary = $isSalesOrderDocument && $salesOrderMultiPaymentEnabled;
+        if (!$hideGenericPaymentSummary) {
+            $paymentBreakdownHtml = '';
+        }
+        $paymentMethodSummaryRow = $hideGenericPaymentSummary
+            ? ''
+            : '<div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">' . $paymentMethod . '</span></div>';
         $currencyCode = (string) ($doc['currencyCode'] ?? 'PEN');
         $totalInWords = $this->escapeHtml($this->amountToSpanishWords((float) ($doc['grandTotal'] ?? 0), $currencyCode));
         $total = $currency . ' ' . $this->formatAmount((float) ($doc['grandTotal'] ?? 0));
@@ -2103,6 +2205,7 @@ TICKETHEAD;
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
     <div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div>
     <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
+    {$customerPhoneRow}
     {$documentNotesRow}
     {$vehicleRow}
 
@@ -2117,7 +2220,8 @@ TICKETHEAD;
             {$a4SummaryRows}
       <div class="total-row"><span>TOTAL</span><span>{$total}</span></div>
             <div class="summary-words">SON: {$totalInWords}</div>
-        <div class="summary-row"><span class="summary-label">FORMA PAGO</span><span class="summary-value">{$paymentMethod}</span></div>
+        {$paymentMethodSummaryRow}
+        {$paymentBreakdownHtml}
     </div>
 
     <div class="footer">
@@ -3282,6 +3386,11 @@ HTML;
     private function isWorkshopMultiVehicleEnabledForContext(int $companyId, ?int $branchId): bool
     {
         return $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_WORKSHOP_MULTI_VEHICLE', false);
+    }
+
+    private function isSalesOrderMultiPaymentEnabledForContext(int $companyId, ?int $branchId): bool
+    {
+        return $this->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_ORDER_MULTI_PAYMENT_ENABLED', false);
     }
 
     private function normalizeVehiclePlate(string $plate): string

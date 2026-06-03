@@ -204,7 +204,8 @@ class SalesDocumentCreationService
                     $pendingPayments,
                     $paidTotal,
                     $companyId,
-                    $branchId
+                    $branchId,
+                    $payload['payments'] ?? []
                 );
 
                 if ($isTributaryIssued) {
@@ -284,18 +285,25 @@ class SalesDocumentCreationService
                     $this->linePersistenceService->persistPayments((int) $documentId, $payload['payments']);
                 }
 
-                $this->cashPostingService->registerCashIncomeFromDocument(
-                    $companyId,
-                    $branchId !== null ? (int) $branchId : null,
-                    $cashRegisterId !== null ? (int) $cashRegisterId : null,
-                    (int) $documentId,
-                    (string) $payload['document_kind'],
-                    (string) $payload['series'],
-                    (int) $nextNumber,
-                    (float) $paidTotal,
-                    (int) $authUser->id,
-                    $payload['payments'] ?? []
-                );
+                $metadataPayload = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+                $sourceDocumentId = isset($metadataPayload['source_document_id']) ? (int) $metadataPayload['source_document_id'] : 0;
+                $sourceDocumentKind = strtoupper(trim((string) ($metadataPayload['source_document_kind'] ?? '')));
+                $skipCashPostingForConvertedSalesOrder = $sourceDocumentId > 0 && $sourceDocumentKind === 'SALES_ORDER';
+
+                if (!$skipCashPostingForConvertedSalesOrder) {
+                    $this->cashPostingService->registerCashIncomeFromDocument(
+                        $companyId,
+                        $branchId !== null ? (int) $branchId : null,
+                        $cashRegisterId !== null ? (int) $cashRegisterId : null,
+                        (int) $documentId,
+                        (string) $payload['document_kind'],
+                        (string) $payload['series'],
+                        (int) $nextNumber,
+                        (float) $paidTotal,
+                        (int) $authUser->id,
+                        $payload['payments'] ?? []
+                    );
+                }
 
                 $resultDto = new CreateCommercialDocumentResultDTO(
                     id: (int) $documentId,

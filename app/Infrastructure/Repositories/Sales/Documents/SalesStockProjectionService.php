@@ -38,6 +38,23 @@ class SalesStockProjectionService
         $this->stockProjection[$projectionKey] = round($next, 8);
     }
 
+    public function projectedCurrentStock(int $companyId, int $warehouseId, int $productId): float
+    {
+        $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId;
+
+        if (!array_key_exists($projectionKey, $this->stockProjection)) {
+            $row = DB::table('inventory.current_stock')
+                ->where('company_id', $companyId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('product_id', $productId)
+                ->first();
+
+            $this->stockProjection[$projectionKey] = $row ? (float) $row->stock : 0.0;
+        }
+
+        return (float) $this->stockProjection[$projectionKey];
+    }
+
     public function projectedLotStock(int $companyId, int $warehouseId, int $productId, int $lotId): float
     {
         $projectionKey = $companyId . ':' . $warehouseId . ':' . $productId . ':' . $lotId;

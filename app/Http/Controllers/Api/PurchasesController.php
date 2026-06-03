@@ -269,7 +269,7 @@ class PurchasesController
         }
 
         $entryType = strtoupper((string) $entry->entry_type);
-        if (!in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER'], true)) {
+        if (!in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER', 'NON_TAX_IN', 'NON_TAX_OUT'], true)) {
             return response()->json(['message' => 'Tipo de ingreso no editable'], 422);
         }
 
@@ -294,7 +294,7 @@ class PurchasesController
         $resolvedIssueAt = $this->resolveIssueAtForStorage($payload['issue_at'] ?? $entry->issue_at);
         $editOccurredAt = now('America/Lima')->format('Y-m-d H:i:sP');
         $inventorySettings = $this->inventorySettingsForCompany($companyId);
-        $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT'], true);
+        $appliesStock = in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'NON_TAX_IN', 'NON_TAX_OUT'], true);
 
         $productIds = collect($payload['items'])
             ->pluck('product_id')
@@ -398,6 +398,14 @@ class PurchasesController
                     }
 
                     if ($entryType === 'ADJUSTMENT' && abs($qty) < 0.00000001) {
+                        throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
+                    }
+
+                    if ($entryType === 'NON_TAX_IN' && $qty <= 0) {
+                        throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
+                    }
+
+                    if ($entryType === 'NON_TAX_OUT' && $qty <= 0) {
                         throw new \RuntimeException('Cantidad invalida para la linea ' . ($index + 1));
                     }
 
@@ -799,7 +807,11 @@ class PurchasesController
                 $entry->id,
                 $entry->entry_type === 'PURCHASE'
                     ? 'Compra'
-                    : ($entry->entry_type === 'PURCHASE_ORDER' ? 'Orden de compra' : 'Ajuste'),
+                    : ($entry->entry_type === 'PURCHASE_ORDER'
+                        ? 'Orden de compra'
+                        : ($entry->entry_type === 'NON_TAX_IN'
+                            ? 'Ingreso no tributario'
+                            : ($entry->entry_type === 'NON_TAX_OUT' ? 'Salida no tributaria' : 'Ajuste'))),
                 '"' . str_replace('"', '""', $entry->reference_no ?? '') . '"',
                 '"' . str_replace('"', '""', $entry->supplier_reference ?? '') . '"',
                 substr($entry->issue_at, 0, 10),
@@ -1133,6 +1145,13 @@ class PurchasesController
     ): void {
         $movementType = $entryType === 'PURCHASE' ? 'IN' : ($qty >= 0 ? 'IN' : 'OUT');
         $delta = $qty;
+        if ($entryType === 'NON_TAX_IN') {
+            $movementType = 'IN';
+            $delta = abs($qty);
+        } elseif ($entryType === 'NON_TAX_OUT') {
+            $movementType = 'OUT';
+            $delta = -abs($qty);
+        }
 
         $this->applyCurrentStockDelta($companyId, $warehouseId, $productId, $delta, $allowNegativeStock);
 

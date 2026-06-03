@@ -130,11 +130,15 @@ class CashMovementRepository implements CashMovementRepositoryInterface
 
     public function listSessionCommercialDocuments(int $companyId, int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): Collection
     {
+        $movementDocRefSubquery = DB::table('sales.cash_movements as cm_doc')
+            ->select('cm_doc.ref_id')
+            ->where('cm_doc.cash_session_id', $sessionId)
+            ->whereIn('cm_doc.ref_type', $documentRefTypes)
+            ->distinct();
+
         return DB::table('sales.commercial_documents as cd')
-            ->join('sales.cash_movements as cm', function ($join) use ($sessionId, $documentRefTypes): void {
-                $join->on('cd.id', '=', 'cm.ref_id')
-                    ->where('cm.cash_session_id', $sessionId)
-                    ->whereIn('cm.ref_type', $documentRefTypes);
+            ->joinSub($movementDocRefSubquery, 'cm_docs', function ($join): void {
+                $join->on('cd.id', '=', 'cm_docs.ref_id');
             })
             ->leftJoin('sales.customers as cust', 'cust.id', '=', 'cd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
@@ -153,6 +157,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(cd.vehicle_model_snapshot AS TEXT)), ''), (cd.metadata->>'vehicle_model'), (cd.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 'pm.name as payment_method_name',
                 'cd.total',
+                'cd.metadata',
                 'cd.status',
                 'cd.created_at',
                 DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as user_name"),
@@ -171,6 +176,17 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ])
             ->where('cd.company_id', $companyId)
             ->whereNotIn('cd.status', $excludedDocumentStatuses)
+            ->whereRaw("(
+                cd.document_kind NOT IN ('QUOTATION', 'SALES_ORDER')
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM sales.commercial_documents d2
+                    WHERE d2.company_id = cd.company_id
+                      AND d2.document_kind IN ('INVOICE', 'RECEIPT')
+                      AND d2.status NOT IN ('VOID', 'CANCELED')
+                      AND COALESCE((d2.metadata->>'source_document_id')::BIGINT, 0) = cd.id
+                )
+            )")
             ->orderBy('cd.created_at')
             ->get();
     }

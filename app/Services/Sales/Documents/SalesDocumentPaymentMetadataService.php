@@ -3,6 +3,7 @@
 namespace App\Services\Sales\Documents;
 
 use App\Application\DTOs\Sales\PaymentSummaryDTO;
+use Illuminate\Support\Facades\DB;
 
 class SalesDocumentPaymentMetadataService
 {
@@ -52,7 +53,7 @@ class SalesDocumentPaymentMetadataService
         }
     }
 
-    public function enrichPaymentMetadata(array $metadata, array $pendingPayments, float $paidTotal, int $companyId, ?int $branchId): array
+    public function enrichPaymentMetadata(array $metadata, array $pendingPayments, float $paidTotal, int $companyId, ?int $branchId, array $payments = []): array
     {
         $isCreditSale = count($pendingPayments) > 0;
         $metadata['payment_condition'] = $isCreditSale ? 'CREDITO' : 'CONTADO';
@@ -86,6 +87,44 @@ class SalesDocumentPaymentMetadataService
 
         $metadata['advance_amount'] = round($declaredAdvance, 2);
         $metadata['has_advance'] = $declaredAdvance > 0.00001;
+
+        $paymentMethodIds = collect($payments)
+            ->map(fn ($payment) => isset($payment['payment_method_id']) ? (int) $payment['payment_method_id'] : 0)
+            ->filter(fn ($methodId) => $methodId > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $paymentMethodMap = [];
+        if (!empty($paymentMethodIds)) {
+            $paymentMethodMap = DB::table('master.payment_types')
+                ->whereIn('id', $paymentMethodIds)
+                ->pluck('name', 'id')
+                ->map(fn ($name) => trim((string) $name))
+                ->all();
+        }
+
+        $metadata['payment_breakdown'] = array_values(array_map(function ($payment) use ($paymentMethodMap) {
+            $methodId = isset($payment['payment_method_id']) ? (int) $payment['payment_method_id'] : 0;
+            $status = strtoupper(trim((string) ($payment['status'] ?? 'PENDING')));
+            if (!in_array($status, ['PENDING', 'PAID', 'CANCELED'], true)) {
+                $status = 'PENDING';
+            }
+
+            return [
+                'payment_method_id' => $methodId > 0 ? $methodId : null,
+                'payment_method_name' => $methodId > 0
+                    ? ((string) ($paymentMethodMap[$methodId] ?? ('Metodo #' . $methodId)))
+                    : null,
+                'amount' => round((float) ($payment['amount'] ?? 0), 2),
+                'status' => $status,
+                'paid_at' => $payment['paid_at'] ?? null,
+                'due_at' => $payment['due_at'] ?? null,
+                'notes' => isset($payment['notes']) && trim((string) $payment['notes']) !== ''
+                    ? trim((string) $payment['notes'])
+                    : null,
+            ];
+        }, $payments));
 
         return $metadata;
     }

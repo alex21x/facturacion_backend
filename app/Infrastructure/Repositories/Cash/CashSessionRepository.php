@@ -143,17 +143,18 @@ class CashSessionRepository implements CashSessionRepositoryInterface
     {
         return DB::table('sales.cash_movements as cm')
             ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
-            ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
+            ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cm.payment_method_id')
             ->select([
                 DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
                 DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO') as payment_method_code"),
                 DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
-                DB::raw('COUNT(cd.id) as document_count'),
-                DB::raw('SUM(cd.total) as total_amount'),
+                DB::raw('COUNT(DISTINCT cm.ref_id) as document_count'),
+                DB::raw('SUM(cm.amount) as total_amount'),
             ])
             ->where('cm.cash_session_id', $sessionId)
             ->where('cm.company_id', $companyId)
             ->whereIn('cm.ref_type', $documentRefTypes)
+            ->where('cm.movement_type', 'INCOME')
             ->whereNotIn('cd.status', $excludedDocumentStatuses)
             ->groupBy(
                 DB::raw('COALESCE(pm.id, 0)'),

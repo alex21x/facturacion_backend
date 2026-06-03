@@ -123,6 +123,44 @@ class PrepareConvertCommercialDocumentUseCase
             ? (int) $payload['payment_method_id']
             : ($source->payment_method_id !== null ? (int) $source->payment_method_id : null);
 
+        $requestedPayments = collect($payload['payments'] ?? [])
+            ->filter(fn ($row) => is_array($row))
+            ->map(function (array $row) {
+                $methodId = isset($row['payment_method_id']) ? (int) $row['payment_method_id'] : 0;
+                $amount = isset($row['amount']) ? round((float) $row['amount'], 2) : 0.0;
+                $status = strtoupper(trim((string) ($row['status'] ?? 'PAID')));
+                if (!in_array($status, ['PENDING', 'PAID', 'CANCELED'], true)) {
+                    $status = 'PAID';
+                }
+
+                return [
+                    'payment_method_id' => $methodId,
+                    'amount' => $amount,
+                    'status' => $status,
+                    'paid_at' => $row['paid_at'] ?? null,
+                    'due_at' => $row['due_at'] ?? null,
+                    'notes' => array_key_exists('notes', $row) ? $row['notes'] : null,
+                ];
+            })
+            ->filter(fn (array $row) => $row['payment_method_id'] > 0 && $row['amount'] > 0)
+            ->values();
+
+        $shouldUseRequestedPayments = $targetDocumentKind === 'SALES_ORDER'
+            && strtoupper($targetStatus) === 'ISSUED'
+            && $requestedPayments->isNotEmpty();
+
+        if ($shouldUseRequestedPayments) {
+            $paidRequestedTotal = (float) $requestedPayments
+                ->filter(fn (array $row) => $row['status'] === 'PAID')
+                ->sum('amount');
+
+            if (abs($paidRequestedTotal - (float) $source->total) > 0.01) {
+                throw new SalesDocumentException('La suma de pagos debe coincidir con el total del documento para convertir a nota de pedido.');
+            }
+
+            $resolvedPaymentMethodId = (int) ($requestedPayments->first()['payment_method_id'] ?? $resolvedPaymentMethodId);
+        }
+
         if ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER' && ($resolvedPaymentMethodId === null || $resolvedPaymentMethodId <= 0)) {
             $resolvedPaymentMethodId = $this->salesLookupService->resolveFallbackPaymentMethodId($companyId);
         }
@@ -159,7 +197,7 @@ class PrepareConvertCommercialDocumentUseCase
                 'conversion_factor' => (float) $item->conversion_factor,
                 'base_unit_price' => (float) $item->base_unit_price,
                 'unit_price' => (float) $item->unit_price,
-                'unit_cost' => (float) $item->unit_cost,
+                'unit_cost' => null,
                 'wholesale_discount_percent' => (float) $item->wholesale_discount_percent,
                 'price_source' => $item->price_source ?: 'MANUAL',
                 'discount_total' => (float) $item->discount_total,
@@ -204,20 +242,34 @@ class PrepareConvertCommercialDocumentUseCase
             'metadata' => array_merge($sourceMetadata, $conversionMetadata),
             'status' => $targetStatus,
             'items' => $itemsPayload,
-            'payments' => (
-                in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
-                || ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER')
-            )
-                && strtoupper($targetStatus) === 'ISSUED'
-                && $resolvedPaymentMethodId !== null
-                ? [[
-                    'payment_method_id' => $resolvedPaymentMethodId,
-                    'amount' => (float) $source->total,
-                    'status' => 'PAID',
-                    'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
-                    'method' => 'REGISTERED',
-                ]]
-                : [],
+            'payments' => $shouldUseRequestedPayments
+                ? $requestedPayments->map(function (array $row) {
+                    return [
+                        'payment_method_id' => (int) $row['payment_method_id'],
+                        'amount' => (float) $row['amount'],
+                        'status' => $row['status'],
+                        'paid_at' => $row['status'] === 'PAID'
+                            ? ($row['paid_at'] ?? now('America/Lima')->format('Y-m-d H:i:sP'))
+                            : null,
+                        'due_at' => $row['due_at'] ?? null,
+                        'notes' => $row['notes'],
+                        'method' => 'REGISTERED',
+                    ];
+                })->values()->all()
+                : ((
+                    in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
+                    || ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER')
+                )
+                    && strtoupper($targetStatus) === 'ISSUED'
+                    && $resolvedPaymentMethodId !== null
+                    ? [[
+                        'payment_method_id' => $resolvedPaymentMethodId,
+                        'amount' => (float) $source->total,
+                        'status' => 'PAID',
+                        'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
+                        'method' => 'REGISTERED',
+                    ]]
+                    : []),
         ];
 
         return [

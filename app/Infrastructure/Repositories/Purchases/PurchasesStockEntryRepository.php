@@ -112,7 +112,7 @@ class PurchasesStockEntryRepository implements PurchasesStockEntryRepositoryInte
 		$dateTo = $filters['date_to'] ?? null;
 		$warehouseId = $filters['warehouse_id'] ?? null;
 
-		if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER'], true)) {
+		if ($entryType && in_array($entryType, ['PURCHASE', 'ADJUSTMENT', 'PURCHASE_ORDER', 'NON_TAX_IN', 'NON_TAX_OUT'], true)) {
 			$query->where('se.entry_type', $entryType);
 		}
 

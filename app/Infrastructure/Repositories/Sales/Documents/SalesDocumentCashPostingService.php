@@ -37,30 +37,77 @@ class SalesDocumentCashPostingService
             return;
         }
 
-        $firstPaidMethod = collect($payments)->first(function ($payment) {
-            return ($payment['status'] ?? 'PENDING') === 'PAID';
-        });
+        $alreadyPosted = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('cash_session_id', (int) $session->id)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->exists();
+
+        if ($alreadyPosted) {
+            return;
+        }
+
+        $paidBreakdown = collect($payments)
+            ->filter(function ($payment) {
+                $status = strtoupper(trim((string) ($payment['status'] ?? 'PENDING')));
+                $amount = isset($payment['amount']) ? (float) $payment['amount'] : 0.0;
+                return $status === 'PAID' && $amount > 0;
+            })
+            ->map(function ($payment) {
+                return [
+                    'payment_method_id' => isset($payment['payment_method_id']) ? (int) $payment['payment_method_id'] : null,
+                    'amount' => round((float) $payment['amount'], 4),
+                ];
+            })
+            ->groupBy(function ($row) {
+                return $row['payment_method_id'] ?? 'null';
+            })
+            ->map(function ($group) {
+                $first = $group->first();
+                return [
+                    'payment_method_id' => $first['payment_method_id'],
+                    'amount' => round((float) $group->sum('amount'), 4),
+                ];
+            })
+            ->values()
+            ->filter(fn ($row) => (float) $row['amount'] > 0)
+            ->all();
+
+        if (empty($paidBreakdown)) {
+            $paidBreakdown = [[
+                'payment_method_id' => null,
+                'amount' => round($paidTotal, 4),
+            ]];
+        }
 
         $labelMap = ['INVOICE' => 'Factura', 'RECEIPT' => 'Boleta', 'CREDIT_NOTE' => 'Nota Credito', 'DEBIT_NOTE' => 'Nota Debito', 'QUOTATION' => 'Cotizacion', 'SALES_ORDER' => 'Pedido'];
         $description = 'Cobro doc ' . ($labelMap[$documentKind] ?? $documentKind) . ' ' . $series . '-' . $number;
 
-        DB::table('sales.cash_movements')->insert([
-            'company_id' => $companyId,
-            'branch_id' => $branchId,
-            'cash_register_id' => $cashRegisterId,
-            'cash_session_id' => (int) $session->id,
-            'movement_type' => 'INCOME',
-            'payment_method_id' => $firstPaidMethod['payment_method_id'] ?? null,
-            'amount' => round($paidTotal, 4),
-            'description' => $description,
-            'notes' => $description,
-            'ref_type' => 'COMMERCIAL_DOCUMENT',
-            'ref_id' => $documentId,
-            'created_by' => $userId,
-            'user_id' => $userId,
-            'movement_at' => now(),
-            'created_at' => now(),
-        ]);
+        $movementAt = now();
+        $rowsToInsert = [];
+        foreach ($paidBreakdown as $paymentRow) {
+            $rowsToInsert[] = [
+                'company_id' => $companyId,
+                'branch_id' => $branchId,
+                'cash_register_id' => $cashRegisterId,
+                'cash_session_id' => (int) $session->id,
+                'movement_type' => 'INCOME',
+                'payment_method_id' => $paymentRow['payment_method_id'],
+                'amount' => (float) $paymentRow['amount'],
+                'description' => $description,
+                'notes' => $description,
+                'ref_type' => 'COMMERCIAL_DOCUMENT',
+                'ref_id' => $documentId,
+                'created_by' => $userId,
+                'user_id' => $userId,
+                'movement_at' => $movementAt,
+                'created_at' => $movementAt,
+            ];
+        }
+
+        DB::table('sales.cash_movements')->insert($rowsToInsert);
 
         $totalIn = (float) DB::table('sales.cash_movements')
             ->where('cash_session_id', (int) $session->id)

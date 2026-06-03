@@ -44,6 +44,31 @@ class SalesDocumentLinePersistenceService
                 ? (float) $item['unit_cost']
                 : null;
 
+            $hasInventoryStock = true;
+            if (
+                $stockDirection < 0
+                && $warehouseId !== null
+                && $processedItem['product']
+                && (bool) ($processedItem['product']->is_stockable ?? false)
+            ) {
+                $currentProjectedStock = $this->stockProjectionService->projectedCurrentStock(
+                    $companyId,
+                    (int) $warehouseId,
+                    (int) $processedItem['product']->id
+                );
+                $hasInventoryStock = $currentProjectedStock > 0.00000001;
+            }
+
+            if (
+                $payloadUnitCost !== null
+                && $stockDirection < 0
+                && $processedItem['product']
+                && (bool) ($processedItem['product']->is_stockable ?? false)
+                && !$hasInventoryStock
+            ) {
+                $payloadUnitCost = null;
+            }
+
             $historicalUnitCost = 0.0;
             if ($payloadUnitCost !== null) {
                 $historicalUnitCost = $payloadUnitCost;
@@ -58,7 +83,12 @@ class SalesDocumentLinePersistenceService
                         continue;
                     }
 
-                    if ($lotUnitCost <= 0 && $processedItem['product'] && isset($processedItem['product']->cost_price)) {
+                    if (
+                        $lotUnitCost <= 0
+                        && $hasInventoryStock
+                        && $processedItem['product']
+                        && isset($processedItem['product']->cost_price)
+                    ) {
                         $lotUnitCost = (float) $processedItem['product']->cost_price;
                         if ($lotUnitCost > 0) {
                             $lotUnitCost = $lotUnitCost / $commercialCostFactor;
@@ -72,7 +102,13 @@ class SalesDocumentLinePersistenceService
                 if ($lotQtyTotal > 0) {
                     $historicalUnitCost = $lotCostTotal / $lotQtyTotal;
                 }
-            } elseif ($stockDirection < 0 && $processedItem['product'] && isset($processedItem['product']->cost_price)) {
+            } elseif (
+                $stockDirection < 0
+                && $processedItem['product']
+                && (bool) ($processedItem['product']->is_stockable ?? false)
+                && $hasInventoryStock
+                && isset($processedItem['product']->cost_price)
+            ) {
                 $historicalUnitCost = (float) $processedItem['product']->cost_price;
                 if ($historicalUnitCost > 0) {
                     $historicalUnitCost = $historicalUnitCost / $commercialCostFactor;

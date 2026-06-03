@@ -10,6 +10,7 @@ use App\Http\Requests\Cash\UpdateCashMovementRequest;
 use App\Services\Cash\CashMovementService;
 use App\Services\Cash\CashSessionService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CashController extends Controller
 {
@@ -21,6 +22,7 @@ class CashController extends Controller
 
     private const DOCUMENT_MOVEMENT_REF_TYPES = ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'];
     private const EXCLUDED_DOCUMENT_STATUSES = ['CANCELED', 'VOID', 'VOIDED'];
+    private const SALES_ORDER_MULTI_PAYMENT_FEATURE_CODE = 'SALES_ORDER_MULTI_PAYMENT_ENABLED';
 
     public function sessions(Request $request)
     {
@@ -196,24 +198,11 @@ class CashController extends Controller
             )
         );
 
+        $salesOrderMultiPaymentEnabled = $this->isSalesOrderMultiPaymentEnabled($companyId);
+
         $documentsWithItems = [];
         foreach ($this->cashMovementService->listSessionCommercialDocuments($companyId, $sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES) as $doc) {
-            $documentsWithItems[] = [
-                'id' => (int) $doc->id,
-                'document_number' => $doc->document_number,
-                'document_kind' => $doc->document_kind,
-                'document_kind_label' => $doc->document_kind_label,
-                'customer_name' => $doc->customer_name,
-                'customer_vehicle_id' => $doc->customer_vehicle_id !== null ? (int) $doc->customer_vehicle_id : null,
-                'vehicle_plate_snapshot' => $doc->vehicle_plate_snapshot !== null ? (string) $doc->vehicle_plate_snapshot : null,
-                'vehicle_brand_snapshot' => $doc->vehicle_brand_snapshot !== null ? (string) $doc->vehicle_brand_snapshot : null,
-                'vehicle_model_snapshot' => $doc->vehicle_model_snapshot !== null ? (string) $doc->vehicle_model_snapshot : null,
-                'payment_method_name' => $doc->payment_method_name,
-                'total' => round((float) $doc->total, 2),
-                'status' => $doc->status,
-                'created_at' => $doc->created_at,
-                'user_name' => $doc->user_name,
-                'items' => array_map(function ($item) {
+            $documentItems = array_map(function ($item) {
                     $qty = round((float) data_get($item, 'qty', 0), 3);
                     $unitPrice = round((float) data_get($item, 'unit_price', 0), 2);
                     $lineSubtotal = round((float) data_get($item, 'line_subtotal', 0), 2);
@@ -246,11 +235,65 @@ class CashController extends Controller
                         'margin_percent_commercial' => $costMeta['margin_percent_commercial'],
                         'margin_source' => $costMeta['margin_source'],
                     ];
-                }, $this->cashMovementService->listDocumentItems((int) $doc->id, $companyId)),
+                }, $this->cashMovementService->listDocumentItems((int) $doc->id, $companyId));
+
+            $baseDocument = [
+                'id' => (int) $doc->id,
+                'document_number' => $doc->document_number,
+                'document_kind' => $doc->document_kind,
+                'document_kind_label' => $doc->document_kind_label,
+                'customer_name' => $doc->customer_name,
+                'customer_vehicle_id' => $doc->customer_vehicle_id !== null ? (int) $doc->customer_vehicle_id : null,
+                'vehicle_plate_snapshot' => $doc->vehicle_plate_snapshot !== null ? (string) $doc->vehicle_plate_snapshot : null,
+                'vehicle_brand_snapshot' => $doc->vehicle_brand_snapshot !== null ? (string) $doc->vehicle_brand_snapshot : null,
+                'vehicle_model_snapshot' => $doc->vehicle_model_snapshot !== null ? (string) $doc->vehicle_model_snapshot : null,
+                'payment_method_name' => $doc->payment_method_name,
+                'total' => round((float) $doc->total, 2),
+                'status' => $doc->status,
+                'created_at' => $doc->created_at,
+                'user_name' => $doc->user_name,
+                'items' => $documentItems,
             ];
+
+            $paymentBreakdown = $salesOrderMultiPaymentEnabled && strtoupper((string) ($doc->document_kind ?? '')) === 'SALES_ORDER'
+                ? $this->extractPaymentBreakdownFromMetadata($doc->metadata ?? null, (float) ($doc->total ?? 0))
+                : [];
+
+            if (count($paymentBreakdown) === 0) {
+                $documentsWithItems[] = $baseDocument;
+                continue;
+            }
+
+            $documentTotal = max(0.0, (float) ($doc->total ?? 0));
+            foreach ($paymentBreakdown as $split) {
+                $splitAmount = (float) ($split['amount'] ?? 0);
+                $ratio = $documentTotal > 0 ? ($splitAmount / $documentTotal) : 0.0;
+
+                $splitItems = array_map(function (array $itemRow) use ($ratio): array {
+                    return [
+                        ...$itemRow,
+                        'quantity' => round((float) ($itemRow['quantity'] ?? 0), 3),
+                        'line_subtotal' => round((float) ($itemRow['line_subtotal'] ?? 0) * $ratio, 2),
+                        'line_total' => round((float) ($itemRow['line_total'] ?? 0) * $ratio, 2),
+                        'cost_total' => round((float) ($itemRow['cost_total'] ?? 0) * $ratio, 2),
+                        'margin_total' => round((float) ($itemRow['margin_total'] ?? 0) * $ratio, 2),
+                        'margin_total_net' => round((float) ($itemRow['margin_total_net'] ?? 0) * $ratio, 2),
+                        'margin_total_commercial' => round((float) ($itemRow['margin_total_commercial'] ?? 0) * $ratio, 2),
+                    ];
+                }, $documentItems);
+
+                $documentsWithItems[] = [
+                    ...$baseDocument,
+                    'payment_method_name' => (string) ($split['payment_method_name'] ?? ($baseDocument['payment_method_name'] ?? '-')),
+                    'total' => round($splitAmount, 2),
+                    'items' => $splitItems,
+                ];
+            }
         }
 
-        $paymentMethodBreakdown = $this->cashSessionService->listSessionSalesByPaymentMethod($sessionId, $companyId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
+        $paymentMethodBreakdown = $salesOrderMultiPaymentEnabled
+            ? $this->buildPaymentBreakdownFromDocuments($documentsWithItems)
+            : $this->cashSessionService->listSessionSalesByPaymentMethod($sessionId, $companyId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
 
         return response()->json([
             'session' => [
@@ -460,32 +503,127 @@ class CashController extends Controller
             ];
         }
 
-        $estimatedMarginRate = 0.22;
-        $maxEstimatedMarginRate = 0.35;
-
-        $targetMargin = $lineRevenueSafe * $estimatedMarginRate;
-        $maxMargin = $lineRevenueSafe * $maxEstimatedMarginRate;
-        $marginNet = min(max(0.0, $targetMargin), max(0.0, $maxMargin));
-        $costTotalNet = max(0.0, $lineRevenueSafe - $marginNet);
-        $costTotalCommercial = $costTotalNet * $commercialCostFactor;
-
-        $referenceUnitPrice = $qtySafe > 0 ? ($lineRevenueSafe / $qtySafe) : max(0.0, $unitPrice);
-        $estimatedUnitCost = $qtySafe > 0 ? ($costTotalCommercial / $qtySafe) : ($referenceUnitPrice * (1 - $estimatedMarginRate));
-        $marginNetPct = $lineRevenueSafe > 0 ? ($marginNet / $lineRevenueSafe) * 100 : 0.0;
-        $marginCommercial = $lineTotalSafe - $costTotalCommercial;
-        $marginCommercialPct = $lineTotalSafe > 0 ? ($marginCommercial / $lineTotalSafe) * 100 : 0.0;
+        $marginNet = $lineRevenueSafe;
+        $marginNetPct = $lineRevenueSafe > 0 ? 100.0 : 0.0;
+        $marginCommercial = $lineTotalSafe;
+        $marginCommercialPct = $lineTotalSafe > 0 ? 100.0 : 0.0;
 
         return [
-            'unit_cost' => round(max(0.0, $estimatedUnitCost), 4),
-            'cost_total' => round($costTotalCommercial, 2),
+            'unit_cost' => 0.0,
+            'cost_total' => 0.0,
             'margin_total' => round($marginNet, 2),
             'margin_percent' => round($marginNetPct, 2),
             'margin_total_net' => round($marginNet, 2),
             'margin_percent_net' => round($marginNetPct, 2),
             'margin_total_commercial' => round($marginCommercial, 2),
             'margin_percent_commercial' => round($marginCommercialPct, 2),
-            'margin_source' => 'ESTIMATED',
+            'margin_source' => 'REAL',
         ];
+    }
+
+    private function isSalesOrderMultiPaymentEnabled(int $companyId): bool
+    {
+        return DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->whereRaw('UPPER(feature_code) = ?', [self::SALES_ORDER_MULTI_PAYMENT_FEATURE_CODE])
+            ->where('is_enabled', true)
+            ->exists();
+    }
+
+    private function extractPaymentBreakdownFromMetadata($metadataRaw, float $documentTotal): array
+    {
+        $metadata = [];
+        if (is_array($metadataRaw)) {
+            $metadata = $metadataRaw;
+        } elseif (is_string($metadataRaw) && trim($metadataRaw) !== '') {
+            $decoded = json_decode($metadataRaw, true);
+            $metadata = is_array($decoded) ? $decoded : [];
+        }
+
+        $rows = is_array($metadata['payment_breakdown'] ?? null) ? $metadata['payment_breakdown'] : [];
+        $normalized = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $amount = round((float) ($row['amount'] ?? 0), 2);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $name = trim((string) ($row['payment_method_name'] ?? $row['method_name'] ?? $row['name'] ?? ''));
+            if ($name === '') {
+                $methodId = isset($row['payment_method_id']) ? (int) $row['payment_method_id'] : 0;
+                $name = $methodId > 0 ? ('Metodo #' . $methodId) : 'Metodo de pago';
+            }
+
+            $normalized[] = [
+                'payment_method_name' => $name,
+                'amount' => $amount,
+            ];
+        }
+
+        if (count($normalized) <= 1) {
+            return [];
+        }
+
+        $totalBreakdown = array_reduce($normalized, static fn (float $carry, array $row): float => $carry + (float) $row['amount'], 0.0);
+        if ($documentTotal <= 0 || $totalBreakdown <= 0) {
+            return [];
+        }
+
+        // Normalize split total to document total to avoid rounding drift in UI totals.
+        $factor = $documentTotal / $totalBreakdown;
+        foreach ($normalized as &$row) {
+            $row['amount'] = round((float) $row['amount'] * $factor, 2);
+        }
+        unset($row);
+
+        return $normalized;
+    }
+
+    private function buildPaymentBreakdownFromDocuments(array $documents): array
+    {
+        $grouped = [];
+
+        foreach ($documents as $doc) {
+            $name = trim((string) ($doc['payment_method_name'] ?? ''));
+            if ($name === '') {
+                $name = 'Sin método de pago';
+            }
+
+            if (!isset($grouped[$name])) {
+                $grouped[$name] = [
+                    'payment_method_id' => 0,
+                    'payment_method_code' => strtoupper(substr(preg_replace('/[^A-Z0-9]/i', '', $name) ?? 'PM', 0, 12)) ?: 'PM',
+                    'payment_method_name' => $name,
+                    'document_ids' => [],
+                    'total_amount' => 0.0,
+                ];
+            }
+
+            $grouped[$name]['document_ids'][(int) ($doc['id'] ?? 0)] = true;
+            $grouped[$name]['total_amount'] += (float) ($doc['total'] ?? 0);
+        }
+
+        $rows = [];
+        foreach ($grouped as $entry) {
+            $rows[] = [
+                'payment_method_id' => $entry['payment_method_id'],
+                'payment_method_code' => $entry['payment_method_code'],
+                'payment_method_name' => $entry['payment_method_name'],
+                'document_count' => count($entry['document_ids']),
+                'total_amount' => round((float) $entry['total_amount'], 2),
+            ];
+        }
+
+        usort($rows, static function (array $a, array $b): int {
+            return strcasecmp((string) ($a['payment_method_name'] ?? ''), (string) ($b['payment_method_name'] ?? ''));
+        });
+
+        return $rows;
     }
 
     private function recalcExpectedBalance(int $sessionId): void

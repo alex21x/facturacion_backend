@@ -9,6 +9,8 @@ use App\Services\Sales\Documents\SalesDocumentException;
 
 class PrepareCreateCommercialDocumentUseCase
 {
+    private const FEATURE_ALLOW_RECEIPT_RUC = 'SALES_ALLOW_RECEIPT_WITH_RUC';
+
     public function __construct(
         private SalesBusinessRuleService $salesBusinessRuleService,
         private SalesDocumentValidationService $salesDocumentValidationService,
@@ -93,6 +95,14 @@ class PrepareCreateCommercialDocumentUseCase
             && !$this->salesBusinessRuleService->customerHasRucIdentity($customerIdentity)
         ) {
             throw new SalesDocumentException('Para este tipo de documento el cliente debe tener RUC valido (11 digitos).');
+        }
+
+        $allowReceiptRuc = $this->isCompanyFeatureEnabled($companyId, self::FEATURE_ALLOW_RECEIPT_RUC, false);
+        if (
+            $this->salesBusinessRuleService->documentKindDisallowsRucCustomer($documentKind, $allowReceiptRuc)
+            && $this->salesBusinessRuleService->customerHasRucIdentity($customerIdentity)
+        ) {
+            throw new SalesDocumentException('Para boleta no se permite cliente con RUC. Active el flag de empresa si desea habilitar boleta con RUC.');
         }
 
         $selectedVehicleId = isset($payload['customer_vehicle_id']) ? (int) $payload['customer_vehicle_id'] : 0;
@@ -220,5 +230,24 @@ class PrepareCreateCommercialDocumentUseCase
             ['id' => 9, 'code' => '09', 'description' => 'Disminucion en el valor'],
             ['id' => 10, 'code' => '10', 'description' => 'Otros conceptos'],
         ];
+    }
+
+    private function isCompanyFeatureEnabled(int $companyId, string $featureCode, bool $defaultValue): bool
+    {
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+        if ($normalizedFeatureCode === '') {
+            return $defaultValue;
+        }
+
+        $row = $this->salesLookupService->loadCompanyFeatureToggles($companyId)
+            ->first(function ($toggle) use ($normalizedFeatureCode) {
+                return strtoupper(trim((string) ($toggle->feature_code ?? ''))) === $normalizedFeatureCode;
+            });
+
+        if (!$row) {
+            return $defaultValue;
+        }
+
+        return (bool) ($row->is_enabled ?? false);
     }
 }

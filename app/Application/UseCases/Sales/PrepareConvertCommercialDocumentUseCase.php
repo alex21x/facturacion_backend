@@ -11,6 +11,8 @@ use Carbon\Carbon;
 
 class PrepareConvertCommercialDocumentUseCase
 {
+    private const FEATURE_ALLOW_RECEIPT_RUC = 'SALES_ALLOW_RECEIPT_WITH_RUC';
+
     public function __construct(
         private SalesDocumentConversionService $salesDocumentConversionService,
         private SalesBusinessRuleService $salesBusinessRuleService,
@@ -165,11 +167,20 @@ class PrepareConvertCommercialDocumentUseCase
             $resolvedPaymentMethodId = $this->salesLookupService->resolveFallbackPaymentMethodId($companyId);
         }
 
+        $sourceCustomerIdentity = $this->salesLookupService->fetchCustomerIdentityForSalesValidation($companyId, (int) $source->customer_id);
         if ($this->salesBusinessRuleService->documentKindRequiresRucCustomer($targetDocumentKind)) {
-            $sourceCustomerIdentity = $this->salesLookupService->fetchCustomerIdentityForSalesValidation($companyId, (int) $source->customer_id);
             if (!$sourceCustomerIdentity || !$this->salesBusinessRuleService->customerHasRucIdentity($sourceCustomerIdentity)) {
                 throw new SalesDocumentException('Para convertir a este tipo de documento el cliente debe tener RUC valido (11 digitos).');
             }
+        }
+
+        $allowReceiptRuc = $this->isCompanyFeatureEnabled($companyId, self::FEATURE_ALLOW_RECEIPT_RUC, false);
+        if (
+            $this->salesBusinessRuleService->documentKindDisallowsRucCustomer($targetDocumentKind, $allowReceiptRuc)
+            && $sourceCustomerIdentity
+            && $this->salesBusinessRuleService->customerHasRucIdentity($sourceCustomerIdentity)
+        ) {
+            throw new SalesDocumentException('Para convertir a boleta no se permite cliente con RUC. Active el flag de empresa si desea habilitar boleta con RUC.');
         }
 
         $itemsPayload = $sourceItems->map(function ($item) use ($lotsByItem, $validProductMap) {
@@ -275,6 +286,25 @@ class PrepareConvertCommercialDocumentUseCase
         return [
             'forward_payload' => $forwardPayload,
         ];
+    }
+
+    private function isCompanyFeatureEnabled(int $companyId, string $featureCode, bool $defaultValue): bool
+    {
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+        if ($normalizedFeatureCode === '') {
+            return $defaultValue;
+        }
+
+        $row = $this->salesLookupService->loadCompanyFeatureToggles($companyId)
+            ->first(function ($toggle) use ($normalizedFeatureCode) {
+                return strtoupper(trim((string) ($toggle->feature_code ?? ''))) === $normalizedFeatureCode;
+            });
+
+        if (!$row) {
+            return $defaultValue;
+        }
+
+        return (bool) ($row->is_enabled ?? false);
     }
 
     private function resolveIssueAtForStorage($issueAt)

@@ -1806,9 +1806,6 @@ HTML;
             ?? $docMetadata['customerPhone']
             ?? ''
         ));
-        $customerPhoneRow = $workshopMultiVehicleEnabled && $customerPhone !== ''
-            ? '<div class="info-row"><div class="info-label">TEL.:</div><div class="info-value">' . $customerPhone . '</div></div>'
-            : '';
         $documentNotes = trim((string) ($doc['notes'] ?? ''));
         $documentNotesRow = $documentNotes !== ''
             ? '<div class="info-row"><div class="info-label">OBSERVACIONES:</div><div class="info-value">' . $this->escapeHtml($documentNotes) . '</div></div>'
@@ -1823,6 +1820,9 @@ HTML;
         $workshopMultiVehicleEnabled = $companyId > 0
             ? $this->isWorkshopMultiVehicleEnabledForContext($companyId, $branchId)
             : false;
+        $customerPhoneRow = $workshopMultiVehicleEnabled && $customerPhone !== ''
+            ? '<div class="info-row"><div class="info-label">TEL.:</div><div class="info-value">' . $customerPhone . '</div></div>'
+            : '';
         $vehiclePlate = trim((string) (
             $doc['vehiclePlateSnapshot']
             ?? $docMetadata['vehicle_plate']

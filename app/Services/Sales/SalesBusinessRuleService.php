@@ -23,6 +23,17 @@ class SalesBusinessRuleService
         return in_array(strtoupper(trim($documentKind)), ['INVOICE', 'CREDIT_NOTE', 'DEBIT_NOTE'], true);
     }
 
+    public function documentKindDisallowsRucCustomer(string $documentKind, bool $allowReceiptRuc): bool
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized !== 'RECEIPT') {
+            return false;
+        }
+
+        return !$allowReceiptRuc;
+    }
+
     public function customerHasRucIdentity($customer): bool
     {
         if (!$customer) {

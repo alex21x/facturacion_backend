@@ -820,10 +820,10 @@ class SalesLookupRepository
                 DB::raw('COALESCE(doc_conversion_flags.has_order_conversion, 0) > 0 as has_order_conversion'),
                 DB::raw('doc_item_totals.document_id IS NOT NULL as has_items'),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.customer_vehicle_id AS TEXT)), ''), (d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_plate_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_brand_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_model_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
@@ -922,10 +922,10 @@ class SalesLookupRepository
                 ) as source_document_number"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.customer_vehicle_id AS TEXT)), ''), (d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_plate_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_brand_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_model_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
             ->where('d.company_id', $companyId);
@@ -986,10 +986,10 @@ class SalesLookupRepository
                         LIMIT 1
                     )
                 ) as origin_seller_user_name"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
-                DB::raw("NULLIF(COALESCE((d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.customer_vehicle_id AS TEXT)), ''), (d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_plate_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_brand_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
+                DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_model_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
                 'di.product_id',
                 DB::raw("COALESCE(di.description, p.name, 'SIN DESCRIPCION') as product_description"),

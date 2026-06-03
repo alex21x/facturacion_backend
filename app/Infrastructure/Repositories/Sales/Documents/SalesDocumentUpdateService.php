@@ -58,7 +58,7 @@ class SalesDocumentUpdateService
 
         $featureBranchId = $document->branch_id !== null ? (int) $document->branch_id : null;
         $allowDraftEdit = $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $featureBranchId, 'SALES_ALLOW_DRAFT_EDIT', true);
-        $workshopMultiVehicleEnabled = $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $featureBranchId, 'WORKSHOP_MULTI_VEHICLE', false)
+        $workshopMultiVehicleEnabled = $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $featureBranchId, 'SALES_WORKSHOP_MULTI_VEHICLE', false)
             && $this->tableExistsBySchemaAndName('sales', 'customer_vehicles');
 
         if ($documentStatus === 'DRAFT') {
@@ -156,7 +156,8 @@ class SalesDocumentUpdateService
                 $currentMetadata,
                 $documentStatus,
                 $isTributaryDocument,
-                $documentKind
+                $documentKind,
+                $workshopMultiVehicleEnabled
             ) {
                 $totals = [
                     'subtotal' => (float) $document->subtotal,

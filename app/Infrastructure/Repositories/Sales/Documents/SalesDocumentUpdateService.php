@@ -493,16 +493,23 @@ class SalesDocumentUpdateService
                 $customerIdForEdit = array_key_exists('customer_id', $payload)
                     ? (int) $payload['customer_id']
                     : (int) $document->customer_id;
-                $resolvedCustomerVehicleId = $document->customer_vehicle_id !== null ? (int) $document->customer_vehicle_id : null;
-                $resolvedVehiclePlateSnapshot = $document->vehicle_plate_snapshot !== null
-                    ? trim((string) $document->vehicle_plate_snapshot)
-                    : trim((string) ($currentMetadata['vehicle_plate'] ?? ''));
-                $resolvedVehicleBrandSnapshot = $document->vehicle_brand_snapshot !== null
-                    ? trim((string) $document->vehicle_brand_snapshot)
-                    : trim((string) ($currentMetadata['vehicle_brand'] ?? ''));
-                $resolvedVehicleModelSnapshot = $document->vehicle_model_snapshot !== null
-                    ? trim((string) $document->vehicle_model_snapshot)
-                    : trim((string) ($currentMetadata['vehicle_model'] ?? ''));
+                $documentVehicleId = property_exists($document, 'customer_vehicle_id')
+                    ? $document->customer_vehicle_id
+                    : ($currentMetadata['customer_vehicle_id'] ?? $currentMetadata['customerVehicleId'] ?? null);
+                $documentVehiclePlate = property_exists($document, 'vehicle_plate_snapshot')
+                    ? $document->vehicle_plate_snapshot
+                    : ($currentMetadata['vehicle_plate'] ?? $currentMetadata['vehiclePlateSnapshot'] ?? null);
+                $documentVehicleBrand = property_exists($document, 'vehicle_brand_snapshot')
+                    ? $document->vehicle_brand_snapshot
+                    : ($currentMetadata['vehicle_brand'] ?? $currentMetadata['vehicleBrand'] ?? null);
+                $documentVehicleModel = property_exists($document, 'vehicle_model_snapshot')
+                    ? $document->vehicle_model_snapshot
+                    : ($currentMetadata['vehicle_model'] ?? $currentMetadata['vehicleModel'] ?? null);
+
+                $resolvedCustomerVehicleId = $documentVehicleId !== null ? (int) $documentVehicleId : null;
+                $resolvedVehiclePlateSnapshot = trim((string) ($documentVehiclePlate ?? ''));
+                $resolvedVehicleBrandSnapshot = trim((string) ($documentVehicleBrand ?? ''));
+                $resolvedVehicleModelSnapshot = trim((string) ($documentVehicleModel ?? ''));
 
                 $hasCustomerVehicleUpdate = array_key_exists('customer_vehicle_id', $payload);
                 if ($workshopMultiVehicleEnabled && $hasCustomerVehicleUpdate) {

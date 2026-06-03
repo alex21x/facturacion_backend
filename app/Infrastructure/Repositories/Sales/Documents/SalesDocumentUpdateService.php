@@ -163,6 +163,13 @@ class SalesDocumentUpdateService
                     'total' => (float) $document->total,
                 ];
 
+                $requestedPaymentsProvided = array_key_exists('payments', $payload) && is_array($payload['payments']);
+                $requestedPayments = $requestedPaymentsProvided
+                    ? $this->normalizePaymentsPayload($payload['payments'])
+                    : [];
+                $currentPayments = $this->loadCurrentPayments($documentId);
+                $shouldSyncPayments = $requestedPaymentsProvided || !empty($payload['items']);
+
                 if (!empty($payload['items'])) {
                     $productIds = collect($payload['items'])
                         ->pluck('product_id')
@@ -317,6 +324,7 @@ class SalesDocumentUpdateService
                     }
 
                     $this->documentRepository->deleteItemsAndPayments($documentId);
+                    $currentPayments = [];
 
                     $stockDirection = CommercialDocumentPolicy::stockDirectionForDocument($documentKind);
                     $lineNo = 1;
@@ -451,12 +459,43 @@ class SalesDocumentUpdateService
                     ];
                 }
 
+                if (empty($payload['items']) && $shouldSyncPayments) {
+                    $this->paymentRepository->deleteByDocumentId($documentId);
+                }
+
+                $effectivePayments = $shouldSyncPayments
+                    ? ($requestedPaymentsProvided ? $requestedPayments : $currentPayments)
+                    : $currentPayments;
+
+                if ($documentStatus === 'ISSUED' && $shouldSyncPayments && empty($effectivePayments)) {
+                    $fallbackPaymentMethodId = array_key_exists('payment_method_id', $payload)
+                        ? ($payload['payment_method_id'] !== null ? (int) $payload['payment_method_id'] : null)
+                        : ($document->payment_method_id !== null ? (int) $document->payment_method_id : null);
+
+                    if ($fallbackPaymentMethodId !== null && $fallbackPaymentMethodId > 0 && (float) $totals['total'] > 0) {
+                        $effectivePayments = [[
+                            'payment_method_id' => $fallbackPaymentMethodId,
+                            'amount' => round((float) $totals['total'], 2),
+                            'status' => 'PAID',
+                            'paid_at' => now()->toDateTimeString(),
+                            'due_at' => null,
+                            'notes' => null,
+                        ]];
+                    }
+                }
+
+                $paymentSummary = $this->summarizePaymentsForUpdate($effectivePayments);
+                $paidTotal = $paymentSummary['paid_total'];
+                $balanceDue = max(0.0, round((float) $totals['total'] - $paidTotal, 2));
+
                 $metadataUpdates = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
                 $updatedMetadata = array_merge($currentMetadata, $metadataUpdates, [
                     'cash_register_id' => $cashRegisterId !== null ? (int) $cashRegisterId : null,
                     'last_manual_update_by' => (int) $authUser->id,
                     'last_manual_update_at' => now()->toDateTimeString(),
                 ]);
+
+                $updatedMetadata['payment_breakdown'] = $this->buildPaymentBreakdown($effectivePayments);
 
                 if (array_key_exists('document_kind', $payload) || array_key_exists('document_kind_id', $payload)) {
                     $requestedKind = strtoupper(trim((string) ($payload['document_kind'] ?? $document->document_kind)));
@@ -495,11 +534,30 @@ class SalesDocumentUpdateService
                     $changes['tax_total'] = $totals['tax_total'];
                     $changes['discount_total'] = $totals['discount_total'];
                     $changes['total'] = $totals['total'];
-                    $changes['paid_total'] = 0;
-                    $changes['balance_due'] = $totals['total'];
+                }
+
+                if (!empty($payload['items']) || $shouldSyncPayments) {
+                    $changes['paid_total'] = $paidTotal;
+                    $changes['balance_due'] = $balanceDue;
                 }
 
                 $this->documentRepository->update($documentId, $companyId, $changes);
+
+                if ($shouldSyncPayments) {
+                    $this->persistPayments($documentId, $effectivePayments);
+                    $this->syncCashMovementsForEditedDocument(
+                        $companyId,
+                        $documentId,
+                        $branchId !== null ? (int) $branchId : null,
+                        $cashRegisterId !== null ? (int) $cashRegisterId : null,
+                        (string) $document->document_kind,
+                        (string) $document->series,
+                        (int) $document->number,
+                        $paidTotal,
+                        (int) $authUser->id,
+                        $effectivePayments
+                    );
+                }
 
                 return [
                     'id' => $documentId,
@@ -725,6 +783,254 @@ class SalesDocumentUpdateService
         }
     }
 
+    private function normalizePaymentsPayload(array $payments): array
+    {
+        return collect($payments)
+            ->filter(fn ($row) => is_array($row))
+            ->map(function (array $row) {
+                $status = strtoupper(trim((string) ($row['status'] ?? 'PAID')));
+                if (!in_array($status, ['PENDING', 'PAID', 'CANCELED'], true)) {
+                    $status = 'PAID';
+                }
+
+                return [
+                    'payment_method_id' => isset($row['payment_method_id']) ? (int) $row['payment_method_id'] : 0,
+                    'amount' => round((float) ($row['amount'] ?? 0), 2),
+                    'status' => $status,
+                    'paid_at' => $row['paid_at'] ?? null,
+                    'due_at' => $row['due_at'] ?? null,
+                    'notes' => isset($row['notes']) && trim((string) $row['notes']) !== ''
+                        ? trim((string) $row['notes'])
+                        : null,
+                ];
+            })
+            ->filter(fn (array $row) => $row['payment_method_id'] > 0 && $row['amount'] > 0)
+            ->values()
+            ->all();
+    }
+
+    private function loadCurrentPayments(int $documentId): array
+    {
+        return DB::table('sales.commercial_document_payments')
+            ->where('document_id', $documentId)
+            ->orderBy('id')
+            ->get([
+                'payment_method_id',
+                'amount',
+                'status',
+                'paid_at',
+                'due_at',
+                'notes',
+            ])
+            ->map(function ($row) {
+                return [
+                    'payment_method_id' => (int) ($row->payment_method_id ?? 0),
+                    'amount' => round((float) ($row->amount ?? 0), 2),
+                    'status' => strtoupper(trim((string) ($row->status ?? 'PENDING'))),
+                    'paid_at' => $row->paid_at,
+                    'due_at' => $row->due_at,
+                    'notes' => $row->notes,
+                ];
+            })
+            ->filter(fn (array $row) => $row['payment_method_id'] > 0 && $row['amount'] > 0)
+            ->values()
+            ->all();
+    }
+
+    private function summarizePaymentsForUpdate(array $payments): array
+    {
+        $paidTotal = collect($payments)
+            ->filter(function (array $row) {
+                return strtoupper(trim((string) ($row['status'] ?? 'PENDING'))) === 'PAID';
+            })
+            ->sum('amount');
+
+        return [
+            'paid_total' => round((float) $paidTotal, 2),
+        ];
+    }
+
+    private function buildPaymentBreakdown(array $payments): array
+    {
+        $methodIds = collect($payments)
+            ->map(fn (array $row) => (int) ($row['payment_method_id'] ?? 0))
+            ->filter(fn (int $methodId) => $methodId > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $methodMap = [];
+        if (!empty($methodIds)) {
+            $methodMap = DB::table('master.payment_types')
+                ->whereIn('id', $methodIds)
+                ->pluck('name', 'id')
+                ->map(fn ($name) => trim((string) $name))
+                ->all();
+        }
+
+        return collect($payments)
+            ->map(function (array $payment) use ($methodMap) {
+                $methodId = (int) ($payment['payment_method_id'] ?? 0);
+
+                return [
+                    'payment_method_id' => $methodId > 0 ? $methodId : null,
+                    'payment_method_name' => $methodId > 0
+                        ? ((string) ($methodMap[$methodId] ?? ('Metodo #' . $methodId)))
+                        : null,
+                    'amount' => round((float) ($payment['amount'] ?? 0), 2),
+                    'status' => strtoupper(trim((string) ($payment['status'] ?? 'PENDING'))),
+                    'paid_at' => $payment['paid_at'] ?? null,
+                    'due_at' => $payment['due_at'] ?? null,
+                    'notes' => $payment['notes'] ?? null,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function persistPayments(int $documentId, array $payments): void
+    {
+        if (empty($payments)) {
+            return;
+        }
+
+        $timestamp = now();
+        $rows = collect($payments)
+            ->map(function (array $row) use ($documentId, $timestamp) {
+                return [
+                    'document_id' => $documentId,
+                    'payment_method_id' => (int) $row['payment_method_id'],
+                    'amount' => round((float) $row['amount'], 2),
+                    'due_at' => $row['due_at'] ?? null,
+                    'paid_at' => $row['paid_at'] ?? null,
+                    'status' => strtoupper(trim((string) ($row['status'] ?? 'PENDING'))),
+                    'notes' => $row['notes'] ?? null,
+                    'created_at' => $timestamp,
+                ];
+            })
+            ->all();
+
+        $this->paymentRepository->createBatch($rows);
+    }
+
+    private function syncCashMovementsForEditedDocument(
+        int $companyId,
+        int $documentId,
+        ?int $branchId,
+        ?int $cashRegisterId,
+        string $documentKind,
+        string $series,
+        int $number,
+        float $paidTotal,
+        int $userId,
+        array $payments
+    ): void {
+        if (!$this->tableExists('sales.cash_movements') || !$this->tableExists('sales.cash_sessions')) {
+            return;
+        }
+
+        $existingRows = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->orderBy('id')
+            ->get();
+
+        if ($existingRows->isEmpty()) {
+            return;
+        }
+
+        $sessionId = (int) ($existingRows->first()->cash_session_id ?? 0);
+        if ($sessionId <= 0) {
+            return;
+        }
+
+        DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->delete();
+
+        if ($paidTotal > 0) {
+            $paidBreakdown = collect($payments)
+                ->filter(function (array $row) {
+                    return strtoupper(trim((string) ($row['status'] ?? 'PENDING'))) === 'PAID'
+                        && (float) ($row['amount'] ?? 0) > 0;
+                })
+                ->groupBy(fn (array $row) => (int) ($row['payment_method_id'] ?? 0))
+                ->map(function ($group, $methodId) {
+                    return [
+                        'payment_method_id' => (int) $methodId > 0 ? (int) $methodId : null,
+                        'amount' => round((float) $group->sum('amount'), 2),
+                    ];
+                })
+                ->filter(fn (array $row) => (float) $row['amount'] > 0)
+                ->values();
+
+            if ($paidBreakdown->isEmpty()) {
+                $paidBreakdown = collect([[
+                    'payment_method_id' => null,
+                    'amount' => round($paidTotal, 2),
+                ]]);
+            }
+
+            $labelMap = [
+                'INVOICE' => 'Factura',
+                'RECEIPT' => 'Boleta',
+                'CREDIT_NOTE' => 'Nota Credito',
+                'DEBIT_NOTE' => 'Nota Debito',
+                'QUOTATION' => 'Cotizacion',
+                'SALES_ORDER' => 'Pedido',
+            ];
+            $description = 'Cobro doc ' . ($labelMap[strtoupper(trim($documentKind))] ?? $documentKind) . ' ' . $series . '-' . $number;
+            $movementAt = now();
+
+            $insertRows = $paidBreakdown->map(function (array $row) use ($companyId, $branchId, $cashRegisterId, $sessionId, $description, $documentId, $userId, $movementAt) {
+                return [
+                    'company_id' => $companyId,
+                    'branch_id' => $branchId,
+                    'cash_register_id' => $cashRegisterId,
+                    'cash_session_id' => $sessionId,
+                    'movement_type' => 'INCOME',
+                    'payment_method_id' => $row['payment_method_id'],
+                    'amount' => (float) $row['amount'],
+                    'description' => $description,
+                    'notes' => $description,
+                    'ref_type' => 'COMMERCIAL_DOCUMENT',
+                    'ref_id' => $documentId,
+                    'created_by' => $userId,
+                    'user_id' => $userId,
+                    'movement_at' => $movementAt,
+                    'created_at' => $movementAt,
+                ];
+            })->all();
+
+            DB::table('sales.cash_movements')->insert($insertRows);
+        }
+
+        $totalIn = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->sum('amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
+            ->sum('amount');
+
+        $openingBalance = (float) (DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->value('opening_balance') ?? 0);
+
+        DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->update([
+                'expected_balance' => round($openingBalance + $totalIn - $totalOut, 4),
+            ]);
+    }
+
     private function inventorySettingsForCompany(int $companyId): array
     {
         $row = DB::table('inventory.inventory_settings')->where('company_id', $companyId)->first();
@@ -738,6 +1044,14 @@ class SalesDocumentUpdateService
         return [
             'allow_negative_stock' => (bool) $row->allow_negative_stock,
         ];
+    }
+
+    private function tableExists(string $qualifiedTable): bool
+    {
+        [$schema, $table] = strpos($qualifiedTable, '.') === false ? ['public', $qualifiedTable] : explode('.', $qualifiedTable, 2);
+        $row = DB::selectOne('select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present', [$schema, $table]);
+
+        return isset($row->present) && (bool) $row->present;
     }
 
 }

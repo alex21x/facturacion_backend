@@ -1098,6 +1098,33 @@ class SalesController extends Controller
             }
         }
 
+        $payments = DB::table('sales.commercial_document_payments as p')
+            ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'p.payment_method_id')
+            ->where('p.document_id', (int) $doc->id)
+            ->orderBy('p.id')
+            ->get([
+                'p.payment_method_id',
+                'p.amount',
+                'p.status',
+                'p.paid_at',
+                'p.due_at',
+                'p.notes',
+                'pm.name as payment_method_name',
+            ])
+            ->map(function ($row) {
+                return [
+                    'payment_method_id' => $row->payment_method_id !== null ? (int) $row->payment_method_id : null,
+                    'payment_method_name' => $row->payment_method_name !== null ? trim((string) $row->payment_method_name) : null,
+                    'amount' => round((float) ($row->amount ?? 0), 2),
+                    'status' => strtoupper(trim((string) ($row->status ?? 'PENDING'))),
+                    'paid_at' => $row->paid_at !== null ? (string) $row->paid_at : null,
+                    'due_at' => $row->due_at !== null ? (string) $row->due_at : null,
+                    'notes' => $row->notes !== null ? trim((string) $row->notes) : null,
+                ];
+            })
+            ->values()
+            ->all();
+
         return response()->json([
             'data' => [
                 'id' => (int) $doc->id,
@@ -1127,6 +1154,7 @@ class SalesController extends Controller
                 'taxTotal' => (float) $taxTotal,
                 'grandTotal' => (float) $doc->total,
                 'metadata' => $docMetadata,
+                'payments' => $payments,
                 'vehiclePlateSnapshot' => $vehiclePlateSnapshot !== '' ? $vehiclePlateSnapshot : null,
                 'vehicleBrandSnapshot' => $vehicleBrandSnapshot !== '' ? $vehicleBrandSnapshot : null,
                 'vehicleModelSnapshot' => $vehicleModelSnapshot !== '' ? $vehicleModelSnapshot : null,

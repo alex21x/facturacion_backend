@@ -58,6 +58,8 @@ class SalesDocumentUpdateService
 
         $featureBranchId = $document->branch_id !== null ? (int) $document->branch_id : null;
         $allowDraftEdit = $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $featureBranchId, 'SALES_ALLOW_DRAFT_EDIT', true);
+        $workshopMultiVehicleEnabled = $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $featureBranchId, 'WORKSHOP_MULTI_VEHICLE', false)
+            && $this->tableExistsBySchemaAndName('sales', 'customer_vehicles');
 
         if ($documentStatus === 'DRAFT') {
             try {
@@ -488,12 +490,62 @@ class SalesDocumentUpdateService
                 $paidTotal = $paymentSummary['paid_total'];
                 $balanceDue = max(0.0, round((float) $totals['total'] - $paidTotal, 2));
 
+                $customerIdForEdit = array_key_exists('customer_id', $payload)
+                    ? (int) $payload['customer_id']
+                    : (int) $document->customer_id;
+                $resolvedCustomerVehicleId = $document->customer_vehicle_id !== null ? (int) $document->customer_vehicle_id : null;
+                $resolvedVehiclePlateSnapshot = $document->vehicle_plate_snapshot !== null
+                    ? trim((string) $document->vehicle_plate_snapshot)
+                    : trim((string) ($currentMetadata['vehicle_plate'] ?? ''));
+                $resolvedVehicleBrandSnapshot = $document->vehicle_brand_snapshot !== null
+                    ? trim((string) $document->vehicle_brand_snapshot)
+                    : trim((string) ($currentMetadata['vehicle_brand'] ?? ''));
+                $resolvedVehicleModelSnapshot = $document->vehicle_model_snapshot !== null
+                    ? trim((string) $document->vehicle_model_snapshot)
+                    : trim((string) ($currentMetadata['vehicle_model'] ?? ''));
+
+                $hasCustomerVehicleUpdate = array_key_exists('customer_vehicle_id', $payload);
+                if ($workshopMultiVehicleEnabled && $hasCustomerVehicleUpdate) {
+                    $requestedVehicleId = $payload['customer_vehicle_id'] !== null ? (int) $payload['customer_vehicle_id'] : 0;
+
+                    if ($requestedVehicleId > 0) {
+                        $vehicle = DB::table('sales.customer_vehicles')
+                            ->where('company_id', $companyId)
+                            ->where('customer_id', $customerIdForEdit)
+                            ->where('id', $requestedVehicleId)
+                            ->where('status', 1)
+                            ->select('id', 'plate', 'brand', 'model')
+                            ->first();
+
+                        if (!$vehicle) {
+                            throw new SalesDocumentException('El vehiculo seleccionado no pertenece al cliente o no esta activo.');
+                        }
+
+                        $resolvedCustomerVehicleId = (int) $vehicle->id;
+                        $resolvedVehiclePlateSnapshot = strtoupper(trim((string) ($vehicle->plate ?? '')));
+                        $resolvedVehicleBrandSnapshot = trim((string) ($vehicle->brand ?? ''));
+                        $resolvedVehicleModelSnapshot = trim((string) ($vehicle->model ?? ''));
+                    } else {
+                        $resolvedCustomerVehicleId = null;
+                        $resolvedVehiclePlateSnapshot = '';
+                        $resolvedVehicleBrandSnapshot = '';
+                        $resolvedVehicleModelSnapshot = '';
+                    }
+                }
+
                 $metadataUpdates = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
                 $updatedMetadata = array_merge($currentMetadata, $metadataUpdates, [
                     'cash_register_id' => $cashRegisterId !== null ? (int) $cashRegisterId : null,
                     'last_manual_update_by' => (int) $authUser->id,
                     'last_manual_update_at' => now()->toDateTimeString(),
                 ]);
+
+                if ($workshopMultiVehicleEnabled && $hasCustomerVehicleUpdate) {
+                    $updatedMetadata['customer_vehicle_id'] = $resolvedCustomerVehicleId;
+                    $updatedMetadata['vehicle_plate'] = $resolvedVehiclePlateSnapshot !== '' ? $resolvedVehiclePlateSnapshot : null;
+                    $updatedMetadata['vehicle_brand'] = $resolvedVehicleBrandSnapshot !== '' ? $resolvedVehicleBrandSnapshot : null;
+                    $updatedMetadata['vehicle_model'] = $resolvedVehicleModelSnapshot !== '' ? $resolvedVehicleModelSnapshot : null;
+                }
 
                 $updatedMetadata['payment_breakdown'] = $this->buildPaymentBreakdown($effectivePayments);
 
@@ -524,6 +576,21 @@ class SalesDocumentUpdateService
                     'notes' => array_key_exists('notes', $payload) ? ($payload['notes'] ?? null) : $document->notes,
                     'metadata' => json_encode($updatedMetadata),
                 ];
+
+                if ($workshopMultiVehicleEnabled && $hasCustomerVehicleUpdate) {
+                    if ($this->columnExistsBySchemaAndName('sales', 'commercial_documents', 'customer_vehicle_id')) {
+                        $changes['customer_vehicle_id'] = $resolvedCustomerVehicleId;
+                    }
+                    if ($this->columnExistsBySchemaAndName('sales', 'commercial_documents', 'vehicle_plate_snapshot')) {
+                        $changes['vehicle_plate_snapshot'] = $resolvedVehiclePlateSnapshot !== '' ? $resolvedVehiclePlateSnapshot : null;
+                    }
+                    if ($this->columnExistsBySchemaAndName('sales', 'commercial_documents', 'vehicle_brand_snapshot')) {
+                        $changes['vehicle_brand_snapshot'] = $resolvedVehicleBrandSnapshot !== '' ? $resolvedVehicleBrandSnapshot : null;
+                    }
+                    if ($this->columnExistsBySchemaAndName('sales', 'commercial_documents', 'vehicle_model_snapshot')) {
+                        $changes['vehicle_model_snapshot'] = $resolvedVehicleModelSnapshot !== '' ? $resolvedVehicleModelSnapshot : null;
+                    }
+                }
 
                 if (array_key_exists('document_kind_id', $payload) && $payload['document_kind_id'] !== null) {
                     $changes['document_kind_id'] = (int) $payload['document_kind_id'];
@@ -1052,6 +1119,23 @@ class SalesDocumentUpdateService
         $row = DB::selectOne('select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present', [$schema, $table]);
 
         return isset($row->present) && (bool) $row->present;
+    }
+
+    private function tableExistsBySchemaAndName(string $schema, string $table): bool
+    {
+        return DB::table('information_schema.tables')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->exists();
+    }
+
+    private function columnExistsBySchemaAndName(string $schema, string $table, string $column): bool
+    {
+        return DB::table('information_schema.columns')
+            ->where('table_schema', $schema)
+            ->where('table_name', $table)
+            ->where('column_name', $column)
+            ->exists();
     }
 
 }

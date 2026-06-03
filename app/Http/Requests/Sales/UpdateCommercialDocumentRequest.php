@@ -16,6 +16,7 @@ class UpdateCommercialDocumentRequest extends SalesDocumentKindFormRequest
             'cash_register_id' => 'nullable|integer|min:1',
             'due_at' => 'nullable|date',
             'customer_id' => 'nullable|integer|min:1',
+            'customer_vehicle_id' => 'nullable|integer|min:1',
             'currency_id' => 'nullable|integer|min:1',
             'payment_method_id' => 'nullable|integer|min:1',
             'payments' => 'nullable|array',

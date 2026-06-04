@@ -6,11 +6,13 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class SalesLookupRepository
 {
     private const DAY_START_SUFFIX = ' 00:00:00';
     private const DAY_END_SUFFIX = ' 23:59:59.999999';
+    private const DOCUMENT_KINDS_BOOTSTRAP_CACHE_TTL_SECONDS = 600;
 
     /** @var array<string, bool> */
     private array $tableExistsCache = [];
@@ -497,9 +499,19 @@ class SalesLookupRepository
 
     public function ensureDocumentKindsTable(): void
     {
-        DB::statement("CREATE SEQUENCE IF NOT EXISTS sales.document_kinds_id_seq START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1");
-        DB::statement("CREATE TABLE IF NOT EXISTS sales.document_kinds (id BIGINT PRIMARY KEY DEFAULT nextval('sales.document_kinds_id_seq'), code VARCHAR(30) NOT NULL UNIQUE, label VARCHAR(120) NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
-        DB::statement("ALTER TABLE sales.document_kinds ADD COLUMN IF NOT EXISTS sunat_code VARCHAR(4) NULL");
+        $bootstrapCacheKey = 'sales_lookup:document_kinds_bootstrap:v3';
+        if (Cache::get($bootstrapCacheKey) === true) {
+            return;
+        }
+
+        if (!$this->tableExistsBySchemaAndName('sales', 'document_kinds')) {
+            throw new \RuntimeException('Missing table sales.document_kinds. Run backend migrations before using sales lookups.');
+        }
+
+        $columns = $this->tableColumnsByQualifiedTable('sales.document_kinds');
+        if (!in_array('sunat_code', $columns, true)) {
+            throw new \RuntimeException('Missing column sales.document_kinds.sunat_code. Run backend migrations before using sales lookups.');
+        }
 
         $defaults = [
             ['code' => 'QUOTATION',   'label' => 'Cotizacion',      'sort_order' => 10, 'sunat_code' => null],
@@ -510,9 +522,19 @@ class SalesLookupRepository
             ['code' => 'DEBIT_NOTE',  'label' => 'Nota de Debito',  'sort_order' => 60, 'sunat_code' => '08'],
         ];
 
+        $defaultCodes = array_map(function (array $row): string {
+            return (string) $row['code'];
+        }, $defaults);
+
+        $existingRows = DB::table('sales.document_kinds')
+            ->select('code', 'sunat_code')
+            ->whereIn('code', $defaultCodes)
+            ->get()
+            ->keyBy('code');
+
         foreach ($defaults as $row) {
-            $exists = DB::table('sales.document_kinds')->where('code', $row['code'])->exists();
-            if (!$exists) {
+            $existing = $existingRows->get($row['code']);
+            if ($existing === null) {
                 DB::table('sales.document_kinds')->insert([
                     'code' => $row['code'],
                     'label' => $row['label'],
@@ -529,6 +551,8 @@ class SalesLookupRepository
                     ->update(['sunat_code' => $row['sunat_code'], 'updated_at' => now()]);
             }
         }
+
+        Cache::put($bootstrapCacheKey, true, self::DOCUMENT_KINDS_BOOTSTRAP_CACHE_TTL_SECONDS);
 
     }
 

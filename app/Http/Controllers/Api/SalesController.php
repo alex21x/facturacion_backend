@@ -46,6 +46,9 @@ class SalesController extends Controller
     private $lotStockProjection = [];
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
+    private array $verticalOverrideMap = [];
+    private array $verticalTemplateMap = [];
+    private array $verticalFeatureMapPrewarmed = [];
     private array $featureContextResolutionCache = [];
     private array $tableExistsCache = [];
     private array $companyFeatureToggleMap = [];  // companyId:FEATURE_CODE => stdClass|null
@@ -3007,11 +3010,16 @@ HTML;
             return $default;
         }
 
-        $override = $this->salesLookupService->findVerticalFeatureOverride(
-            $companyId,
-            (int) $activeVertical['id'],
-            $normalizedFeatureCode
-        );
+        $verticalId = (int) ($activeVertical['id'] ?? 0);
+        if ($verticalId <= 0) {
+            $this->verticalFeaturePreferenceCache[$cacheKey] = $default;
+            return $default;
+        }
+
+        $this->prewarmVerticalFeaturePreferences($companyId, $verticalId);
+
+        $overrideKey = $companyId . ':' . $verticalId . ':' . $normalizedFeatureCode;
+        $override = $this->verticalOverrideMap[$overrideKey] ?? null;
 
         if ($override && ($override->is_enabled !== null || $override->config !== null)) {
             $resolved = [
@@ -3024,12 +3032,10 @@ HTML;
             return $resolved;
         }
 
-        $template = $this->salesLookupService->findVerticalFeatureTemplate(
-            (int) $activeVertical['id'],
-            $normalizedFeatureCode
-        );
+        $templateKey = $verticalId . ':' . $normalizedFeatureCode;
+        $template = $this->verticalTemplateMap[$templateKey] ?? null;
 
-        if ($template) {
+        if ($template && ($template->is_enabled !== null || $template->config !== null)) {
             $resolved = [
                 'resolved' => true,
                 'is_enabled' => $template->is_enabled !== null ? (bool) $template->is_enabled : null,
@@ -3096,6 +3102,49 @@ HTML;
                 }
                 $this->featureTogglePrewarmed[$bk] = true;
             }
+        }
+    }
+
+    private function prewarmVerticalFeaturePreferences(int $companyId, int $verticalId): void
+    {
+        $companyVerticalKey = $companyId . ':' . $verticalId;
+        if (!isset($this->verticalFeatureMapPrewarmed[$companyVerticalKey])) {
+            $rows = $this->salesLookupService->loadVerticalFeatureOverrides($companyId, $verticalId);
+
+            foreach ($rows as $row) {
+                $normalizedFeatureCode = strtoupper(trim((string) ($row->feature_code ?? '')));
+                if ($normalizedFeatureCode === '') {
+                    continue;
+                }
+
+                $mapKey = $companyVerticalKey . ':' . $normalizedFeatureCode;
+                $this->verticalOverrideMap[$mapKey] = (object) [
+                    'is_enabled' => $row->is_enabled,
+                    'config' => $row->config,
+                ];
+            }
+
+            $this->verticalFeatureMapPrewarmed[$companyVerticalKey] = true;
+        }
+
+        $verticalKey = (string) $verticalId;
+        if (!isset($this->verticalFeatureMapPrewarmed[$verticalKey])) {
+            $rows = $this->salesLookupService->loadVerticalFeatureTemplates($verticalId);
+
+            foreach ($rows as $row) {
+                $normalizedFeatureCode = strtoupper(trim((string) ($row->feature_code ?? '')));
+                if ($normalizedFeatureCode === '') {
+                    continue;
+                }
+
+                $mapKey = $verticalId . ':' . $normalizedFeatureCode;
+                $this->verticalTemplateMap[$mapKey] = (object) [
+                    'is_enabled' => $row->is_enabled,
+                    'config' => $row->config,
+                ];
+            }
+
+            $this->verticalFeatureMapPrewarmed[$verticalKey] = true;
         }
     }
 

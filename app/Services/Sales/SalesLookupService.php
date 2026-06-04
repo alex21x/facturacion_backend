@@ -248,6 +248,16 @@ class SalesLookupService
         return $this->repository->findVerticalFeatureTemplate($verticalId, $featureCode);
     }
 
+    public function loadVerticalFeatureOverrides(int $companyId, int $verticalId): Collection
+    {
+        return $this->repository->loadVerticalFeatureOverrides($companyId, $verticalId);
+    }
+
+    public function loadVerticalFeatureTemplates(int $verticalId): Collection
+    {
+        return $this->repository->loadVerticalFeatureTemplates($verticalId);
+    }
+
     public function resolveActiveCompanyVertical(int $companyId): ?array
     {
         return $this->repository->resolveActiveCompanyVertical($companyId);

@@ -13,6 +13,7 @@ class SalesLookupRepository
     private const DAY_START_SUFFIX = ' 00:00:00';
     private const DAY_END_SUFFIX = ' 23:59:59.999999';
     private const DOCUMENT_KINDS_BOOTSTRAP_CACHE_TTL_SECONDS = 600;
+    private const VERTICAL_FEATURE_LOOKUP_CACHE_TTL_SECONDS = 5;
 
     /** @var array<string, bool> */
     private array $tableExistsCache = [];
@@ -727,6 +728,12 @@ class SalesLookupRepository
 
     public function paginateCommercialDocuments(int $companyId, array $filters, int $page, int $limit): array
     {
+        $countQuery = DB::table('sales.commercial_documents as d')
+            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->where('d.company_id', $companyId);
+
+        $this->applyCommercialDocumentFilters($countQuery, $filters);
+
         $itemDiscountTotals = DB::table('sales.commercial_document_items as di')
             ->select([
                 'di.document_id',
@@ -853,7 +860,7 @@ class SalesLookupRepository
 
         $this->applyCommercialDocumentFilters($query, $filters);
 
-        $total = (clone $query)->count('d.id');
+        $total = (int) $countQuery->count('d.id');
         $lastPage = (int) max(1, ceil($total / $limit));
         if ($page > $lastPage) {
             $page = $lastPage;
@@ -871,7 +878,7 @@ class SalesLookupRepository
             'meta' => [
                 'page' => $page,
                 'per_page' => $limit,
-                'total' => (int) $total,
+                'total' => $total,
                 'last_page' => $lastPage,
             ],
         ];
@@ -1249,6 +1256,29 @@ class SalesLookupRepository
             ->first(['is_enabled', 'config']);
 
         return $toggle ? \App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO::fromRow($toggle) : null;
+    }
+
+    public function loadVerticalFeatureOverrides(int $companyId, int $verticalId): Collection
+    {
+        $cacheKey = sprintf('sales_lookup:vertical_feature_overrides:%d:%d', $companyId, $verticalId);
+
+        return Cache::remember($cacheKey, self::VERTICAL_FEATURE_LOOKUP_CACHE_TTL_SECONDS, function () use ($companyId, $verticalId) {
+            return DB::table('appcfg.company_vertical_feature_overrides')
+                ->where('company_id', $companyId)
+                ->where('vertical_id', $verticalId)
+                ->get(['feature_code', 'is_enabled', 'config']);
+        });
+    }
+
+    public function loadVerticalFeatureTemplates(int $verticalId): Collection
+    {
+        $cacheKey = sprintf('sales_lookup:vertical_feature_templates:%d', $verticalId);
+
+        return Cache::remember($cacheKey, self::VERTICAL_FEATURE_LOOKUP_CACHE_TTL_SECONDS, function () use ($verticalId) {
+            return DB::table('appcfg.vertical_feature_templates')
+                ->where('vertical_id', $verticalId)
+                ->get(['feature_code', 'is_enabled', 'config']);
+        });
     }
 
     public function resolveActiveCompanyVertical(int $companyId): ?array

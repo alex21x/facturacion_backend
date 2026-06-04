@@ -530,13 +530,6 @@ class SalesLookupRepository
             }
         }
 
-        DB::table('sales.document_kinds')
-            ->whereRaw("UPPER(TRIM(code)) LIKE 'CREDIT_NOTE%'")
-            ->update(['sunat_code' => '07', 'updated_at' => now()]);
-
-        DB::table('sales.document_kinds')
-            ->whereRaw("UPPER(TRIM(code)) LIKE 'DEBIT_NOTE%'")
-            ->update(['sunat_code' => '08', 'updated_at' => now()]);
     }
 
     public function listDocumentKindsCatalog(): Collection

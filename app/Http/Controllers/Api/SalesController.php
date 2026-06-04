@@ -245,7 +245,6 @@ class SalesController extends Controller
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
-        $this->ensureCustomersPhoneColumn();
         $search = trim((string) $request->query('q', ''));
         $status = 1;
         $limit = (int) $request->query('limit', 12);
@@ -270,7 +269,6 @@ class SalesController extends Controller
         $workshopVehicleSearchEnabled = $this->isWorkshopMultiVehicleEnabledForContext($companyId, null)
             && $this->tableExists('sales.customer_vehicles');
 
-        $this->ensureCustomersPhoneColumn();
         $search = trim((string) $request->query('q', ''));
         $status = $request->query('status');
         $limit = (int) $request->query('limit', 1000);

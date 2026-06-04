@@ -14,6 +14,7 @@ class SalesLookupRepository
     private const DAY_END_SUFFIX = ' 23:59:59.999999';
     private const DOCUMENT_KINDS_BOOTSTRAP_CACHE_TTL_SECONDS = 600;
     private const VERTICAL_FEATURE_LOOKUP_CACHE_TTL_SECONDS = 5;
+    private const TABLE_EXISTS_CACHE_TTL_SECONDS = 300;
 
     /** @var array<string, bool> */
     private array $tableExistsCache = [];
@@ -1371,11 +1372,9 @@ class SalesLookupRepository
 
     public function ensureCustomersPhoneColumn(): void
     {
-        if (!$this->tableExistsBySchemaAndName('sales', 'customers')) {
-            return;
-        }
-
-        DB::statement('ALTER TABLE sales.customers ADD COLUMN IF NOT EXISTS phone VARCHAR(40) NULL');
+        // Runtime DDL in hot paths causes lock/contention spikes in production.
+        // Phone column must be provisioned by migrations.
+        return;
     }
 
     public function fetchCustomerIdentityForSalesValidation(int $companyId, int $customerId): ?\App\Application\DTOs\Sales\SalesCustomerIdentityDTO
@@ -2862,12 +2861,19 @@ class SalesLookupRepository
             return $this->tableExistsCache[$cacheKey];
         }
 
-        $row = DB::selectOne(
-            'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
-            [$schema, $table]
+        $present = (bool) Cache::remember(
+            'sales_lookup:table_exists:' . $cacheKey,
+            self::TABLE_EXISTS_CACHE_TTL_SECONDS,
+            function () use ($schema, $table): bool {
+                $row = DB::selectOne(
+                    'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
+                    [$schema, $table]
+                );
+
+                return isset($row->present) && (bool) $row->present;
+            }
         );
 
-        $present = isset($row->present) && (bool) $row->present;
         $this->tableExistsCache[$cacheKey] = $present;
 
         return $present;

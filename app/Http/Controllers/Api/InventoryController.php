@@ -25,11 +25,14 @@ use App\Services\Authorization\CompanyFeatureAuthorizationService;
 use App\Services\Inventory\InventoryControllerSupportService;
 use App\Services\Inventory\InventoryProductService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class InventoryController extends Controller
 {
     private const FEATURE_PRODUCTS_BY_PROFILE = 'INVENTORY_PRODUCTS_BY_PROFILE';
     private const FEATURE_PRODUCT_MASTERS_BY_PROFILE = 'INVENTORY_PRODUCT_MASTERS_BY_PROFILE';
+    private const LOOKUPS_CACHE_TTL_SECONDS = 10;
+    private const PRODUCT_COMMERCIAL_CONFIG_CACHE_TTL_SECONDS = 5;
 
     public function __construct(
         private GetProductLookupsUseCase $getProductLookupsUseCase,
@@ -51,25 +54,32 @@ class InventoryController extends Controller
     {
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
+        $userId = (int) ($authUser->id ?? 0);
 
-        $lookups = $this->getProductLookupsUseCase->execute($companyId);
+        $cacheKey = sprintf('inventory:product_lookups:%d:%d', $companyId, $userId);
 
-        return response()->json([
-            'units' => $lookups['units'],
-            'categories' => $lookups['categories'],
-            'lines' => $lookups['lines'],
-            'brands' => $lookups['brands'],
-            'locations' => $lookups['locations'],
-            'warranties' => $lookups['warranties'],
-            'product_natures' => [
-                ['code' => 'PRODUCT', 'label' => 'Producto'],
-                ['code' => 'SUPPLY', 'label' => 'Insumo'],
-            ],
-            'permissions' => [
-                'can_manage_products' => $this->canManageProducts($authUser, $companyId),
-                'can_manage_product_masters' => $this->canManageProductMasters($authUser, $companyId),
-            ],
-        ]);
+        $payload = Cache::remember($cacheKey, self::LOOKUPS_CACHE_TTL_SECONDS, function () use ($authUser, $companyId) {
+            $lookups = $this->getProductLookupsUseCase->execute($companyId);
+
+            return [
+                'units' => $lookups['units'],
+                'categories' => $lookups['categories'],
+                'lines' => $lookups['lines'],
+                'brands' => $lookups['brands'],
+                'locations' => $lookups['locations'],
+                'warranties' => $lookups['warranties'],
+                'product_natures' => [
+                    ['code' => 'PRODUCT', 'label' => 'Producto'],
+                    ['code' => 'SUPPLY', 'label' => 'Insumo'],
+                ],
+                'permissions' => [
+                    'can_manage_products' => $this->canManageProducts($authUser, $companyId),
+                    'can_manage_product_masters' => $this->canManageProductMasters($authUser, $companyId),
+                ],
+            ];
+        });
+
+        return response()->json($payload);
     }
 
     public function products(Request $request)
@@ -304,8 +314,11 @@ class InventoryController extends Controller
     public function productCommercialConfig(Request $request, int $id)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
+        $cacheKey = sprintf('inventory:product_commercial_config:%d:%d', $companyId, $id);
 
-        $config = $this->getInventoryProductCommercialConfigUseCase->execute($companyId, $id);
+        $config = Cache::remember($cacheKey, self::PRODUCT_COMMERCIAL_CONFIG_CACHE_TTL_SECONDS, function () use ($companyId, $id) {
+            return $this->getInventoryProductCommercialConfigUseCase->execute($companyId, $id);
+        });
         if ($config === null) {
             return response()->json(['message' => 'Product not found'], 404);
         }
@@ -339,6 +352,8 @@ class InventoryController extends Controller
 
             return response()->json(['message' => $e->getMessage()], 422);
         }
+
+        Cache::forget(sprintf('inventory:product_commercial_config:%d:%d', $companyId, $id));
 
         $config = $this->getInventoryProductCommercialConfigUseCase->execute($companyId, $id);
         if ($config === null) {

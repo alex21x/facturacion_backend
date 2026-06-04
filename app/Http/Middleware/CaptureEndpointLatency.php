@@ -12,7 +12,7 @@ class CaptureEndpointLatency
 {
     private static ?bool $tableAvailable = null;
 
-    private float $start = 0.0;
+    private const START_ATTR = 'perf_request_started_at';
 
     private string $requestId = '';
 
@@ -23,7 +23,7 @@ class CaptureEndpointLatency
 
     public function handle(Request $request, Closure $next)
     {
-        $this->start = microtime(true);
+        $request->attributes->set(self::START_ATTR, microtime(true));
         $this->requestId = $this->resolveRequestId($request);
         $request->attributes->set('perf_request_id', $this->requestId);
 
@@ -41,8 +41,10 @@ class CaptureEndpointLatency
             ? (int) $response->getStatusCode()
             : 0;
 
-        $this->persistSample($request, $statusCode, $this->start);
-        $this->logSlowRequest($request, $statusCode, $this->start);
+        $startedAt = (float) $request->attributes->get(self::START_ATTR, microtime(true));
+
+        $this->persistSample($request, $statusCode, $startedAt);
+        $this->logSlowRequest($request, $statusCode, $startedAt);
     }
 
     private function persistSample(Request $request, int $statusCode, float $start): void

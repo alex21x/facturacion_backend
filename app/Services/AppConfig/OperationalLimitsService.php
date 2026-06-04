@@ -3,9 +3,16 @@
 namespace App\Services\AppConfig;
 
 use App\Infrastructure\Repositories\AppConfig\OperationalLimitsRepository;
+use Illuminate\Support\Facades\Cache;
 
 class OperationalLimitsService
 {
+    private const TABLE_EXISTS_CACHE_TTL_SECONDS = 300;
+    private const USAGE_CACHE_TTL_SECONDS = 5;
+    private const PLATFORM_LIMITS_CACHE_TTL_SECONDS = 15;
+    private const COMPANY_LIMITS_CACHE_TTL_SECONDS = 15;
+    private const ACTIVE_VERTICAL_CACHE_TTL_SECONDS = 30;
+
     private array $usageCache = [];
     private array $tableExistsCache = [];
     private ?array $platformLimitsCache = null;
@@ -28,12 +35,18 @@ class OperationalLimitsService
             return $this->usageCache[$companyId];
         }
 
-        $usage = [
-            'enabled_companies' => $this->operationalLimitsRepository->countEnabledCompanies(),
-            'enabled_branches' => $this->operationalLimitsRepository->countEnabledBranches($companyId),
-            'enabled_warehouses' => $this->operationalLimitsRepository->countEnabledWarehouses($companyId),
-            'enabled_cash_registers' => $this->operationalLimitsRepository->countEnabledCashRegisters($companyId),
-        ];
+        $usage = Cache::remember(
+            $this->usageSharedCacheKey($companyId),
+            self::USAGE_CACHE_TTL_SECONDS,
+            function () use ($companyId) {
+                return [
+                    'enabled_companies' => $this->operationalLimitsRepository->countEnabledCompanies(),
+                    'enabled_branches' => $this->operationalLimitsRepository->countEnabledBranches($companyId),
+                    'enabled_warehouses' => $this->operationalLimitsRepository->countEnabledWarehouses($companyId),
+                    'enabled_cash_registers' => $this->operationalLimitsRepository->countEnabledCashRegisters($companyId),
+                ];
+            }
+        );
 
         $this->usageCache[$companyId] = $usage;
 
@@ -46,20 +59,25 @@ class OperationalLimitsService
             return $this->platformLimitsCache;
         }
 
-        $enabledCompanies = $this->getUsage(0)['enabled_companies'];
+        $this->platformLimitsCache = Cache::remember(
+            'operational_limits:platform:v1',
+            self::PLATFORM_LIMITS_CACHE_TTL_SECONDS,
+            function () {
+                $enabledCompanies = $this->operationalLimitsRepository->countEnabledCompanies();
 
-        if (!$this->tableExistsCached('appcfg', 'platform_limits')) {
-            $this->platformLimitsCache = [
-                'max_companies_enabled' => max(1, $enabledCompanies),
-            ];
+                if (!$this->tableExistsCached('appcfg', 'platform_limits')) {
+                    return [
+                        'max_companies_enabled' => max(1, $enabledCompanies),
+                    ];
+                }
 
-            return $this->platformLimitsCache;
-        }
+                $row = $this->operationalLimitsRepository->findPlatformLimitsRow();
 
-        $row = $this->operationalLimitsRepository->findPlatformLimitsRow();
-        $this->platformLimitsCache = [
-            'max_companies_enabled' => $row ? (int) $row->max_companies_enabled : max(1, $enabledCompanies),
-        ];
+                return [
+                    'max_companies_enabled' => $row ? (int) $row->max_companies_enabled : max(1, $enabledCompanies),
+                ];
+            }
+        );
 
         return $this->platformLimitsCache;
     }
@@ -70,27 +88,29 @@ class OperationalLimitsService
             return $this->companyLimitsCache[$companyId];
         }
 
-        $usage = $this->getUsage($companyId);
+        $limits = Cache::remember(
+            $this->companyLimitsSharedCacheKey($companyId),
+            self::COMPANY_LIMITS_CACHE_TTL_SECONDS,
+            function () use ($companyId) {
+                $usage = $this->getUsage($companyId);
 
-        if (!$this->tableExistsCached('appcfg', 'company_operational_limits')) {
-            $fallback = $this->fallbackCompanyLimits($usage);
-            $this->companyLimitsCache[$companyId] = $fallback;
-            return $fallback;
-        }
+                if (!$this->tableExistsCached('appcfg', 'company_operational_limits')) {
+                    return $this->fallbackCompanyLimits($usage);
+                }
 
-        $row = $this->operationalLimitsRepository->findCompanyOperationalLimitsRow($companyId);
-        if (!$row) {
-            $fallback = $this->fallbackCompanyLimits($usage);
-            $this->companyLimitsCache[$companyId] = $fallback;
-            return $fallback;
-        }
+                $row = $this->operationalLimitsRepository->findCompanyOperationalLimitsRow($companyId);
+                if (!$row) {
+                    return $this->fallbackCompanyLimits($usage);
+                }
 
-        $limits = [
-            'max_branches_enabled' => (int) $row->max_branches_enabled,
-            'max_warehouses_enabled' => (int) $row->max_warehouses_enabled,
-            'max_cash_registers_enabled' => (int) $row->max_cash_registers_enabled,
-            'max_cash_registers_per_warehouse' => (int) ($row->max_cash_registers_per_warehouse ?? 1),
-        ];
+                return [
+                    'max_branches_enabled' => (int) $row->max_branches_enabled,
+                    'max_warehouses_enabled' => (int) $row->max_warehouses_enabled,
+                    'max_cash_registers_enabled' => (int) $row->max_cash_registers_enabled,
+                    'max_cash_registers_per_warehouse' => (int) ($row->max_cash_registers_per_warehouse ?? 1),
+                ];
+            }
+        );
 
         $this->companyLimitsCache[$companyId] = $limits;
 
@@ -126,20 +146,37 @@ class OperationalLimitsService
 
     public function resolveActiveCompanyVertical(int $companyId): ?array
     {
-        if (!$this->tableExistsCached('appcfg', 'verticals')
-            || !$this->tableExistsCached('appcfg', 'company_verticals')) {
-            return null;
-        }
+        $resolved = Cache::remember(
+            'operational_limits:active_vertical:v1:company:' . $companyId,
+            self::ACTIVE_VERTICAL_CACHE_TTL_SECONDS,
+            function () use ($companyId) {
+                if (!$this->tableExistsCached('appcfg', 'verticals')
+                    || !$this->tableExistsCached('appcfg', 'company_verticals')) {
+                    return ['resolved' => false];
+                }
 
-        $row = $this->operationalLimitsRepository->findActiveCompanyVerticalRow($companyId);
-        if (!$row) {
+                $row = $this->operationalLimitsRepository->findActiveCompanyVerticalRow($companyId);
+                if (!$row) {
+                    return ['resolved' => false];
+                }
+
+                return [
+                    'resolved' => true,
+                    'id' => (int) $row->id,
+                    'code' => (string) $row->code,
+                    'name' => (string) $row->name,
+                ];
+            }
+        );
+
+        if (!is_array($resolved) || !($resolved['resolved'] ?? false)) {
             return null;
         }
 
         return [
-            'id' => (int) $row->id,
-            'code' => (string) $row->code,
-            'name' => (string) $row->name,
+            'id' => (int) ($resolved['id'] ?? 0),
+            'code' => (string) ($resolved['code'] ?? ''),
+            'name' => (string) ($resolved['name'] ?? ''),
         ];
     }
 
@@ -227,7 +264,13 @@ class OperationalLimitsService
     {
         $cacheKey = $schema . '.' . $table;
         if (!array_key_exists($cacheKey, $this->tableExistsCache)) {
-            $this->tableExistsCache[$cacheKey] = $this->operationalLimitsRepository->tableExists($schema, $table);
+            $this->tableExistsCache[$cacheKey] = Cache::remember(
+                'operational_limits:table_exists:v1:' . $cacheKey,
+                self::TABLE_EXISTS_CACHE_TTL_SECONDS,
+                function () use ($schema, $table) {
+                    return $this->operationalLimitsRepository->tableExists($schema, $table);
+                }
+            );
         }
 
         return $this->tableExistsCache[$cacheKey];
@@ -236,13 +279,27 @@ class OperationalLimitsService
     private function resetComputedCaches(?int $companyId = null): void
     {
         $this->platformLimitsCache = null;
+        Cache::forget('operational_limits:platform:v1');
 
         if ($companyId !== null) {
             unset($this->companyLimitsCache[$companyId]);
             unset($this->usageCache[$companyId]);
+            Cache::forget($this->companyLimitsSharedCacheKey($companyId));
+            Cache::forget($this->usageSharedCacheKey($companyId));
+            Cache::forget('operational_limits:active_vertical:v1:company:' . $companyId);
         } else {
             $this->companyLimitsCache = [];
             $this->usageCache = [];
         }
+    }
+
+    private function usageSharedCacheKey(int $companyId): string
+    {
+        return 'operational_limits:usage:v1:company:' . $companyId;
+    }
+
+    private function companyLimitsSharedCacheKey(int $companyId): string
+    {
+        return 'operational_limits:company_limits:v1:company:' . $companyId;
     }
 }

@@ -282,7 +282,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             return $session ? CashSessionDetailDTO::fromRow($session) : null;
     }
 
-    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
+    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
         $existingMovement = DB::table('sales.cash_movements')
             ->where('company_id', $companyId)
@@ -303,22 +303,24 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                         'cash_session_id' => (int) $session->id,
                         'branch_id' => $document->branch_id ?? $session->branch_id,
                     ]);
+
+                return true;
             }
 
-            return;
+            return false;
         }
 
-        $this->insertCommercialDocumentMovement($companyId, $sessionId, $document, $session);
+        return $this->insertCommercialDocumentMovement($companyId, $sessionId, $document, $session);
     }
 
-    public function insertCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
+    public function insertCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
         $amount = (float) ($document->paid_total ?? 0);
         if ($amount <= 0) {
             $amount = (float) ($document->total ?? 0);
         }
         if ($amount <= 0) {
-            return;
+            return false;
         }
 
         $label = [
@@ -348,6 +350,8 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             'movement_at' => $document->created_at ?? now(),
             'created_at' => now(),
         ]);
+
+        return true;
     }
 
     public function findSessionById(int $sessionId): ?CashSessionRecordDTO
@@ -386,8 +390,15 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         $totalIn = $this->sumSessionMovementsByDirection($sessionId, ['IN', 'INCOME'], $documentRefTypes, $excludedDocumentStatuses);
         $totalOut = $this->sumSessionMovementsByDirection($sessionId, ['OUT', 'EXPENSE'], $documentRefTypes, $excludedDocumentStatuses);
 
+        $expectedBalance = round((float) $sess->opening_balance + $totalIn - $totalOut, 4);
+        $currentExpectedBalance = round((float) ($sess->expected_balance ?? 0), 4);
+
+        if (abs($expectedBalance - $currentExpectedBalance) < 0.0001) {
+            return;
+        }
+
         DB::table('sales.cash_sessions')->where('id', $sessionId)->update([
-            'expected_balance' => round((float) $sess->opening_balance + $totalIn - $totalOut, 4),
+            'expected_balance' => $expectedBalance,
         ]);
     }
 }

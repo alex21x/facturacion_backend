@@ -21,9 +21,9 @@ class CashMovementCommandService
         $this->repository->updateMovementById($companyId, $movementId, $changes);
     }
 
-    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
+    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
-        $this->repository->upsertSessionCommercialDocumentMovement($companyId, $sessionId, $document, $session);
+        return $this->repository->upsertSessionCommercialDocumentMovement($companyId, $sessionId, $document, $session);
     }
 
     public function recalcExpectedBalance(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): void

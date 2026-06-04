@@ -28,9 +28,9 @@ interface CashMovementRepositoryInterface
 
     public function findSessionDetail(int $companyId, int $sessionId): ?CashSessionDetailDTO;
 
-    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void;
+    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool;
 
-    public function insertCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void;
+    public function insertCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool;
 
     public function findSessionById(int $sessionId): ?CashSessionRecordDTO;
 

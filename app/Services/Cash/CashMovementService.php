@@ -67,9 +67,9 @@ class CashMovementService
         return $this->queryService->findSessionDetail($companyId, $sessionId);
     }
 
-    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): void
+    public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
-        $this->commandService->upsertSessionCommercialDocumentMovement($companyId, $sessionId, $document, $session);
+        return $this->commandService->upsertSessionCommercialDocumentMovement($companyId, $sessionId, $document, $session);
     }
 
     public function findSessionById(int $sessionId): ?CashSessionRecordDTO

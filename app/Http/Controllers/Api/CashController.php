@@ -447,11 +447,17 @@ class CashController extends Controller
             return;
         }
 
+        $hasSyncChanges = false;
+
         foreach ($documents as $document) {
-            $this->cashMovementService->upsertSessionCommercialDocumentMovement($companyId, $sessionId, (object) $document, $session);
+            if ($this->cashMovementService->upsertSessionCommercialDocumentMovement($companyId, $sessionId, (object) $document, $session)) {
+                $hasSyncChanges = true;
+            }
         }
 
-        $this->recalcExpectedBalance((int) $session->id);
+        if ($hasSyncChanges) {
+            $this->recalcExpectedBalance((int) $session->id);
+        }
     }
 
     private function resolveItemCostAndMargin(

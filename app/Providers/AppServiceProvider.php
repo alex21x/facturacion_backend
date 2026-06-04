@@ -70,6 +70,11 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
 
+            // Skip telemetry write queries to avoid observability feedback noise.
+            if (stripos((string) $query->sql, 'ops.http_endpoint_latency_samples') !== false) {
+                return;
+            }
+
             $request = app()->bound('request') ? app('request') : null;
             if (!$request instanceof Request) {
                 return;

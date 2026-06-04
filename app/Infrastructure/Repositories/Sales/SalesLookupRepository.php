@@ -12,6 +12,12 @@ class SalesLookupRepository
     private const DAY_START_SUFFIX = ' 00:00:00';
     private const DAY_END_SUFFIX = ' 23:59:59.999999';
 
+    /** @var array<string, bool> */
+    private array $tableExistsCache = [];
+
+    /** @var array<string, array<int, string>> */
+    private array $tableColumnsCache = [];
+
     public function branchExists(int $companyId, int $branchId): bool
     {
         return DB::table('core.branches')
@@ -2804,24 +2810,41 @@ class SalesLookupRepository
 
     private function tableExistsBySchemaAndName(string $schema, string $table): bool
     {
+        $cacheKey = strtolower(trim($schema)) . '.' . strtolower(trim($table));
+        if (array_key_exists($cacheKey, $this->tableExistsCache)) {
+            return $this->tableExistsCache[$cacheKey];
+        }
+
         $row = DB::selectOne(
             'select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present',
             [$schema, $table]
         );
 
-        return isset($row->present) && (bool) $row->present;
+        $present = isset($row->present) && (bool) $row->present;
+        $this->tableExistsCache[$cacheKey] = $present;
+
+        return $present;
     }
 
     private function tableColumnsByQualifiedTable(string $qualifiedTable): array
     {
+        $cacheKey = strtolower(trim($qualifiedTable));
+        if (array_key_exists($cacheKey, $this->tableColumnsCache)) {
+            return $this->tableColumnsCache[$cacheKey];
+        }
+
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        return collect(DB::select(
+        $columns = collect(DB::select(
             'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
             [$schema, $table]
         ))->map(function ($row) {
             return (string) $row->column_name;
         })->all();
+
+        $this->tableColumnsCache[$cacheKey] = $columns;
+
+        return $columns;
     }
 
     private function splitQualifiedTable(string $qualifiedTable): array

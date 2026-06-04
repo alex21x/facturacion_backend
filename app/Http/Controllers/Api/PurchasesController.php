@@ -19,11 +19,17 @@ use App\Services\Purchases\SupplierManagementService;
 use App\Services\Purchases\SupplierQueryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class PurchasesController
 {
+    private const LOOKUPS_CACHE_TTL_SECONDS = 5;
+
     private array $stockProjection = [];
     private array $lotStockProjection = [];
+    private array $companyFeatureToggleRowCache = [];
+    private array $branchFeatureToggleRowCache = [];
+    private array $resolvedFeatureToggleRowCache = [];
 
     public function __construct(
         private CommerceFeatureToggleService $featureToggles,
@@ -569,56 +575,62 @@ class PurchasesController
             $branchId = null;
         }
 
-        $baseLookups = $this->getPurchasesLookupsUseCase->execute($companyId);
+        $cacheKey = 'purchases:lookups:v1:company:' . $companyId . ':branch:' . ($branchId ?? 'null');
 
-        $detraccionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_DETRACCION_ENABLED');
-        $retencionCompradorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED');
-        $retencionProveedorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED');
-        $percepcionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_PERCEPCION_ENABLED');
-        $globalDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED');
-        $itemDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_ITEM_DISCOUNT_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_ITEM_DISCOUNT_ENABLED');
-        $freeOperationEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_FREE_ITEMS_ENABLED')
-            || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_FREE_ITEMS_ENABLED');
+        $payload = Cache::remember($cacheKey, self::LOOKUPS_CACHE_TTL_SECONDS, function () use ($companyId, $branchId) {
+            $baseLookups = $this->getPurchasesLookupsUseCase->execute($companyId);
 
-        $retencionFeatureCode = $retencionCompradorEnabled
-            ? 'PURCHASES_RETENCION_COMPRADOR_ENABLED'
-            : ($retencionProveedorEnabled ? 'PURCHASES_RETENCION_PROVEEDOR_ENABLED' : null);
+            $detraccionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_DETRACCION_ENABLED');
+            $retencionCompradorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_COMPRADOR_ENABLED');
+            $retencionProveedorEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_RETENCION_PROVEEDOR_ENABLED');
+            $percepcionEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_PERCEPCION_ENABLED');
+            $globalDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_GLOBAL_DISCOUNT_ENABLED');
+            $itemDiscountEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_ITEM_DISCOUNT_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_ITEM_DISCOUNT_ENABLED');
+            $freeOperationEnabled = $this->isFeatureEnabled($companyId, $branchId, 'PURCHASES_FREE_ITEMS_ENABLED')
+                || $this->isCommerceFeatureEnabled($companyId, 'PURCHASES_FREE_ITEMS_ENABLED');
 
-        return response()->json([
-            'payment_methods' => $baseLookups['payment_methods'],
-            'tax_categories' => $baseLookups['tax_categories'],
-            'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
-            'inventory_settings' => $baseLookups['inventory_settings'],
-            'detraccion_service_codes' => $detraccionEnabled ? $this->resolveDetractionServiceCodes() : [],
-            'detraccion_min_amount' => $detraccionEnabled ? $this->getDetractionMinAmount($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED') : null,
-            'detraccion_account' => $detraccionEnabled ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED', 'DETRACCION') : null,
-            'retencion_comprador_enabled' => $retencionCompradorEnabled,
-            'retencion_proveedor_enabled' => $retencionProveedorEnabled,
-            'retencion_types' => ($retencionCompradorEnabled || $retencionProveedorEnabled)
-                ? $this->resolveRetencionTypes($companyId, $branchId, $retencionCompradorEnabled, $retencionProveedorEnabled)
-                : [],
-            'retencion_account' => $retencionFeatureCode
-                ? $this->resolveFeatureAccountInfo($companyId, $branchId, $retencionFeatureCode, 'RETENCION')
-                : null,
-            'retencion_percentage' => 3.00,
-            'percepcion_enabled' => $percepcionEnabled,
-            'global_discount_enabled' => $globalDiscountEnabled,
-            'item_discount_enabled' => $itemDiscountEnabled,
-            'free_operation_enabled' => $freeOperationEnabled,
-            'percepcion_types' => $percepcionEnabled ? $this->resolvePercepcionTypes($companyId, $branchId) : [],
-            'percepcion_account' => $percepcionEnabled
-                ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED', 'PERCEPCION')
-                : null,
-            'sunat_operation_types' => ($detraccionEnabled || $retencionCompradorEnabled || $retencionProveedorEnabled || $percepcionEnabled)
-                ? $this->resolveSunatOperationTypes($companyId, $branchId)
-                : [],
-        ]);
+            $retencionFeatureCode = $retencionCompradorEnabled
+                ? 'PURCHASES_RETENCION_COMPRADOR_ENABLED'
+                : ($retencionProveedorEnabled ? 'PURCHASES_RETENCION_PROVEEDOR_ENABLED' : null);
+
+            return [
+                'payment_methods' => $baseLookups['payment_methods'],
+                'tax_categories' => $baseLookups['tax_categories'],
+                'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
+                'inventory_settings' => $baseLookups['inventory_settings'],
+                'detraccion_service_codes' => $detraccionEnabled ? $this->resolveDetractionServiceCodes() : [],
+                'detraccion_min_amount' => $detraccionEnabled ? $this->getDetractionMinAmount($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED') : null,
+                'detraccion_account' => $detraccionEnabled ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_DETRACCION_ENABLED', 'DETRACCION') : null,
+                'retencion_comprador_enabled' => $retencionCompradorEnabled,
+                'retencion_proveedor_enabled' => $retencionProveedorEnabled,
+                'retencion_types' => ($retencionCompradorEnabled || $retencionProveedorEnabled)
+                    ? $this->resolveRetencionTypes($companyId, $branchId, $retencionCompradorEnabled, $retencionProveedorEnabled)
+                    : [],
+                'retencion_account' => $retencionFeatureCode
+                    ? $this->resolveFeatureAccountInfo($companyId, $branchId, $retencionFeatureCode, 'RETENCION')
+                    : null,
+                'retencion_percentage' => 3.00,
+                'percepcion_enabled' => $percepcionEnabled,
+                'global_discount_enabled' => $globalDiscountEnabled,
+                'item_discount_enabled' => $itemDiscountEnabled,
+                'free_operation_enabled' => $freeOperationEnabled,
+                'percepcion_types' => $percepcionEnabled ? $this->resolvePercepcionTypes($companyId, $branchId) : [],
+                'percepcion_account' => $percepcionEnabled
+                    ? $this->resolveFeatureAccountInfo($companyId, $branchId, 'PURCHASES_PERCEPCION_ENABLED', 'PERCEPCION')
+                    : null,
+                'sunat_operation_types' => ($detraccionEnabled || $retencionCompradorEnabled || $retencionProveedorEnabled || $percepcionEnabled)
+                    ? $this->resolveSunatOperationTypes($companyId, $branchId)
+                    : [],
+            ];
+        });
+
+        return response()->json($payload);
     }
 
     /**
@@ -1460,24 +1472,47 @@ class PurchasesController
 
     private function resolveFeatureToggleRow(int $companyId, $branchId, string $featureCode)
     {
-        $companyRow = $this->purchasesPersistenceService->findCompanyFeatureToggle($companyId, $featureCode);
+        $normalizedFeatureCode = strtoupper(trim($featureCode));
+        $companyCacheKey = $companyId . ':' . $normalizedFeatureCode;
+        if (!array_key_exists($companyCacheKey, $this->companyFeatureToggleRowCache)) {
+            $this->companyFeatureToggleRowCache[$companyCacheKey] = $this->purchasesPersistenceService
+                ->findCompanyFeatureToggle($companyId, $normalizedFeatureCode);
+        }
+
+        $companyRow = $this->companyFeatureToggleRowCache[$companyCacheKey];
+        $resolvedCacheKey = $companyId . ':' . ($branchId === null ? 'null' : (int) $branchId) . ':' . $normalizedFeatureCode;
+
+        if (array_key_exists($resolvedCacheKey, $this->resolvedFeatureToggleRowCache)) {
+            return $this->resolvedFeatureToggleRowCache[$resolvedCacheKey];
+        }
 
         if ($branchId !== null) {
-            $branchRow = $this->purchasesPersistenceService->findBranchFeatureToggle($companyId, $branchId, $featureCode);
+            $normalizedBranchId = (int) $branchId;
+            $branchCacheKey = $companyId . ':' . $normalizedBranchId . ':' . $normalizedFeatureCode;
+            if (!array_key_exists($branchCacheKey, $this->branchFeatureToggleRowCache)) {
+                $this->branchFeatureToggleRowCache[$branchCacheKey] = $this->purchasesPersistenceService
+                    ->findBranchFeatureToggle($companyId, $normalizedBranchId, $normalizedFeatureCode);
+            }
+
+            $branchRow = $this->branchFeatureToggleRowCache[$branchCacheKey];
 
             if ($branchRow && (bool) ($branchRow->is_enabled ?? false)) {
+                $this->resolvedFeatureToggleRowCache[$resolvedCacheKey] = $branchRow;
                 return $branchRow;
             }
 
             if ($companyRow && (bool) ($companyRow->is_enabled ?? false)) {
+                $this->resolvedFeatureToggleRowCache[$resolvedCacheKey] = $companyRow;
                 return $companyRow;
             }
 
             if ($branchRow) {
+                $this->resolvedFeatureToggleRowCache[$resolvedCacheKey] = $branchRow;
                 return $branchRow;
             }
         }
 
+        $this->resolvedFeatureToggleRowCache[$resolvedCacheKey] = $companyRow;
         return $companyRow;
     }
 

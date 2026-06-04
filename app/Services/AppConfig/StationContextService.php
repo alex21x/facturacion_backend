@@ -6,6 +6,8 @@ use App\Infrastructure\Repositories\AppConfig\StationContextRepository;
 
 class StationContextService
 {
+    private ?bool $hasStationContextSchema = null;
+
     public function __construct(
         private StationContextRepository $stationContextRepository
     ) {
@@ -17,8 +19,7 @@ class StationContextService
             return null;
         }
 
-        if (!$this->stationContextRepository->tableExists('appcfg', 'pos_stations')
-            || !$this->stationContextRepository->columnExists('auth', 'refresh_tokens', 'device_id')) {
+        if (!$this->hasRequiredSchema()) {
             return null;
         }
 
@@ -47,5 +48,17 @@ class StationContextService
             'cash_register_code' => (string) $station->cash_register_code,
             'cash_register_name' => (string) $station->cash_register_name,
         ];
+    }
+
+    private function hasRequiredSchema(): bool
+    {
+        if ($this->hasStationContextSchema !== null) {
+            return $this->hasStationContextSchema;
+        }
+
+        $this->hasStationContextSchema = $this->stationContextRepository->tableExists('appcfg', 'pos_stations')
+            && $this->stationContextRepository->columnExists('auth', 'refresh_tokens', 'device_id');
+
+        return $this->hasStationContextSchema;
     }
 }

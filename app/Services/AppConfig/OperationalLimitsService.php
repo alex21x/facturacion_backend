@@ -6,6 +6,11 @@ use App\Infrastructure\Repositories\AppConfig\OperationalLimitsRepository;
 
 class OperationalLimitsService
 {
+    private array $usageCache = [];
+    private array $tableExistsCache = [];
+    private ?array $platformLimitsCache = null;
+    private array $companyLimitsCache = [];
+
     public function __construct(
         private OperationalLimitsRepository $operationalLimitsRepository
     ) {
@@ -13,56 +18,83 @@ class OperationalLimitsService
 
     public function hasRequiredTables(): bool
     {
-        return $this->operationalLimitsRepository->tableExists('appcfg', 'platform_limits')
-            && $this->operationalLimitsRepository->tableExists('appcfg', 'company_operational_limits');
+        return $this->tableExistsCached('appcfg', 'platform_limits')
+            && $this->tableExistsCached('appcfg', 'company_operational_limits');
     }
 
     public function getUsage(int $companyId): array
     {
-        return [
+        if (array_key_exists($companyId, $this->usageCache)) {
+            return $this->usageCache[$companyId];
+        }
+
+        $usage = [
             'enabled_companies' => $this->operationalLimitsRepository->countEnabledCompanies(),
             'enabled_branches' => $this->operationalLimitsRepository->countEnabledBranches($companyId),
             'enabled_warehouses' => $this->operationalLimitsRepository->countEnabledWarehouses($companyId),
             'enabled_cash_registers' => $this->operationalLimitsRepository->countEnabledCashRegisters($companyId),
         ];
+
+        $this->usageCache[$companyId] = $usage;
+
+        return $usage;
     }
 
     public function getPlatformLimits(): array
     {
-        $enabledCompanies = $this->operationalLimitsRepository->countEnabledCompanies();
+        if ($this->platformLimitsCache !== null) {
+            return $this->platformLimitsCache;
+        }
 
-        if (!$this->operationalLimitsRepository->tableExists('appcfg', 'platform_limits')) {
-            return [
+        $enabledCompanies = $this->getUsage(0)['enabled_companies'];
+
+        if (!$this->tableExistsCached('appcfg', 'platform_limits')) {
+            $this->platformLimitsCache = [
                 'max_companies_enabled' => max(1, $enabledCompanies),
             ];
+
+            return $this->platformLimitsCache;
         }
 
         $row = $this->operationalLimitsRepository->findPlatformLimitsRow();
-
-        return [
+        $this->platformLimitsCache = [
             'max_companies_enabled' => $row ? (int) $row->max_companies_enabled : max(1, $enabledCompanies),
         ];
+
+        return $this->platformLimitsCache;
     }
 
     public function getCompanyLimits(int $companyId): array
     {
+        if (array_key_exists($companyId, $this->companyLimitsCache)) {
+            return $this->companyLimitsCache[$companyId];
+        }
+
         $usage = $this->getUsage($companyId);
 
-        if (!$this->operationalLimitsRepository->tableExists('appcfg', 'company_operational_limits')) {
-            return $this->fallbackCompanyLimits($usage);
+        if (!$this->tableExistsCached('appcfg', 'company_operational_limits')) {
+            $fallback = $this->fallbackCompanyLimits($usage);
+            $this->companyLimitsCache[$companyId] = $fallback;
+            return $fallback;
         }
 
         $row = $this->operationalLimitsRepository->findCompanyOperationalLimitsRow($companyId);
         if (!$row) {
-            return $this->fallbackCompanyLimits($usage);
+            $fallback = $this->fallbackCompanyLimits($usage);
+            $this->companyLimitsCache[$companyId] = $fallback;
+            return $fallback;
         }
 
-        return [
+        $limits = [
             'max_branches_enabled' => (int) $row->max_branches_enabled,
             'max_warehouses_enabled' => (int) $row->max_warehouses_enabled,
             'max_cash_registers_enabled' => (int) $row->max_cash_registers_enabled,
             'max_cash_registers_per_warehouse' => (int) ($row->max_cash_registers_per_warehouse ?? 1),
         ];
+
+        $this->companyLimitsCache[$companyId] = $limits;
+
+        return $limits;
     }
 
     public function updateLimits(int $companyId, array $payload, int $userId): void
@@ -88,12 +120,14 @@ class OperationalLimitsService
 
             $this->operationalLimitsRepository->updateOrInsertCompanyOperationalLimits($companyId, $updates, $userId);
         });
+
+        $this->resetComputedCaches($companyId);
     }
 
     public function resolveActiveCompanyVertical(int $companyId): ?array
     {
-        if (!$this->operationalLimitsRepository->tableExists('appcfg', 'verticals')
-            || !$this->operationalLimitsRepository->tableExists('appcfg', 'company_verticals')) {
+        if (!$this->tableExistsCached('appcfg', 'verticals')
+            || !$this->tableExistsCached('appcfg', 'company_verticals')) {
             return null;
         }
 
@@ -124,7 +158,7 @@ class OperationalLimitsService
         $companies = $this->operationalLimitsRepository->listNonSystemCompanies($systemCompanyId);
 
         $limitsByCompany = collect();
-        if ($this->operationalLimitsRepository->tableExists('appcfg', 'company_operational_limits')) {
+        if ($this->tableExistsCached('appcfg', 'company_operational_limits')) {
             $limitsByCompany = $this->operationalLimitsRepository->getAllCompanyOperationalLimits()->keyBy('company_id');
         }
 
@@ -164,6 +198,7 @@ class OperationalLimitsService
         ];
 
         $this->operationalLimitsRepository->updateOrInsertCompanyOperationalLimits($companyId, $updates, $updatedBy);
+        $this->resetComputedCaches($companyId);
     }
 
     public function updateCompanyOperationalLimitBulk(array $companyIds, array $payload, ?int $updatedBy): void
@@ -186,5 +221,28 @@ class OperationalLimitsService
             'max_cash_registers_enabled' => max(1, $usage['enabled_cash_registers']),
             'max_cash_registers_per_warehouse' => 1,
         ];
+    }
+
+    private function tableExistsCached(string $schema, string $table): bool
+    {
+        $cacheKey = $schema . '.' . $table;
+        if (!array_key_exists($cacheKey, $this->tableExistsCache)) {
+            $this->tableExistsCache[$cacheKey] = $this->operationalLimitsRepository->tableExists($schema, $table);
+        }
+
+        return $this->tableExistsCache[$cacheKey];
+    }
+
+    private function resetComputedCaches(?int $companyId = null): void
+    {
+        $this->platformLimitsCache = null;
+
+        if ($companyId !== null) {
+            unset($this->companyLimitsCache[$companyId]);
+            unset($this->usageCache[$companyId]);
+        } else {
+            $this->companyLimitsCache = [];
+            $this->usageCache = [];
+        }
     }
 }

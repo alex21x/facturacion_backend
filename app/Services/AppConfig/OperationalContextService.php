@@ -3,9 +3,13 @@
 namespace App\Services\AppConfig;
 
 use App\Infrastructure\Repositories\AppConfig\OperationalContextRepository;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class OperationalContextService
 {
+    private const CONTEXT_LOOKUP_CACHE_TTL_SECONDS = 5;
+
     public function __construct(
         private OperationalContextRepository $operationalContextRepository
     ) {
@@ -56,9 +60,20 @@ class OperationalContextService
             ];
         }
 
-        $branches = $this->operationalContextRepository->listActiveBranches($companyId);
-        $warehouses = $this->operationalContextRepository->listActiveWarehouses($companyId, $resolvedBranchId);
-        $cashRegisters = $this->operationalContextRepository->listActiveCashRegisters($companyId, $resolvedBranchId, $resolvedWarehouseId);
+        $branches = $this->cachedRowsAsCollection(
+            'operational_context:branches:v1:company:' . $companyId,
+            fn () => $this->operationalContextRepository->listActiveBranches($companyId)
+        );
+
+        $warehouses = $this->cachedRowsAsCollection(
+            'operational_context:warehouses:v1:company:' . $companyId . ':branch:' . ($resolvedBranchId ?? 'null'),
+            fn () => $this->operationalContextRepository->listActiveWarehouses($companyId, $resolvedBranchId)
+        );
+
+        $cashRegisters = $this->cachedRowsAsCollection(
+            'operational_context:cash_registers:v1:company:' . $companyId . ':branch:' . ($resolvedBranchId ?? 'null') . ':warehouse:' . ($resolvedWarehouseId ?? 'null'),
+            fn () => $this->operationalContextRepository->listActiveCashRegisters($companyId, $resolvedBranchId, $resolvedWarehouseId)
+        );
 
         if ($resolvedWarehouseId !== null && !$warehouses->contains('id', $resolvedWarehouseId)) {
             $resolvedWarehouseId = $warehouses->first()->id ?? null;
@@ -79,5 +94,21 @@ class OperationalContextService
                 'cash_register_id' => $resolvedCashRegisterId,
             ],
         ];
+    }
+
+    private function cachedRowsAsCollection(string $cacheKey, callable $resolver): Collection
+    {
+        $rows = Cache::remember($cacheKey, self::CONTEXT_LOOKUP_CACHE_TTL_SECONDS, function () use ($resolver) {
+            /** @var Collection $result */
+            $result = $resolver();
+
+            return $result->map(function ($row) {
+                return (array) $row;
+            })->values()->all();
+        });
+
+        return collect($rows)->map(function ($row) {
+            return (object) $row;
+        });
     }
 }

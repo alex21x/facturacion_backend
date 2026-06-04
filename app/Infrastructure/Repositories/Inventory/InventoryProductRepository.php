@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryProductRepository implements InventoryProductRepositoryInterface
 {
+    private const SCHEMA_CHECK_CACHE_TTL_SECONDS = 300;
     private static ?bool $hasRestaurantRecipesTable = null;
     private static ?bool $hasRestaurantRecipesDeletedAt = null;
 
@@ -27,8 +28,9 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
         return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), function () use ($companyId, $search, $status, $limit, $autocomplete) {
             $normalizedSearch = mb_strtolower(trim($search));
             $searchIsShort = mb_strlen($normalizedSearch) <= 2;
+            $useLightweightList = $autocomplete || $search !== '' || $limit <= 200;
 
-            if ($autocomplete) {
+            if ($useLightweightList) {
                 $query = DB::table('inventory.products as p')
                     ->select([
                         'p.id',
@@ -57,6 +59,7 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
                         DB::raw('NULL::text as warranty_name'),
                         DB::raw('NULL::text as unit_code'),
                         DB::raw('NULL::text as unit_name'),
+                        DB::raw('false as has_recipe'),
                     ])
                     ->where('p.company_id', $companyId)
                     ->whereNull('p.deleted_at');
@@ -156,7 +159,13 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
     private function hasRestaurantRecipesTable(): bool
     {
         if (self::$hasRestaurantRecipesTable === null) {
-            self::$hasRestaurantRecipesTable = DB::getSchemaBuilder()->hasTable('restaurant.product_recipes');
+            self::$hasRestaurantRecipesTable = (bool) Cache::remember(
+                'inventory:has_table:restaurant.product_recipes',
+                self::SCHEMA_CHECK_CACHE_TTL_SECONDS,
+                function (): bool {
+                    return DB::getSchemaBuilder()->hasTable('restaurant.product_recipes');
+                }
+            );
         }
 
         return self::$hasRestaurantRecipesTable;
@@ -165,8 +174,14 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
     private function hasRestaurantRecipesDeletedAtColumn(): bool
     {
         if (self::$hasRestaurantRecipesDeletedAt === null) {
-            self::$hasRestaurantRecipesDeletedAt = $this->hasRestaurantRecipesTable()
-                && DB::getSchemaBuilder()->hasColumn('restaurant.product_recipes', 'deleted_at');
+            self::$hasRestaurantRecipesDeletedAt = (bool) Cache::remember(
+                'inventory:has_column:restaurant.product_recipes.deleted_at',
+                self::SCHEMA_CHECK_CACHE_TTL_SECONDS,
+                function (): bool {
+                    return $this->hasRestaurantRecipesTable()
+                        && DB::getSchemaBuilder()->hasColumn('restaurant.product_recipes', 'deleted_at');
+                }
+            );
         }
 
         return self::$hasRestaurantRecipesDeletedAt;

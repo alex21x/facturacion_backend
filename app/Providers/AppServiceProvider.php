@@ -71,7 +71,7 @@ class AppServiceProvider extends ServiceProvider
             }
 
             // Skip telemetry write queries to avoid observability feedback noise.
-            if (stripos((string) $query->sql, 'ops.http_endpoint_latency_samples') !== false) {
+            if ($this->shouldSkipSlowSqlLog((string) $query->sql)) {
                 return;
             }
 
@@ -122,5 +122,14 @@ class AppServiceProvider extends ServiceProvider
         $threshold = is_numeric($value) ? (float) $value : 250.0;
 
         return $threshold > 0 ? $threshold : 250.0;
+    }
+
+    private function shouldSkipSlowSqlLog(string $sql): bool
+    {
+        $normalized = strtolower($sql);
+
+        // Covers quoted/unquoted forms, e.g. ops.http_endpoint_latency_samples,
+        // "ops"."http_endpoint_latency_samples", `ops`.`http_endpoint_latency_samples`.
+        return str_contains($normalized, 'http_endpoint_latency_samples');
     }
 }

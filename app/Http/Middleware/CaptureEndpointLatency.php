@@ -53,6 +53,11 @@ class CaptureEndpointLatency
             return;
         }
 
+        // Never run latency persistence inline on sync queues; it inflates user-facing latency.
+        if ($this->isSyncQueueConnection()) {
+            return;
+        }
+
         if (!$this->canCapture($request)) {
             return;
         }
@@ -87,6 +92,11 @@ class CaptureEndpointLatency
         } catch (\Throwable $e) {
             // Keep observability best-effort and never fail the request.
         }
+    }
+
+    private function isSyncQueueConnection(): bool
+    {
+        return strtolower((string) config('queue.default', 'sync')) === 'sync';
     }
 
     private function canCapture(Request $request): bool

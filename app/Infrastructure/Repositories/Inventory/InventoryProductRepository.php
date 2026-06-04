@@ -13,7 +13,7 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
 
     public function getProducts(int $companyId, string $search, $status, int $limit, bool $autocomplete): array
     {
-        $limit = max(1, min($limit, 5000));
+        $limit = max(1, min($limit, 50000));
         $cacheKey = sprintf(
             'inventory_products:%d:%s:%s:%d:%d',
             $companyId,

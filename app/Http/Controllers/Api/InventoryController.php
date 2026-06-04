@@ -87,7 +87,7 @@ class InventoryController extends Controller
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $search = trim((string) $request->query('search', ''));
         $status = $request->query('status');
-        $limit = (int) $request->query('limit', 2000);
+        $limit = (int) $request->query('limit', 50000);
         $autocomplete = filter_var($request->query('autocomplete', false), FILTER_VALIDATE_BOOLEAN);
 
         return response()->json([

@@ -17,7 +17,7 @@ class InventoryProductCommandRepository
     public function listProducts(int $companyId, string $search, $status, int $limit, bool $autocomplete): array
     {
         $search = trim($search);
-        $limit = max(1, min($limit, $autocomplete ? 100 : 2000));
+        $limit = max(1, min($limit, $autocomplete ? 100 : 50000));
 
         return $this->inventoryProductRepository->getProducts($companyId, $search, $status, $limit, $autocomplete);
     }

@@ -12,7 +12,7 @@ class UpdateProductCommercialConfigRequest extends ApiFormRequest
             'company_id' => 'nullable|integer|min:1',
             'base_unit_id' => 'nullable|integer|min:1',
             'units' => 'nullable|array',
-            'units.*.unit_id' => 'required_with:units|integer|min:1',
+            'units.*.unit_id' => 'required_with:units|integer|min:1|distinct',
             'units.*.is_base' => 'nullable|boolean',
             'units.*.status' => 'nullable|integer|in:0,1',
             'conversions' => 'nullable|array',

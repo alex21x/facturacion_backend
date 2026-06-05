@@ -27,6 +27,7 @@ use App\Services\Sales\SalesLookupService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class MasterDataController extends Controller
 {
@@ -947,6 +948,7 @@ class MasterDataController extends Controller
         }
 
         $this->inventoryControllerSupportService->updateCompanyUnits($companyId, $items, (int) $authUser->id);
+        Cache::forget(sprintf('inventory:product-commercial:%d:enabled_units', $companyId));
 
         return response()->json(['message' => 'Units updated']);
     }

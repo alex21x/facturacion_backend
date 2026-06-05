@@ -571,6 +571,20 @@ class DailySummaryService
         $canResendSentWithoutTicket = $summaryStatus === self::STATUS_SENT
             && $summaryTicket === null;
 
+        // Idempotent behavior for rapid repeated clicks/retries while a send is already in progress
+        // or after the summary was already processed.
+        if ($summaryStatus === self::STATUS_SENDING) {
+            return $this->buildIdempotentSendResult($summary, 'Resumen en proceso de envio');
+        }
+
+        if ($summaryStatus === self::STATUS_ACCEPTED) {
+            return $this->buildIdempotentSendResult($summary, 'Resumen ya aceptado por SUNAT');
+        }
+
+        if ($summaryStatus === self::STATUS_SENT && $summaryTicket !== null) {
+            return $this->buildIdempotentSendResult($summary, 'Resumen ya enviado con ticket SUNAT');
+        }
+
         if (!in_array($summaryStatus, [self::STATUS_DRAFT, self::STATUS_ERROR, self::STATUS_REJECTED], true) && !$canResendSentWithoutTicket) {
             throw new TaxBridgeException(
                 'Summary must be in DRAFT, ERROR or REJECTED status to send (or SENT without SUNAT ticket). Current: ' . $summary->status,
@@ -808,6 +822,39 @@ class DailySummaryService
     // ─────────────────────────────────────────────────────────────────────────
     // PAYLOAD BUILDERS
     // ─────────────────────────────────────────────────────────────────────────
+
+    private function buildIdempotentSendResult(object $summary, string $label): array
+    {
+        $rawResponse = $summary->raw_response ?? null;
+        $decodedResponse = null;
+
+        if (is_string($rawResponse) && trim($rawResponse) !== '') {
+            $parsed = json_decode($rawResponse, true);
+            if (is_array($parsed)) {
+                $decodedResponse = $parsed;
+            }
+        }
+
+        if ($decodedResponse === null && is_object($rawResponse)) {
+            $decodedResponse = (array) $rawResponse;
+        }
+
+        return [
+            'status' => (string) ($summary->status ?? self::STATUS_ERROR),
+            'label' => $label,
+            'bridge_http_code' => isset($summary->bridge_http_code) ? (int) $summary->bridge_http_code : null,
+            'sunat_ticket' => $this->normalizeSunatTicketValue($summary->sunat_ticket ?? null),
+            'sunat_cdr_code' => $summary->sunat_cdr_code ?? null,
+            'sunat_cdr_desc' => $summary->sunat_cdr_desc ?? null,
+            'sunat_error_code' => null,
+            'sunat_error_message' => null,
+            'response' => $decodedResponse ?? [],
+            'debug' => [
+                'idempotent' => true,
+                'summary_id' => (int) ($summary->id ?? 0),
+            ],
+        ];
+    }
 
     private function buildPayload(int $companyId, object $summary, array $config): array
     {

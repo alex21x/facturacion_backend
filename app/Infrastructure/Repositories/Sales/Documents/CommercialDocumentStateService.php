@@ -22,10 +22,21 @@ class CommercialDocumentStateService
         ?string $status = null,
         array $extraUpdates = []
     ): bool {
+        $extraKeys = [];
+        foreach ($extraUpdates as $key => $value) {
+            if ($key === 'metadata' || $key === 'status') {
+                continue;
+            }
+
+            $extraKeys[] = $key;
+        }
+
+        $selectColumns = array_values(array_unique(array_merge(['metadata', 'status'], $extraKeys)));
+
         $row = DB::table('sales.commercial_documents')
             ->where('id', $documentId)
             ->where('company_id', $companyId)
-            ->select('metadata')
+            ->select($selectColumns)
             ->first();
 
         if (!$row) {
@@ -46,15 +57,13 @@ class CommercialDocumentStateService
             $meta[$key] = $value;
         }
 
-        if (!empty($metadataUpdates)) {
+        $metadataChanged = !empty($metadataUpdates)
+            && json_encode($meta) !== json_encode(json_decode((string) ($row->metadata ?? '{}'), true) ?: []);
+
+        $updatePayload = [];
+
+        if ($metadataChanged) {
             $meta['sunat_last_sync_at'] = now()->toDateTimeString();
-        }
-
-        $updatePayload = [
-            'updated_at' => now(),
-        ];
-
-        if (!empty($metadataUpdates)) {
             $updatePayload['metadata'] = json_encode($meta);
         }
 
@@ -65,7 +74,9 @@ class CommercialDocumentStateService
                 throw new InvalidArgumentException('Invalid commercial document status: ' . $status);
             }
 
-            $updatePayload['status'] = $normalizedStatus;
+            if (strtoupper((string) ($row->status ?? '')) !== $normalizedStatus) {
+                $updatePayload['status'] = $normalizedStatus;
+            }
         }
 
         foreach ($extraUpdates as $key => $value) {
@@ -73,8 +84,17 @@ class CommercialDocumentStateService
                 continue;
             }
 
-            $updatePayload[$key] = $value;
+            $currentValue = $row->{$key} ?? null;
+            if ($currentValue !== $value) {
+                $updatePayload[$key] = $value;
+            }
         }
+
+        if (empty($updatePayload)) {
+            return true;
+        }
+
+        $updatePayload['updated_at'] = now();
 
         DB::table('sales.commercial_documents')
             ->where('id', $documentId)

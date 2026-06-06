@@ -176,8 +176,12 @@ class CaptureEndpointLatency
             ? (int) $authUser->company_id
             : null;
 
+        $requestId = trim((string) ($this->requestId !== ''
+            ? $this->requestId
+            : $request->attributes->get('perf_request_id', '')));
+
         Log::warning('perf.slow_request', [
-            'request_id' => $this->requestId,
+            'request_id' => $requestId,
             'company_id' => $companyId,
             'method' => strtoupper((string) $request->method()),
             'path' => '/' . ltrim((string) $request->path(), '/'),

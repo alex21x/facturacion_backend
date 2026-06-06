@@ -730,8 +730,12 @@ class SalesLookupRepository
     public function paginateCommercialDocuments(int $companyId, array $filters, int $page, int $limit): array
     {
         $countQuery = DB::table('sales.commercial_documents as d')
-            ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId);
+
+        $customerFilter = trim((string) ($filters['customer'] ?? ''));
+        if ($customerFilter !== '') {
+            $countQuery->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id');
+        }
 
         $this->applyCommercialDocumentFilters($countQuery, $filters);
 
@@ -740,6 +744,12 @@ class SalesLookupRepository
                 'di.document_id',
                 DB::raw('SUM(COALESCE(di.discount_total, 0)) as item_discount_total'),
             ])
+            ->whereExists(function (Builder $scope) use ($companyId): void {
+                $scope->select(DB::raw('1'))
+                    ->from('sales.commercial_documents as ds')
+                    ->whereColumn('ds.id', 'di.document_id')
+                    ->where('ds.company_id', $companyId);
+            })
             ->groupBy('di.document_id');
 
         $conversionFlags = DB::table('sales.commercial_documents as dconv')
@@ -749,6 +759,7 @@ class SalesLookupRepository
                 DB::raw("MAX(CASE WHEN dconv.document_kind IN ('INVOICE', 'RECEIPT') AND dconv.status NOT IN ('VOID', 'CANCELED') THEN 1 ELSE 0 END) as has_tributary_conversion"),
                 DB::raw("MAX(CASE WHEN dconv.document_kind = 'SALES_ORDER' AND dconv.status NOT IN ('VOID', 'CANCELED') THEN 1 ELSE 0 END) as has_order_conversion"),
             ])
+            ->where('dconv.company_id', $companyId)
             ->whereRaw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0) > 0")
             ->groupBy('dconv.company_id', DB::raw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0)"));
 

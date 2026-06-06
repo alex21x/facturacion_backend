@@ -16,6 +16,7 @@ class HomeMetricsSummaryService
     public function buildSummary(int $companyId, string $range, ?int $branchId, ?int $warehouseId): array
     {
         $normalizedRange = $this->normalizeHomeMetricsRange($range);
+        $cacheTtlSeconds = $this->cacheTtlSeconds();
 
         $cacheKey = implode(':', [
             'appcfg',
@@ -26,9 +27,11 @@ class HomeMetricsSummaryService
             $warehouseId ?? 'all',
         ]);
 
-        $cachedPayload = Cache::get($cacheKey);
-        if (is_array($cachedPayload)) {
-            return $cachedPayload;
+        if ($cacheTtlSeconds > 0) {
+            $cachedPayload = Cache::get($cacheKey);
+            if (is_array($cachedPayload)) {
+                return $cachedPayload;
+            }
         }
 
         $now = Carbon::now('America/Lima');
@@ -110,9 +113,19 @@ class HomeMetricsSummaryService
             ],
         ];
 
-        Cache::put($cacheKey, $payload, now()->addSeconds(45));
+        if ($cacheTtlSeconds > 0) {
+            Cache::put($cacheKey, $payload, now()->addSeconds($cacheTtlSeconds));
+        }
 
         return $payload;
+    }
+
+    private function cacheTtlSeconds(): int
+    {
+        $value = env('APPCFG_HOME_METRICS_CACHE_SECONDS');
+        $ttl = is_numeric($value) ? (int) $value : 0;
+
+        return $ttl > 0 ? $ttl : 0;
     }
 
     private function normalizeHomeMetricsRange(string $range): string

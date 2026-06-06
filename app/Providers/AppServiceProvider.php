@@ -85,6 +85,32 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
 
+            $signature = sha1((string) $query->connectionName . '|' . preg_replace('/\s+/', ' ', trim((string) $query->sql)));
+            $seenSignatures = $request->attributes->get('perf_slow_sql_seen_signatures', []);
+            if (!is_array($seenSignatures)) {
+                $seenSignatures = [];
+            }
+
+            // Avoid repeated logs for the exact same SQL shape inside one request.
+            if (isset($seenSignatures[$signature])) {
+                return;
+            }
+
+            $maxLogsPerRequest = $this->slowSqlMaxLogsPerRequest();
+            $loggedCount = (int) $request->attributes->get('perf_slow_sql_logged_count', 0);
+            if ($loggedCount >= $maxLogsPerRequest) {
+                $request->attributes->set(
+                    'perf_slow_sql_suppressed_count',
+                    (int) $request->attributes->get('perf_slow_sql_suppressed_count', 0) + 1
+                );
+
+                return;
+            }
+
+            $seenSignatures[$signature] = true;
+            $request->attributes->set('perf_slow_sql_seen_signatures', $seenSignatures);
+            $request->attributes->set('perf_slow_sql_logged_count', $loggedCount + 1);
+
             $authUser = $request->attributes->get('auth_user');
             $companyId = is_object($authUser) && isset($authUser->company_id)
                 ? (int) $authUser->company_id
@@ -98,6 +124,8 @@ class AppServiceProvider extends ServiceProvider
                 'connection' => (string) $query->connectionName,
                 'time_ms' => round((float) $query->time, 3),
                 'threshold_ms' => $thresholdMs,
+                'sql_log_slot' => $loggedCount + 1,
+                'sql_log_cap' => $maxLogsPerRequest,
                 'sql' => $query->sql,
                 'bindings_count' => count($query->bindings),
             ]);
@@ -119,9 +147,17 @@ class AppServiceProvider extends ServiceProvider
     private function slowSqlThresholdMs(): float
     {
         $value = env('OPS_SLOW_SQL_MS');
-        $threshold = is_numeric($value) ? (float) $value : 250.0;
+        $threshold = is_numeric($value) ? (float) $value : 350.0;
 
-        return $threshold > 0 ? $threshold : 250.0;
+        return $threshold > 0 ? $threshold : 350.0;
+    }
+
+    private function slowSqlMaxLogsPerRequest(): int
+    {
+        $value = env('OPS_SLOW_SQL_MAX_LOGS_PER_REQUEST');
+        $max = is_numeric($value) ? (int) $value : 2;
+
+        return $max > 0 ? $max : 2;
     }
 
     private function shouldSkipSlowSqlLog(string $sql): bool

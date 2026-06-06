@@ -1540,49 +1540,41 @@ class InventoryProductCommandRepository
         string $nature,
         ?int $excludeProductId = null
     ): ?\App\Application\DTOs\Inventory\InventoryProductReferenceDTO {
-        if ($sku !== null) {
-            $query = DB::table('inventory.products')
-                ->where('company_id', $companyId)
-                ->whereNull('deleted_at')
-                ->whereRaw("UPPER(COALESCE(sku, '')) = ?", [strtoupper(trim($sku))]);
-
-            if ($excludeProductId !== null) {
-                $query->where('id', '<>', $excludeProductId);
-            }
-
-            $row = $query->select('id')->first();
-            if ($row) {
-                return \App\Application\DTOs\Inventory\InventoryProductReferenceDTO::fromRow($row);
-            }
+        $normalizedSku = $sku !== null ? strtoupper(trim($sku)) : null;
+        if ($normalizedSku === '') {
+            $normalizedSku = null;
         }
 
-        if ($barcode !== null) {
-            $query = DB::table('inventory.products')
-                ->where('company_id', $companyId)
-                ->whereNull('deleted_at')
-                ->where('barcode', trim($barcode));
-
-            if ($excludeProductId !== null) {
-                $query->where('id', '<>', $excludeProductId);
-            }
-
-            $row = $query->select('id')->first();
-            if ($row) {
-                return \App\Application\DTOs\Inventory\InventoryProductReferenceDTO::fromRow($row);
-            }
+        $normalizedBarcode = $barcode !== null ? trim($barcode) : null;
+        if ($normalizedBarcode === '') {
+            $normalizedBarcode = null;
         }
+
+        $normalizedName = strtoupper(trim($name));
 
         $query = DB::table('inventory.products')
             ->where('company_id', $companyId)
             ->whereNull('deleted_at')
-            ->whereRaw("UPPER(TRIM(COALESCE(name, ''))) = ?", [strtoupper(trim($name))])
-            ->where('product_nature', $nature);
+            ->where(function ($nested) use ($normalizedSku, $normalizedBarcode, $normalizedName, $nature, $unitId): void {
+                if ($normalizedSku !== null) {
+                    $nested->orWhereRaw("UPPER(COALESCE(sku, '')) = ?", [$normalizedSku]);
+                }
 
-        if ($unitId === null) {
-            $query->whereNull('unit_id');
-        } else {
-            $query->where('unit_id', $unitId);
-        }
+                if ($normalizedBarcode !== null) {
+                    $nested->orWhere('barcode', $normalizedBarcode);
+                }
+
+                $nested->orWhere(function ($byName) use ($normalizedName, $nature, $unitId): void {
+                    $byName->whereRaw("UPPER(TRIM(COALESCE(name, ''))) = ?", [$normalizedName])
+                        ->where('product_nature', $nature);
+
+                    if ($unitId === null) {
+                        $byName->whereNull('unit_id');
+                    } else {
+                        $byName->where('unit_id', $unitId);
+                    }
+                });
+            });
 
         if ($excludeProductId !== null) {
             $query->where('id', '<>', $excludeProductId);

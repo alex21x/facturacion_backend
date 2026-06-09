@@ -1417,8 +1417,23 @@ class GreGuideService
 
         // Transport details
         $vehiclePlaca    = htmlspecialchars((string) (($guide['vehicle']['placa'] ?? '') ?: ''), ENT_QUOTES, 'UTF-8');
+        $vehicleMarca    = htmlspecialchars(
+            trim((string) (($guide['vehicle']['marca'] ?? ($guide['vehicle']['brand'] ?? '')) ?: '')),
+            ENT_QUOTES,
+            'UTF-8'
+        );
+        $vehicleLicense  = htmlspecialchars(
+            trim((string) (($guide['vehicle']['license'] ?? ($guide['vehicle']['licencia'] ?? ($guide['vehicle']['vehiculo_licencia'] ?? ''))) ?: '')),
+            ENT_QUOTES,
+            'UTF-8'
+        );
         $driverName      = htmlspecialchars((string) (($guide['driver']['name'] ?? '') ?: ''), ENT_QUOTES, 'UTF-8');
         $driverDoc       = htmlspecialchars((string) (($guide['driver']['doc_number'] ?? '') ?: ''), ENT_QUOTES, 'UTF-8');
+        $driverLicense   = htmlspecialchars(
+            trim((string) (($guide['driver']['license'] ?? ($guide['driver']['licencia'] ?? '')) ?: '')),
+            ENT_QUOTES,
+            'UTF-8'
+        );
         $transporterName = htmlspecialchars((string) (($guide['transporter']['name'] ?? '') ?: ''), ENT_QUOTES, 'UTF-8');
         $transporterDoc  = htmlspecialchars((string) (($guide['transporter']['doc_number'] ?? '') ?: ''), ENT_QUOTES, 'UTF-8');
 
@@ -1445,9 +1460,18 @@ class GreGuideService
                 if ($vehiclePlaca !== '') {
                     $transportInfo .= "<div class=\"info-row\"><span class=\"info-label\">VEHICULO:</span><span class=\"info-value\">{$vehiclePlaca}</span></div>";
                 }
+                if ($vehicleMarca !== '') {
+                    $transportInfo .= "<div class=\"info-row\"><span class=\"info-label\">MARCA:</span><span class=\"info-value\">{$vehicleMarca}</span></div>";
+                }
+                if ($vehicleLicense !== '') {
+                    $transportInfo .= "<div class=\"info-row\"><span class=\"info-label\">LIC. VEHICULO:</span><span class=\"info-value\">{$vehicleLicense}</span></div>";
+                }
                 if ($driverName !== '') {
                     $transportInfo .= "<div class=\"info-row\"><span class=\"info-label\">CONDUCTOR:</span><span class=\"info-value\">{$driverName}</span></div>"
                         . "<div class=\"info-row\"><span class=\"info-label\">DOC:</span><span class=\"info-value\">{$driverDoc}</span></div>";
+                }
+                if ($driverLicense !== '') {
+                    $transportInfo .= "<div class=\"info-row\"><span class=\"info-label\">LICENCIA:</span><span class=\"info-value\">{$driverLicense}</span></div>";
                 }
             }
 
@@ -1560,8 +1584,17 @@ HTML;
             if ($vehiclePlaca !== '') {
                 $transportRowsA4 .= "<tr><td class=\"label\">Vehiculo (placa):</td><td class=\"value\">{$vehiclePlaca}</td></tr>";
             }
+            if ($vehicleMarca !== '') {
+                $transportRowsA4 .= "<tr><td class=\"label\">Vehiculo (marca):</td><td class=\"value\">{$vehicleMarca}</td></tr>";
+            }
+            if ($vehicleLicense !== '') {
+                $transportRowsA4 .= "<tr><td class=\"label\">Licencia vehiculo:</td><td class=\"value\">{$vehicleLicense}</td></tr>";
+            }
             if ($driverName !== '') {
                 $transportRowsA4 .= "<tr><td class=\"label\">Conductor:</td><td class=\"value\">{$driverName} &mdash; {$driverDoc}</td></tr>";
+            }
+            if ($driverLicense !== '') {
+                $transportRowsA4 .= "<tr><td class=\"label\">Licencia conductor:</td><td class=\"value\">{$driverLicense}</td></tr>";
             }
         }
 
@@ -1734,6 +1767,14 @@ HTML;
 
         if ($modalidad === '02') {
             $cabecera['vehiculo_placa'] = (string) ($vehicle['placa'] ?? '');
+            $vehicleBrand = trim((string) ($vehicle['marca'] ?? ($vehicle['brand'] ?? '')));
+            $vehicleLicense = trim((string) ($vehicle['license'] ?? ($vehicle['licencia'] ?? ($vehicle['vehiculo_licencia'] ?? ''))));
+            if ($vehicleBrand !== '') {
+                $cabecera['vehiculo_marca'] = $vehicleBrand;
+            }
+            if ($vehicleLicense !== '') {
+                $cabecera['vehiculo_licencia'] = $vehicleLicense;
+            }
             $cabecera['conductor_codigo'] = (string) ($driver['doc_type'] ?? '1');
             $cabecera['conductor_ruc'] = (string) ($driver['doc_number'] ?? '');
             $cabecera['conductor_licencia'] = (string) ($driver['license'] ?? ($driver['licencia'] ?? ''));

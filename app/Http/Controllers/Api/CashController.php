@@ -398,7 +398,7 @@ class CashController extends Controller
 
         if ((int) ($movement->cash_session_id ?? 0) > 0) {
             $session = $this->cashSessionService->findSessionById((int) $movement->cash_session_id);
-            if (!$session || strtoupper((string) ($session->status ?? '')) !== 'OPEN') {
+            if (!$session || !$this->isCashSessionOpenStatus((string) ($session->status ?? ''))) {
                 return response()->json([
                     'message' => 'Solo se pueden editar movimientos de sesiones abiertas.',
                 ], 422);
@@ -650,5 +650,12 @@ class CashController extends Controller
         }
 
         return $normalized;
+    }
+
+    private function isCashSessionOpenStatus(string $status): bool
+    {
+        $normalized = strtoupper(trim($status));
+
+        return in_array($normalized, ['OPEN', 'OPENED', 'ACTIVE', 'ABIERTA'], true);
     }
 }

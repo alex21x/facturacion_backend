@@ -921,6 +921,8 @@ class SalesLookupRepository
                     WHEN 'VOID'     THEN 'Anulado'
                     WHEN 'CANCELED' THEN 'Cancelado'
                     ELSE d.status END as status_label"),
+                'd.subtotal',
+                'd.tax_total',
                 'd.total',
                 'd.balance_due',
                 DB::raw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) as source_document_id"),

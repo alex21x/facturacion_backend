@@ -606,6 +606,8 @@ class SalesController extends Controller
 
     public function exportCommercialDocuments(Request $request)
     {
+        //return response()->json($request->all());    
+        //dd($request);
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchIdFilter = $request->query('branch_id', $authUser->branch_id);
@@ -638,6 +640,8 @@ class SalesController extends Controller
             'seller_user_id' => (!$isSellerUser && $isAdminUser) ? null : (int) $authUser->id,
             'workshop_vehicle_search_enabled' => $workshopVehicleSearchEnabled,
         ];
+
+        //return response()->json($filters);
         $detailMode = strtoupper(trim((string) $request->query('detail', 'SUMMARY')));
 
         $max = (int) $request->query('max', 5000);
@@ -690,6 +694,7 @@ class SalesController extends Controller
                     'Cantidad',
                     'Precio Unitario',
                     'Total Linea',
+                    'SENATI'
                 ], ';');
 
                 foreach ($detailRows as $row) {
@@ -725,6 +730,7 @@ class SalesController extends Controller
                         number_format((float) ($row->qty ?? 0), 3, '.', ''),
                         number_format((float) ($row->unit_price ?? 0), 2, '.', ''),
                         number_format((float) ($row->line_total ?? 0), 2, '.', ''),
+                        number_format((float) ($row->igv ?? 0), 2, '.', ''),
                     ], ';');
                 }
 
@@ -746,7 +752,7 @@ class SalesController extends Controller
             ]);
         }
 
-        $filename = 'reporte_ventas_' . now()->format('Ymd_His') . '.csv';
+        $filename = 'reporte_ventas_1' . now()->format('Ymd_His') . '.csv';
 
         return response()->streamDownload(function () use ($rows) {
             $out = fopen('php://output', 'w');
@@ -775,6 +781,7 @@ class SalesController extends Controller
                 'Descuento Global',
                 'Total',
                 'Saldo',
+                'SENATI',
             ], ';');
 
             foreach ($rows as $row) {
@@ -805,6 +812,7 @@ class SalesController extends Controller
                     number_format((float) ($row->global_discount_total ?? 0), 2, '.', ''),
                     number_format((float) ($row->total ?? 0), 2, '.', ''),
                     number_format((float) ($row->balance_due ?? 0), 2, '.', ''),
+                    number_format((float) ($row->igv ?? 0), 2, '.', ''),
                 ], ';');
             }
 

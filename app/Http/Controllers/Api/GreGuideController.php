@@ -186,7 +186,9 @@ class GreGuideController extends Controller
         }
 
         $limit = min((int) $request->query('limit', 50), 500);
-        $history = $this->auditService->getDocumentHistoryByScope($id, 'GRE_GUIDE', 'GRE', $limit);
+        // Keep scope strict by GRE document kind and avoid hardcoded tributary type
+        // so history remains visible even if enum/type naming changed over time.
+        $history = $this->auditService->getDocumentHistoryByScope($id, 'GRE_GUIDE', null, $limit);
 
         return response()->json([
             'guide_id' => $id,

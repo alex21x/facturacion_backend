@@ -27,7 +27,7 @@ class GreGuideService
         self::STATUS_CANCELLED,
     ];
     private const AUDIT_DOCUMENT_KIND = 'GRE_GUIDE';
-    private const AUDIT_TRIBUTARY_TYPE = 'GRE';
+    private const AUDIT_TRIBUTARY_TYPE = 'REMISION_GUIA';
     private const INVENTORY_REF_TYPE_GRE_GUIDE = 'GRE_GUIDE';
     private const INVENTORY_REF_TYPE_GRE_GUIDE_CANCEL = 'GRE_GUIDE_CANCEL';
 
@@ -271,9 +271,21 @@ class GreGuideService
                 $meta = json_decode((string) ($item->metadata ?? '{}'), true);
                 $meta = is_array($meta) ? $meta : [];
 
+                $description = trim((string) ($item->description ?? ''));
+                if ($description === '') {
+                    $description = trim((string) (
+                        $meta['description']
+                        ?? $meta['descripcion']
+                        ?? $meta['product_name']
+                        ?? $meta['name']
+                        ?? $meta['producto']
+                        ?? ''
+                    ));
+                }
+
                 return [
                     'code' => (string) ($meta['sku'] ?? $meta['code'] ?? ''),
-                    'description' => (string) ($item->description ?? ''),
+                    'description' => $description,
                     'qty' => (float) ($item->qty ?? 0),
                     'unit' => (string) ($meta['unit'] ?? 'NIU'),
                 ];
@@ -618,6 +630,9 @@ class GreGuideService
             $ticket = $this->extractBridgeTicket($decoded, $raw);
             $cdrCode = $this->extractBridgeCode($decoded);
             $cdrDesc = $this->extractBridgeMessage($decoded);
+            if ($cdrDesc === null) {
+                $cdrDesc = $this->extractBridgeMessageFromRaw($raw);
+            }
 
             $resolvedBridgeStatus = $this->resolveGreOutcomeStatus($cdrCode, $cdrDesc);
 
@@ -1046,11 +1061,11 @@ class GreGuideService
 
     private function isBridgeNullLikeResponse($decoded, string $raw): bool
     {
+        $trimmedRaw = strtolower(trim($raw));
         if ($decoded === null) {
-            return true;
+            return $trimmedRaw === '' || $trimmedRaw === 'null' || $trimmedRaw === '"null"';
         }
 
-        $trimmedRaw = strtolower(trim($raw));
         if ($trimmedRaw === 'null' || $trimmedRaw === '"null"') {
             return true;
         }
@@ -1060,6 +1075,21 @@ class GreGuideService
         }
 
         return false;
+    }
+
+    private function extractBridgeMessageFromRaw(string $raw): ?string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $plain = trim(preg_replace('/\s+/', ' ', strip_tags($trimmed)) ?? '');
+        if ($plain === '') {
+            return null;
+        }
+
+        return mb_substr($plain, 0, 400);
     }
 
     private function extractBridgeCode($decoded): ?string
@@ -1728,8 +1758,11 @@ HTML;
 
     private function buildGrePayload(int $companyId, object $row, array $config): array
     {
-        $items = json_decode((string) ($row->items ?? '[]'), true);
-        $items = is_array($items) ? $items : [];
+        $items = $this->normalizeGuideItems(
+            is_array(json_decode((string) ($row->items ?? '[]'), true))
+                ? json_decode((string) ($row->items ?? '[]'), true)
+                : []
+        );
 
         $destinatario = json_decode((string) ($row->destinatario ?? '{}'), true);
         $destinatario = is_array($destinatario) ? $destinatario : [];
@@ -1846,6 +1879,12 @@ HTML;
             'ruc' => (string) ($company->tax_id ?? ''),
             'user' => $bridgeUser,
             'pass' => $bridgePass,
+            'client_id' => (string) (($config['client_id'] ?? '') !== ''
+                ? $config['client_id']
+                : env('TAX_BRIDGE_GRE_CLIENT_ID', '70bae3cc-53cc-49c5-a69e-d2d6d1090e93')),
+            'client_secret' => (string) (($config['client_secret'] ?? '') !== ''
+                ? $config['client_secret']
+                : env('TAX_BRIDGE_GRE_CLIENT_SECRET', 'd3zcun+948VLlHWCm9djig==')),
             'razon_social' => (string) ($company->legal_name ?? ''),
             'nombre_comercial' => (string) ($company->trade_name ?? ''),
             'direccion' => $direccion,
@@ -2037,6 +2076,8 @@ HTML;
 
     private function normalizeGuideRow(object $row): array
     {
+        $decodedItems = json_decode((string) ($row->items ?? '[]'), true);
+
         return [
             'id' => (int) $row->id,
             'company_id' => (int) $row->company_id,
@@ -2062,7 +2103,7 @@ HTML;
             'vehicle' => json_decode((string) ($row->vehicle ?? '{}'), true),
             'driver' => json_decode((string) ($row->driver ?? '{}'), true),
             'destinatario' => json_decode((string) ($row->destinatario ?? '{}'), true),
-            'items' => json_decode((string) ($row->items ?? '[]'), true),
+            'items' => $this->normalizeGuideItems(is_array($decodedItems) ? $decodedItems : []),
             'bridge_method' => $row->bridge_method,
             'bridge_endpoint' => $row->bridge_endpoint,
             'bridge_http_code' => $row->bridge_http_code !== null ? (int) $row->bridge_http_code : null,
@@ -2076,6 +2117,29 @@ HTML;
             'created_at' => $row->created_at,
             'updated_at' => $row->updated_at,
         ];
+    }
+
+    private function normalizeGuideItems(array $items): array
+    {
+        return array_values(array_map(function ($item) {
+            $row = is_array($item) ? $item : [];
+
+            $description = trim((string) (
+                $row['description']
+                ?? $row['descripcion']
+                ?? $row['product_name']
+                ?? $row['name']
+                ?? $row['producto']
+                ?? ''
+            ));
+
+            return [
+                'code' => trim((string) ($row['code'] ?? $row['codigo'] ?? $row['sku'] ?? '')),
+                'description' => $description,
+                'qty' => (float) ($row['qty'] ?? $row['cantidad'] ?? 0),
+                'unit' => trim((string) ($row['unit'] ?? $row['unidad'] ?? 'NIU')),
+            ];
+        }, $items));
     }
 
     private function tableExists(string $qualifiedName): bool

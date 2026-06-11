@@ -94,84 +94,92 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             }
         }
 
-        $conversions = DB::table('inventory.product_uom_conversions as c')
-            ->join('core.units as fu', 'fu.id', '=', 'c.from_unit_id')
-            ->join('core.units as tu', 'tu.id', '=', 'c.to_unit_id')
-            ->select([
-                'c.id',
-                'c.from_unit_id',
-                'fu.code as from_unit_code',
-                'fu.name as from_unit_name',
-                'c.to_unit_id',
-                'tu.code as to_unit_code',
-                'tu.name as to_unit_name',
-                'c.conversion_factor',
-                'c.status',
-            ])
-            ->where('c.company_id', $companyId)
-            ->where('c.product_id', $productId)
-            ->orderBy('fu.name')
-            ->get();
+        $conversions = collect();
+        if ($features[self::FEATURE_UOM_CONVERSIONS]) {
+            $conversions = DB::table('inventory.product_uom_conversions as c')
+                ->join('core.units as fu', 'fu.id', '=', 'c.from_unit_id')
+                ->join('core.units as tu', 'tu.id', '=', 'c.to_unit_id')
+                ->select([
+                    'c.id',
+                    'c.from_unit_id',
+                    'fu.code as from_unit_code',
+                    'fu.name as from_unit_name',
+                    'c.to_unit_id',
+                    'tu.code as to_unit_code',
+                    'tu.name as to_unit_name',
+                    'c.conversion_factor',
+                    'c.status',
+                ])
+                ->where('c.company_id', $companyId)
+                ->where('c.product_id', $productId)
+                ->orderBy('fu.name')
+                ->get();
+        }
 
-        $wholesalePrices = DB::table('sales.product_price_tier_values as ptv')
-            ->join('sales.price_tiers as pt', 'pt.id', '=', 'ptv.price_tier_id')
-            ->leftJoin('core.units as u', 'u.id', '=', 'ptv.unit_id')
-            ->select([
-                'ptv.id',
-                'ptv.price_tier_id',
-                'pt.code as tier_code',
-                'pt.name as tier_name',
-                'pt.min_qty',
-                'pt.max_qty',
-                'ptv.unit_id',
-                'u.code as unit_code',
-                'u.name as unit_name',
-                'ptv.unit_price',
-                'ptv.status',
-            ])
-            ->where('ptv.company_id', $companyId)
-            ->where('ptv.product_id', $productId)
-            ->where('pt.status', 1)
-            ->orderBy('pt.priority')
-            ->orderBy('pt.min_qty')
-            ->get();
+        $wholesalePrices = collect();
+        $priceTiers = collect();
+        $profileTierPrices = collect();
+        if ($features[self::FEATURE_WHOLESALE_PRICING]) {
+            $wholesalePrices = DB::table('sales.product_price_tier_values as ptv')
+                ->join('sales.price_tiers as pt', 'pt.id', '=', 'ptv.price_tier_id')
+                ->leftJoin('core.units as u', 'u.id', '=', 'ptv.unit_id')
+                ->select([
+                    'ptv.id',
+                    'ptv.price_tier_id',
+                    'pt.code as tier_code',
+                    'pt.name as tier_name',
+                    'pt.min_qty',
+                    'pt.max_qty',
+                    'ptv.unit_id',
+                    'u.code as unit_code',
+                    'u.name as unit_name',
+                    'ptv.unit_price',
+                    'ptv.status',
+                ])
+                ->where('ptv.company_id', $companyId)
+                ->where('ptv.product_id', $productId)
+                ->where('pt.status', 1)
+                ->orderBy('pt.priority')
+                ->orderBy('pt.min_qty')
+                ->get();
 
-        $priceTiers = Cache::remember(
-            $this->companyCacheKey($companyId, 'price_tiers'),
-            now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
-            function () use ($companyId) {
-                return DB::table('sales.price_tiers')
-                    ->select('id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
-                    ->where('company_id', $companyId)
-                    ->where('status', 1)
-                    ->orderBy('priority')
-                    ->orderBy('min_qty')
-                    ->get();
-            }
-        );
+            $priceTiers = Cache::remember(
+                $this->companyCacheKey($companyId, 'price_tiers'),
+                now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
+                function () use ($companyId) {
+                    return DB::table('sales.price_tiers')
+                        ->select('id', 'code', 'name', 'min_qty', 'max_qty', 'priority', 'status')
+                        ->where('company_id', $companyId)
+                        ->where('status', 1)
+                        ->orderBy('priority')
+                        ->orderBy('min_qty')
+                        ->get();
+                }
+            );
 
-        $profileTierPrices = DB::table('sales.product_tier_prices as ptp')
-            ->join('sales.price_tiers as pt', function ($join) use ($companyId) {
-                $join->on('pt.id', '=', 'ptp.tier_id')
-                    ->where('pt.company_id', '=', $companyId);
-            })
-            ->select([
-                'ptp.id',
-                'ptp.tier_id',
-                'pt.code as tier_code',
-                'pt.name as tier_name',
-                'ptp.currency_id',
-                'ptp.unit_price',
-                'ptp.valid_from',
-                'ptp.valid_to',
-                'ptp.status',
-            ])
-            ->where('ptp.company_id', $companyId)
-            ->where('ptp.product_id', $productId)
-            ->where('ptp.status', 1)
-            ->orderByDesc('ptp.valid_from')
-            ->orderBy('pt.priority')
-            ->get();
+            $profileTierPrices = DB::table('sales.product_tier_prices as ptp')
+                ->join('sales.price_tiers as pt', function ($join) use ($companyId) {
+                    $join->on('pt.id', '=', 'ptp.tier_id')
+                        ->where('pt.company_id', '=', $companyId);
+                })
+                ->select([
+                    'ptp.id',
+                    'ptp.tier_id',
+                    'pt.code as tier_code',
+                    'pt.name as tier_name',
+                    'ptp.currency_id',
+                    'ptp.unit_price',
+                    'ptp.valid_from',
+                    'ptp.valid_to',
+                    'ptp.status',
+                ])
+                ->where('ptp.company_id', $companyId)
+                ->where('ptp.product_id', $productId)
+                ->where('ptp.status', 1)
+                ->orderByDesc('ptp.valid_from')
+                ->orderBy('pt.priority')
+                ->get();
+        }
 
         return [
             'product' => [

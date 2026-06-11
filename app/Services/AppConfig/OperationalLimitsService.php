@@ -12,11 +12,13 @@ class OperationalLimitsService
     private const PLATFORM_LIMITS_CACHE_TTL_SECONDS = 15;
     private const COMPANY_LIMITS_CACHE_TTL_SECONDS = 15;
     private const ACTIVE_VERTICAL_CACHE_TTL_SECONDS = 30;
+    private const COMPANY_OPERATIONAL_MATRIX_CACHE_TTL_SECONDS = 20;
 
     private array $usageCache = [];
     private array $tableExistsCache = [];
     private ?array $platformLimitsCache = null;
     private array $companyLimitsCache = [];
+    private array $companyOperationalMatrixCache = [];
 
     public function __construct(
         private OperationalLimitsRepository $operationalLimitsRepository
@@ -192,37 +194,50 @@ class OperationalLimitsService
 
     public function listCompanyOperationalLimitMatrix(int $systemCompanyId): array
     {
-        $companies = $this->operationalLimitsRepository->listNonSystemCompanies($systemCompanyId);
-
-        $limitsByCompany = collect();
-        if ($this->tableExistsCached('appcfg', 'company_operational_limits')) {
-            $limitsByCompany = $this->operationalLimitsRepository->getAllCompanyOperationalLimits()->keyBy('company_id');
+        if (array_key_exists($systemCompanyId, $this->companyOperationalMatrixCache)) {
+            return $this->companyOperationalMatrixCache[$systemCompanyId];
         }
 
-        return $companies->map(function ($company) use ($limitsByCompany) {
-            $companyId = (int) $company->id;
-            $limits = $limitsByCompany->get($companyId);
+        $cacheKey = 'operational_limits:company_matrix:v1:system_company:' . $systemCompanyId;
 
-            $usageBranches = $this->operationalLimitsRepository->countEnabledBranches($companyId);
-            $usageWarehouses = $this->operationalLimitsRepository->countEnabledWarehouses($companyId);
-            $usageCashRegisters = $this->operationalLimitsRepository->countEnabledCashRegisters($companyId);
+        $rows = Cache::remember($cacheKey, self::COMPANY_OPERATIONAL_MATRIX_CACHE_TTL_SECONDS, function () use ($systemCompanyId) {
+            $companies = $this->operationalLimitsRepository->listNonSystemCompanies($systemCompanyId);
+            $companyIds = $companies->pluck('id')->map(fn ($id) => (int) $id)->all();
 
-            return [
-                'company_id' => $companyId,
-                'tax_id' => $company->tax_id,
-                'legal_name' => $company->legal_name,
-                'trade_name' => $company->trade_name,
-                'company_status' => (int) $company->status,
-                'max_branches_enabled' => max(1, (int) ($limits->max_branches_enabled ?? 1)),
-                'max_warehouses_enabled' => max(1, (int) ($limits->max_warehouses_enabled ?? 1)),
-                'max_cash_registers_enabled' => max(1, (int) ($limits->max_cash_registers_enabled ?? 1)),
-                'max_cash_registers_per_warehouse' => max(1, (int) ($limits->max_cash_registers_per_warehouse ?? 1)),
-                'usage_branches' => $usageBranches,
-                'usage_warehouses' => $usageWarehouses,
-                'usage_cash_registers' => $usageCashRegisters,
-                'updated_at' => $limits->updated_at ?? null,
-            ];
-        })->values()->all();
+            $limitsByCompany = collect();
+            if ($this->tableExistsCached('appcfg', 'company_operational_limits')) {
+                $limitsByCompany = $this->operationalLimitsRepository->getAllCompanyOperationalLimits()->keyBy('company_id');
+            }
+
+            $branchesUsage = $this->operationalLimitsRepository->countEnabledBranchesByCompanyIds($companyIds);
+            $warehousesUsage = $this->operationalLimitsRepository->countEnabledWarehousesByCompanyIds($companyIds);
+            $cashRegistersUsage = $this->operationalLimitsRepository->countEnabledCashRegistersByCompanyIds($companyIds);
+
+            return $companies->map(function ($company) use ($limitsByCompany, $branchesUsage, $warehousesUsage, $cashRegistersUsage) {
+                $companyId = (int) $company->id;
+                $limits = $limitsByCompany->get($companyId);
+
+                return [
+                    'company_id' => $companyId,
+                    'tax_id' => $company->tax_id,
+                    'legal_name' => $company->legal_name,
+                    'trade_name' => $company->trade_name,
+                    'company_status' => (int) $company->status,
+                    'max_branches_enabled' => max(1, (int) ($limits->max_branches_enabled ?? 1)),
+                    'max_warehouses_enabled' => max(1, (int) ($limits->max_warehouses_enabled ?? 1)),
+                    'max_cash_registers_enabled' => max(1, (int) ($limits->max_cash_registers_enabled ?? 1)),
+                    'max_cash_registers_per_warehouse' => max(1, (int) ($limits->max_cash_registers_per_warehouse ?? 1)),
+                    'usage_branches' => (int) ($branchesUsage[$companyId] ?? 0),
+                    'usage_warehouses' => (int) ($warehousesUsage[$companyId] ?? 0),
+                    'usage_cash_registers' => (int) ($cashRegistersUsage[$companyId] ?? 0),
+                    'updated_at' => $limits->updated_at ?? null,
+                ];
+            })->values()->all();
+        });
+
+        $this->companyOperationalMatrixCache[$systemCompanyId] = $rows;
+
+        return $rows;
     }
 
     public function updateCompanyOperationalLimit(int $companyId, array $payload, ?int $updatedBy): void
@@ -280,6 +295,12 @@ class OperationalLimitsService
     {
         $this->platformLimitsCache = null;
         Cache::forget('operational_limits:platform:v1');
+
+        foreach (array_keys($this->companyOperationalMatrixCache) as $systemCompanyId) {
+            Cache::forget('operational_limits:company_matrix:v1:system_company:' . $systemCompanyId);
+        }
+
+        $this->companyOperationalMatrixCache = [];
 
         if ($companyId !== null) {
             unset($this->companyLimitsCache[$companyId]);

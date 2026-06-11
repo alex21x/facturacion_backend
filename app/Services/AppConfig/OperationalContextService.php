@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Cache;
 class OperationalContextService
 {
     private const CONTEXT_LOOKUP_CACHE_TTL_SECONDS = 5;
+    private const COMPANY_CACHE_TTL_SECONDS = 30;
+    private const BRANCH_EXISTS_CACHE_TTL_SECONDS = 30;
 
     public function __construct(
         private OperationalContextRepository $operationalContextRepository
@@ -17,7 +19,13 @@ class OperationalContextService
 
     public function branchExists(int $companyId, int $branchId): bool
     {
-        return $this->operationalContextRepository->branchExists($companyId, $branchId);
+        return (bool) Cache::remember(
+            'operational_context:branch_exists:v1:company:' . $companyId . ':branch:' . $branchId,
+            self::BRANCH_EXISTS_CACHE_TTL_SECONDS,
+            function () use ($companyId, $branchId) {
+                return $this->operationalContextRepository->branchExists($companyId, $branchId);
+            }
+        );
     }
 
     public function validateOperationalContextSelection(
@@ -45,7 +53,26 @@ class OperationalContextService
         ?int $resolvedWarehouseId,
         ?int $resolvedCashRegisterId
     ): array {
-        $company = $this->operationalContextRepository->findCompany($companyId);
+        $companyPayload = Cache::remember(
+            'operational_context:company:v1:' . $companyId,
+            self::COMPANY_CACHE_TTL_SECONDS,
+            function () use ($companyId) {
+                $row = $this->operationalContextRepository->findCompany($companyId);
+                if ($row === null) {
+                    return null;
+                }
+
+                return [
+                    'id' => (int) $row->id,
+                    'tax_id' => $row->tax_id,
+                    'legal_name' => $row->legal_name,
+                    'trade_name' => $row->trade_name,
+                    'status' => (int) $row->status,
+                ];
+            }
+        );
+
+        $company = $companyPayload === null ? null : (object) $companyPayload;
         if ($company === null) {
             return [
                 'company' => null,

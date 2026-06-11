@@ -30,6 +30,24 @@ class OperationalLimitsRepository
             ->count();
     }
 
+    public function countEnabledBranchesByCompanyIds(array $companyIds): array
+    {
+        if (empty($companyIds)) {
+            return [];
+        }
+
+        return DB::table('core.branches')
+            ->select('company_id', DB::raw('COUNT(*) as total'))
+            ->whereIn('company_id', $companyIds)
+            ->where('status', 1)
+            ->groupBy('company_id')
+            ->pluck('total', 'company_id')
+            ->mapWithKeys(function ($total, $companyId) {
+                return [(int) $companyId => (int) $total];
+            })
+            ->all();
+    }
+
     public function countEnabledWarehouses(int $companyId): int
     {
         return (int) DB::table('inventory.warehouses')
@@ -38,12 +56,48 @@ class OperationalLimitsRepository
             ->count();
     }
 
+    public function countEnabledWarehousesByCompanyIds(array $companyIds): array
+    {
+        if (empty($companyIds)) {
+            return [];
+        }
+
+        return DB::table('inventory.warehouses')
+            ->select('company_id', DB::raw('COUNT(*) as total'))
+            ->whereIn('company_id', $companyIds)
+            ->where('status', 1)
+            ->groupBy('company_id')
+            ->pluck('total', 'company_id')
+            ->mapWithKeys(function ($total, $companyId) {
+                return [(int) $companyId => (int) $total];
+            })
+            ->all();
+    }
+
     public function countEnabledCashRegisters(int $companyId): int
     {
         return (int) DB::table('sales.cash_registers')
             ->where('company_id', $companyId)
             ->where('status', 1)
             ->count();
+    }
+
+    public function countEnabledCashRegistersByCompanyIds(array $companyIds): array
+    {
+        if (empty($companyIds)) {
+            return [];
+        }
+
+        return DB::table('sales.cash_registers')
+            ->select('company_id', DB::raw('COUNT(*) as total'))
+            ->whereIn('company_id', $companyIds)
+            ->where('status', 1)
+            ->groupBy('company_id')
+            ->pluck('total', 'company_id')
+            ->mapWithKeys(function ($total, $companyId) {
+                return [(int) $companyId => (int) $total];
+            })
+            ->all();
     }
 
     public function listNonSystemCompanies(int $systemCompanyId): Collection

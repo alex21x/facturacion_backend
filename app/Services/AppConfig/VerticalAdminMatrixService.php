@@ -3,9 +3,16 @@
 namespace App\Services\AppConfig;
 
 use App\Infrastructure\Repositories\AppConfig\VerticalAdminMatrixRepository;
+use Illuminate\Support\Facades\Cache;
 
 class VerticalAdminMatrixService
 {
+    private const TABLE_EXISTS_CACHE_TTL_SECONDS = 300;
+    private const ADMIN_MATRIX_CACHE_TTL_SECONDS = 20;
+
+    private array $tableExistsCache = [];
+    private array $adminMatrixCache = [];
+
     public function __construct(
         private VerticalAdminMatrixRepository $verticalAdminMatrixRepository,
         private CompanyAccessLinkService $companyAccessLinkService
@@ -14,116 +21,128 @@ class VerticalAdminMatrixService
 
     public function hasRequiredTables(): bool
     {
-        return $this->verticalAdminMatrixRepository->tableExists('appcfg', 'verticals')
-            && $this->verticalAdminMatrixRepository->tableExists('appcfg', 'company_verticals');
+        return $this->tableExistsCached('appcfg', 'verticals')
+            && $this->tableExistsCached('appcfg', 'company_verticals');
     }
 
     public function buildAdminMatrix(int $systemCompanyId): array
     {
-        $verticals = $this->verticalAdminMatrixRepository->listActiveVerticals();
-        $companies = $this->verticalAdminMatrixRepository->listNonSystemCompanies($systemCompanyId);
-        $companyIds = $companies->pluck('id')->map(fn ($id) => (int) $id)->all();
-
-        $existingAccessLinks = collect();
-        if ($this->companyAccessLinkService->tableExists('appcfg', 'company_access_links')) {
-            $existingAccessLinks = $this->companyAccessLinkService->getByCompanyIds($companyIds);
+        if (array_key_exists($systemCompanyId, $this->adminMatrixCache)) {
+            return $this->adminMatrixCache[$systemCompanyId];
         }
 
-        foreach ($companies as $company) {
-            $companyId = (int) $company->id;
-            if (!$existingAccessLinks->has($companyId)) {
-                $this->companyAccessLinkService->ensureCompanyAccessLink(
-                    $companyId,
-                    (string) ($company->legal_name ?? ''),
-                    $company->tax_id !== null ? (string) $company->tax_id : null,
-                    null
-                );
-            }
-        }
+        $cacheKey = 'vertical_admin_matrix:v1:system_company:' . $systemCompanyId;
 
-        $accessLinksByCompany = collect();
-        if ($this->companyAccessLinkService->tableExists('appcfg', 'company_access_links')) {
-            $accessLinksByCompany = $this->companyAccessLinkService->getActiveByCompanyIds($companyIds);
-        }
+        $matrix = Cache::remember($cacheKey, self::ADMIN_MATRIX_CACHE_TTL_SECONDS, function () use ($systemCompanyId) {
+            $verticals = $this->verticalAdminMatrixRepository->listActiveVerticals();
+            $companies = $this->verticalAdminMatrixRepository->listNonSystemCompanies($systemCompanyId);
+            $companyIds = $companies->pluck('id')->map(fn ($id) => (int) $id)->all();
 
-        $assignments = $this->verticalAdminMatrixRepository->listAssignmentsByCompanyIds($companyIds);
-        $byCompany = [];
-        foreach ($assignments as $row) {
-            $companyId = (int) $row->company_id;
-            if (!array_key_exists($companyId, $byCompany)) {
-                $byCompany[$companyId] = [];
+            $existingAccessLinks = collect();
+            if ($this->companyAccessLinkService->tableExists('appcfg', 'company_access_links')) {
+                $existingAccessLinks = $this->companyAccessLinkService->getByCompanyIds($companyIds);
             }
 
-            $byCompany[$companyId][] = [
-                'vertical_id' => (int) $row->vertical_id,
-                'vertical_code' => (string) $row->vertical_code,
-                'vertical_name' => (string) $row->vertical_name,
-                'is_enabled' => (int) $row->status === 1,
-                'is_primary' => (bool) $row->is_primary,
-                'effective_from' => $row->effective_from,
-                'effective_to' => $row->effective_to,
-            ];
-        }
-
-        $adminUsersByCompany = collect();
-        $adminUsersRaw = $this->verticalAdminMatrixRepository->listAdminUsersByCompanyIds($companyIds);
-        foreach ($adminUsersRaw as $au) {
-            $cid = (int) $au->company_id;
-            if (!$adminUsersByCompany->has($cid)) {
-                $adminUsersByCompany->put($cid, $au);
+            foreach ($companies as $company) {
+                $companyId = (int) $company->id;
+                if (!$existingAccessLinks->has($companyId)) {
+                    $this->companyAccessLinkService->ensureCompanyAccessLink(
+                        $companyId,
+                        (string) ($company->legal_name ?? ''),
+                        $company->tax_id !== null ? (string) $company->tax_id : null,
+                        null
+                    );
+                }
             }
-        }
 
-        $missingAdminCompanyIds = array_values(array_diff(
-            $companyIds,
-            $adminUsersByCompany->keys()->map(fn ($id) => (int) $id)->all()
-        ));
+            $accessLinksByCompany = collect();
+            if ($this->companyAccessLinkService->tableExists('appcfg', 'company_access_links')) {
+                $accessLinksByCompany = $this->companyAccessLinkService->getActiveByCompanyIds($companyIds);
+            }
 
-        if (!empty($missingAdminCompanyIds)) {
-            $fallbackUsers = $this->verticalAdminMatrixRepository->listFallbackUsersByCompanyIds($missingAdminCompanyIds);
-            foreach ($fallbackUsers as $fu) {
-                $cid = (int) $fu->company_id;
+            $assignments = $this->verticalAdminMatrixRepository->listAssignmentsByCompanyIds($companyIds);
+            $byCompany = [];
+            foreach ($assignments as $row) {
+                $companyId = (int) $row->company_id;
+                if (!array_key_exists($companyId, $byCompany)) {
+                    $byCompany[$companyId] = [];
+                }
+
+                $byCompany[$companyId][] = [
+                    'vertical_id' => (int) $row->vertical_id,
+                    'vertical_code' => (string) $row->vertical_code,
+                    'vertical_name' => (string) $row->vertical_name,
+                    'is_enabled' => (int) $row->status === 1,
+                    'is_primary' => (bool) $row->is_primary,
+                    'effective_from' => $row->effective_from,
+                    'effective_to' => $row->effective_to,
+                ];
+            }
+
+            $adminUsersByCompany = collect();
+            $adminUsersRaw = $this->verticalAdminMatrixRepository->listAdminUsersByCompanyIds($companyIds);
+            foreach ($adminUsersRaw as $au) {
+                $cid = (int) $au->company_id;
                 if (!$adminUsersByCompany->has($cid)) {
-                    $adminUsersByCompany->put($cid, $fu);
+                    $adminUsersByCompany->put($cid, $au);
                 }
             }
-        }
 
-        $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany) {
-            $companyId = (int) $company->id;
-            $companyAssignments = $byCompany[$companyId] ?? [];
-            $accessLink = $accessLinksByCompany->get($companyId);
-            $accessSlug = $accessLink ? (string) $accessLink->access_slug : null;
-            $adminUser = $adminUsersByCompany->get($companyId);
+            $missingAdminCompanyIds = array_values(array_diff(
+                $companyIds,
+                $adminUsersByCompany->keys()->map(fn ($id) => (int) $id)->all()
+            ));
 
-            $active = null;
-            foreach ($companyAssignments as $assignment) {
-                if ($assignment['is_enabled'] && $assignment['is_primary']) {
-                    $active = $assignment;
-                    break;
+            if (!empty($missingAdminCompanyIds)) {
+                $fallbackUsers = $this->verticalAdminMatrixRepository->listFallbackUsersByCompanyIds($missingAdminCompanyIds);
+                foreach ($fallbackUsers as $fu) {
+                    $cid = (int) $fu->company_id;
+                    if (!$adminUsersByCompany->has($cid)) {
+                        $adminUsersByCompany->put($cid, $fu);
+                    }
                 }
             }
+
+            $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany) {
+                $companyId = (int) $company->id;
+                $companyAssignments = $byCompany[$companyId] ?? [];
+                $accessLink = $accessLinksByCompany->get($companyId);
+                $accessSlug = $accessLink ? (string) $accessLink->access_slug : null;
+                $adminUser = $adminUsersByCompany->get($companyId);
+
+                $active = null;
+                foreach ($companyAssignments as $assignment) {
+                    if ($assignment['is_enabled'] && $assignment['is_primary']) {
+                        $active = $assignment;
+                        break;
+                    }
+                }
+
+                return [
+                    'company_id' => $companyId,
+                    'tax_id' => $company->tax_id,
+                    'legal_name' => $company->legal_name,
+                    'trade_name' => $company->trade_name,
+                    'company_status' => (int) $company->status,
+                    'active_vertical_code' => $active['vertical_code'] ?? null,
+                    'active_vertical_name' => $active['vertical_name'] ?? null,
+                    'access_slug' => $accessSlug,
+                    'access_link_active' => $accessLink !== null,
+                    'assignments' => $companyAssignments,
+                    'admin_username' => $adminUser ? $adminUser->username : null,
+                    'admin_email' => $adminUser ? $adminUser->email : null,
+                ];
+            })->values()->all();
 
             return [
-                'company_id' => $companyId,
-                'tax_id' => $company->tax_id,
-                'legal_name' => $company->legal_name,
-                'trade_name' => $company->trade_name,
-                'company_status' => (int) $company->status,
-                'active_vertical_code' => $active['vertical_code'] ?? null,
-                'active_vertical_name' => $active['vertical_name'] ?? null,
-                'access_slug' => $accessSlug,
-                'access_link_active' => $accessLink !== null,
-                'assignments' => $companyAssignments,
-                'admin_username' => $adminUser ? $adminUser->username : null,
-                'admin_email' => $adminUser ? $adminUser->email : null,
+                'verticals' => $verticals,
+                'companies' => $companyRows,
             ];
-        })->values()->all();
+        });
 
-        return [
-            'verticals' => $verticals,
-            'companies' => $companyRows,
-        ];
+        $this->adminMatrixCache[$systemCompanyId] = $matrix;
+
+        return $matrix;
     }
 
     public function getCompanyVerticalSettings(int $companyId): array
@@ -160,6 +179,8 @@ class VerticalAdminMatrixService
                 $updatedBy
             );
         });
+
+        $this->resetCachedAdminData();
     }
 
     public function existingCompanyIds(array $companyIds): array
@@ -187,7 +208,8 @@ class VerticalAdminMatrixService
         bool $isEnabled,
         bool $makePrimary,
         string $effectiveFrom,
-        int $updatedBy
+        int $updatedBy,
+        bool $resetCache = true
     ): void {
         $this->verticalAdminMatrixRepository->runInTransaction(function () use (
             $companyId,
@@ -225,6 +247,10 @@ class VerticalAdminMatrixService
 
             $this->ensurePrimaryForEnabledVerticals($companyId, $updatedBy);
         });
+
+        if ($resetCache) {
+            $this->resetCachedAdminData();
+        }
     }
 
     public function applyAdminMatrixUpdateBulk(
@@ -236,8 +262,18 @@ class VerticalAdminMatrixService
         int $updatedBy
     ): void {
         foreach ($companyIds as $companyId) {
-            $this->applyAdminMatrixUpdate((int) $companyId, $verticalId, $isEnabled, $makePrimary, $effectiveFrom, $updatedBy);
+            $this->applyAdminMatrixUpdate(
+                (int) $companyId,
+                $verticalId,
+                $isEnabled,
+                $makePrimary,
+                $effectiveFrom,
+                $updatedBy,
+                false
+            );
         }
+
+        $this->resetCachedAdminData();
     }
 
     private function ensurePrimaryForEnabledVerticals(int $companyId, int $updatedBy): void
@@ -252,5 +288,30 @@ class VerticalAdminMatrixService
         }
 
         $this->verticalAdminMatrixRepository->markVerticalAsPrimary($fallbackId, $updatedBy);
+    }
+
+    private function tableExistsCached(string $schema, string $table): bool
+    {
+        $cacheKey = $schema . '.' . $table;
+        if (!array_key_exists($cacheKey, $this->tableExistsCache)) {
+            $this->tableExistsCache[$cacheKey] = Cache::remember(
+                'vertical_admin_matrix:table_exists:v1:' . $cacheKey,
+                self::TABLE_EXISTS_CACHE_TTL_SECONDS,
+                function () use ($schema, $table) {
+                    return $this->verticalAdminMatrixRepository->tableExists($schema, $table);
+                }
+            );
+        }
+
+        return $this->tableExistsCache[$cacheKey];
+    }
+
+    private function resetCachedAdminData(): void
+    {
+        foreach (array_keys($this->adminMatrixCache) as $systemCompanyId) {
+            Cache::forget('vertical_admin_matrix:v1:system_company:' . $systemCompanyId);
+        }
+
+        $this->adminMatrixCache = [];
     }
 }

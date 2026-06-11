@@ -31,8 +31,8 @@ class InventoryController extends Controller
 {
     private const FEATURE_PRODUCTS_BY_PROFILE = 'INVENTORY_PRODUCTS_BY_PROFILE';
     private const FEATURE_PRODUCT_MASTERS_BY_PROFILE = 'INVENTORY_PRODUCT_MASTERS_BY_PROFILE';
-    private const LOOKUPS_CACHE_TTL_SECONDS = 10;
-    private const PRODUCT_COMMERCIAL_CONFIG_CACHE_TTL_SECONDS = 5;
+    private const LOOKUPS_CACHE_TTL_SECONDS = 60;
+    private const PRODUCT_COMMERCIAL_CONFIG_CACHE_TTL_SECONDS = 30;
 
     public function __construct(
         private GetProductLookupsUseCase $getProductLookupsUseCase,

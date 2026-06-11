@@ -42,6 +42,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
@@ -50,6 +51,7 @@ class AppConfigController extends Controller
 {
     private const SYSTEM_COMPANY_ID = 1;
     private const SALES_TAX_BRIDGE_FEATURE_CODE = 'SALES_TAX_BRIDGE';
+    private const COMPANY_INVENTORY_SETTINGS_MATRIX_CACHE_TTL_SECONDS = 20;
 
     private array $activeVerticalCache = [];
     private array $verticalFeaturePreferenceCache = [];
@@ -3126,39 +3128,47 @@ class AppConfigController extends Controller
 
     public function companyInventorySettingsAdminMatrix(Request $request)
     {
-        $companies = $this->adminSettingsMatrixService->listNonSystemCompanies(self::SYSTEM_COMPANY_ID);
+        $cacheKey = 'appcfg:company_inventory_settings_admin_matrix:v1:system_company:' . self::SYSTEM_COMPANY_ID;
 
-        $inventorySettingsByCompany = collect();
-        if ($this->tableExists('inventory', 'inventory_settings')) {
-            $inventorySettingsByCompany = $this->adminSettingsMatrixService->getInventorySettingsByCompany();
-        }
+        $rows = collect(Cache::remember(
+            $cacheKey,
+            self::COMPANY_INVENTORY_SETTINGS_MATRIX_CACHE_TTL_SECONDS,
+            function () {
+                $companies = $this->adminSettingsMatrixService->listNonSystemCompanies(self::SYSTEM_COMPANY_ID);
 
-        $rows = $companies->map(function ($company) use ($inventorySettingsByCompany) {
-            $companyId = (int) $company->id;
-            $settings = $inventorySettingsByCompany->get($companyId);
+                $inventorySettingsByCompany = collect();
+                if ($this->tableExists('inventory', 'inventory_settings')) {
+                    $inventorySettingsByCompany = $this->adminSettingsMatrixService->getInventorySettingsByCompany();
+                }
 
-            return [
-                'company_id' => $companyId,
-                'tax_id' => $company->tax_id,
-                'legal_name' => $company->legal_name,
-                'trade_name' => $company->trade_name,
-                'company_status' => (int) $company->status,
-                'inventory_settings' => [
-                    'complexity_mode' => $settings ? ($settings->complexity_mode ?? 'BASIC') : 'BASIC',
-                    'inventory_mode' => $settings ? ($settings->inventory_mode ?? 'KARDEX_SIMPLE') : 'KARDEX_SIMPLE',
-                    'lot_outflow_strategy' => $settings ? ($settings->lot_outflow_strategy ?? 'MANUAL') : 'MANUAL',
-                    'enable_inventory_pro' => $settings ? (bool) $settings->enable_inventory_pro : false,
-                    'enable_lot_tracking' => $settings ? (bool) $settings->enable_lot_tracking : false,
-                    'enable_expiry_tracking' => $settings ? (bool) $settings->enable_expiry_tracking : false,
-                    'enable_advanced_reporting' => $settings ? (bool) $settings->enable_advanced_reporting : false,
-                    'enable_graphical_dashboard' => $settings ? (bool) $settings->enable_graphical_dashboard : false,
-                    'enable_location_control' => $settings ? (bool) $settings->enable_location_control : false,
-                    'allow_negative_stock' => $settings ? (bool) $settings->allow_negative_stock : false,
-                    'low_stock_alert_threshold' => $settings ? (int) ($settings->low_stock_alert_threshold ?? 5) : 5,
-                    'enforce_lot_for_tracked' => $settings ? (bool) $settings->enforce_lot_for_tracked : false,
-                ],
-            ];
-        })->values();
+                return $companies->map(function ($company) use ($inventorySettingsByCompany) {
+                    $companyId = (int) $company->id;
+                    $settings = $inventorySettingsByCompany->get($companyId);
+
+                    return [
+                        'company_id' => $companyId,
+                        'tax_id' => $company->tax_id,
+                        'legal_name' => $company->legal_name,
+                        'trade_name' => $company->trade_name,
+                        'company_status' => (int) $company->status,
+                        'inventory_settings' => [
+                            'complexity_mode' => $settings ? ($settings->complexity_mode ?? 'BASIC') : 'BASIC',
+                            'inventory_mode' => $settings ? ($settings->inventory_mode ?? 'KARDEX_SIMPLE') : 'KARDEX_SIMPLE',
+                            'lot_outflow_strategy' => $settings ? ($settings->lot_outflow_strategy ?? 'MANUAL') : 'MANUAL',
+                            'enable_inventory_pro' => $settings ? (bool) $settings->enable_inventory_pro : false,
+                            'enable_lot_tracking' => $settings ? (bool) $settings->enable_lot_tracking : false,
+                            'enable_expiry_tracking' => $settings ? (bool) $settings->enable_expiry_tracking : false,
+                            'enable_advanced_reporting' => $settings ? (bool) $settings->enable_advanced_reporting : false,
+                            'enable_graphical_dashboard' => $settings ? (bool) $settings->enable_graphical_dashboard : false,
+                            'enable_location_control' => $settings ? (bool) $settings->enable_location_control : false,
+                            'allow_negative_stock' => $settings ? (bool) $settings->allow_negative_stock : false,
+                            'low_stock_alert_threshold' => $settings ? (int) ($settings->low_stock_alert_threshold ?? 5) : 5,
+                            'enforce_lot_for_tracked' => $settings ? (bool) $settings->enforce_lot_for_tracked : false,
+                        ],
+                    ];
+                })->values()->all();
+            }
+        ));
 
         return response()->json(['companies' => $rows]);
     }
@@ -3215,6 +3225,8 @@ class AppConfigController extends Controller
                 $hasCreatedAt ? ['created_at' => now()] : []
             )
         );
+
+        Cache::forget('appcfg:company_inventory_settings_admin_matrix:v1:system_company:' . self::SYSTEM_COMPANY_ID);
 
         return $this->companyInventorySettingsAdminMatrix($request);
     }

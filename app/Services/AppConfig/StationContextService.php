@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Cache;
 class StationContextService
 {
     private const SCHEMA_CACHE_TTL_SECONDS = 300;
-    private const STATION_RESOLVE_CACHE_TTL_SECONDS = 5;
+    private const STATION_RESOLVE_CACHE_TTL_SECONDS = 60;
 
     private ?bool $hasStationContextSchema = null;
 

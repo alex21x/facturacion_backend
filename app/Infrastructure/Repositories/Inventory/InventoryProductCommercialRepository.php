@@ -32,14 +32,28 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             $this->companyCacheKey($companyId, 'enabled_units'),
             now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
             function () use ($companyId) {
-                return DB::table('core.units as u')
-                    ->join('appcfg.company_units as cu', function ($join) use ($companyId) {
-                        $join->on('cu.unit_id', '=', 'u.id')
-                            ->where('cu.company_id', '=', $companyId)
-                            ->where('cu.is_enabled', '=', true);
-                    })
-                    ->select('u.id', 'u.code', 'u.name', 'u.sunat_uom_code')
-                    ->orderBy('u.name')
+                $hasCompanyUnitsTable = DB::getSchemaBuilder()->hasTable('appcfg.company_units');
+
+                if ($hasCompanyUnitsTable) {
+                    $rows = DB::table('core.units as u')
+                        ->join('appcfg.company_units as cu', function ($join) use ($companyId) {
+                            $join->on('cu.unit_id', '=', 'u.id')
+                                ->where('cu.company_id', '=', $companyId)
+                                ->where('cu.is_enabled', '=', true);
+                        })
+                        ->select('u.id', 'u.code', 'u.name', 'u.sunat_uom_code')
+                        ->orderBy('u.name')
+                        ->get();
+
+                    if ($rows->isNotEmpty()) {
+                        return $rows;
+                    }
+                }
+
+                // Fallback for legacy/misaligned environments without appcfg.company_units seed.
+                return DB::table('core.units')
+                    ->select('id', 'code', 'name', 'sunat_uom_code')
+                    ->orderBy('name')
                     ->get();
             }
         );
@@ -188,51 +202,161 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             throw new \RuntimeException('Product not found');
         }
 
-        $this->ensureProductSaleUnitsTable();
-        $this->ensureProductPriceTierValuesTable();
+        $this->assertCommercialTablesReady();
 
-        DB::transaction(function () use ($payload, $companyId, $productId, $authUser) {
-            if (array_key_exists('base_unit_id', $payload)) {
-                DB::table('inventory.products')
-                    ->where('id', $productId)
-                    ->where('company_id', $companyId)
-                    ->update([
-                        'unit_id' => $payload['base_unit_id'],
-                    ]);
-            }
+        $features = $this->commerceFeatures($companyId);
+        $enabledUnitIds = DB::table('core.units')->pluck('id')->map(fn($id) => (int) $id)->all();
+        $enabledUnitMap = array_fill_keys($enabledUnitIds, true);
 
+        DB::transaction(function () use ($payload, $companyId, $productId, $authUser, $features, $enabledUnitMap) {
+            $productRow = DB::table('inventory.products')
+                ->where('id', $productId)
+                ->where('company_id', $companyId)
+                ->select('unit_id')
+                ->first();
+
+            $baseUnitId = array_key_exists('base_unit_id', $payload)
+                ? ($payload['base_unit_id'] !== null ? (int) $payload['base_unit_id'] : null)
+                : ($productRow && $productRow->unit_id !== null ? (int) $productRow->unit_id : null);
+
+            $unitsPayload = [];
             if (array_key_exists('units', $payload)) {
+                if (!$features[self::FEATURE_MULTI_UOM]) {
+                    throw new \RuntimeException('La empresa no tiene habilitada la funcionalidad de multiples unidades por producto.');
+                }
+
+                foreach (($payload['units'] ?? []) as $row) {
+                    $unitId = (int) ($row['unit_id'] ?? 0);
+                    if ($unitId <= 0) {
+                        throw new \RuntimeException('Unidad de venta invalida.');
+                    }
+                    if (!isset($enabledUnitMap[$unitId])) {
+                        throw new \RuntimeException('La unidad seleccionada no existe en catalogo.');
+                    }
+
+                    if (isset($unitsPayload[$unitId])) {
+                        throw new \RuntimeException('No se permiten unidades repetidas para el mismo producto.');
+                    }
+
+                    $unitsPayload[$unitId] = [
+                        'unit_id' => $unitId,
+                        'is_base' => (bool) ($row['is_base'] ?? false),
+                        'status' => (int) ($row['status'] ?? 1) === 1 ? 1 : 0,
+                    ];
+                }
+
+                if (empty($unitsPayload)) {
+                    throw new \RuntimeException('Debes registrar al menos una unidad de venta.');
+                }
+
+                $declaredBaseUnitId = null;
+                foreach ($unitsPayload as $unitId => $row) {
+                    if ($row['is_base']) {
+                        $declaredBaseUnitId = $unitId;
+                        break;
+                    }
+                }
+
+                if ($baseUnitId === null) {
+                    $baseUnitId = $declaredBaseUnitId ?? (int) array_key_first($unitsPayload);
+                }
+
+                if (!isset($unitsPayload[$baseUnitId])) {
+                    throw new \RuntimeException('La unidad base debe pertenecer a la lista de unidades del producto.');
+                }
+
+                foreach ($unitsPayload as $unitId => $row) {
+                    $unitsPayload[$unitId]['is_base'] = $unitId === $baseUnitId;
+                }
+
                 DB::table('inventory.product_sale_units')
                     ->where('company_id', $companyId)
                     ->where('product_id', $productId)
                     ->delete();
 
-                foreach ($payload['units'] as $row) {
+                foreach (array_values($unitsPayload) as $row) {
                     DB::table('inventory.product_sale_units')->insert([
                         'company_id' => $companyId,
                         'product_id' => $productId,
-                        'unit_id' => (int) $row['unit_id'],
-                        'is_base' => (bool) ($row['is_base'] ?? false),
-                        'status' => (int) ($row['status'] ?? 1),
+                        'unit_id' => $row['unit_id'],
+                        'is_base' => $row['is_base'],
+                        'status' => $row['status'],
                         'updated_by' => $authUser->id,
                         'updated_at' => now(),
                     ]);
                 }
             }
 
+            if (array_key_exists('base_unit_id', $payload) || array_key_exists('units', $payload)) {
+                if ($baseUnitId !== null && !isset($enabledUnitMap[$baseUnitId])) {
+                    throw new \RuntimeException('La unidad base seleccionada no existe en catalogo.');
+                }
+
+                DB::table('inventory.products')
+                    ->where('id', $productId)
+                    ->where('company_id', $companyId)
+                    ->update([
+                        'unit_id' => $baseUnitId,
+                    ]);
+            }
+
+            $allowedUnitIds = [];
+            if (!empty($unitsPayload)) {
+                $allowedUnitIds = array_keys($unitsPayload);
+            } else {
+                $existingUnits = DB::table('inventory.product_sale_units')
+                    ->where('company_id', $companyId)
+                    ->where('product_id', $productId)
+                    ->pluck('unit_id')
+                    ->map(fn($id) => (int) $id)
+                    ->all();
+
+                $allowedUnitIds = $existingUnits;
+                if ($baseUnitId !== null && !in_array($baseUnitId, $allowedUnitIds, true)) {
+                    $allowedUnitIds[] = $baseUnitId;
+                }
+            }
+
+            $allowedUnitMap = array_fill_keys($allowedUnitIds, true);
+
             if (array_key_exists('conversions', $payload)) {
+                if (!$features[self::FEATURE_UOM_CONVERSIONS]) {
+                    throw new \RuntimeException('La empresa no tiene habilitadas las conversiones por unidad.');
+                }
+
                 DB::table('inventory.product_uom_conversions')
                     ->where('company_id', $companyId)
                     ->where('product_id', $productId)
                     ->delete();
 
-                foreach ($payload['conversions'] as $row) {
+                $pairs = [];
+                foreach (($payload['conversions'] ?? []) as $row) {
+                    $fromUnitId = (int) ($row['from_unit_id'] ?? 0);
+                    $toUnitId = (int) ($row['to_unit_id'] ?? 0);
+                    $factor = (float) ($row['conversion_factor'] ?? 0);
+
+                    if ($fromUnitId <= 0 || $toUnitId <= 0 || $fromUnitId === $toUnitId) {
+                        throw new \RuntimeException('Cada conversion debe tener unidades origen/destino validas y distintas.');
+                    }
+                    if ($factor <= 0) {
+                        throw new \RuntimeException('El factor de conversion debe ser mayor a cero.');
+                    }
+                    if (!isset($allowedUnitMap[$fromUnitId]) || !isset($allowedUnitMap[$toUnitId])) {
+                        throw new \RuntimeException('Las conversiones solo pueden usar unidades configuradas en el producto.');
+                    }
+
+                    $pairKey = $fromUnitId . ':' . $toUnitId;
+                    if (isset($pairs[$pairKey])) {
+                        throw new \RuntimeException('No se permiten conversiones duplicadas para el mismo par de unidades.');
+                    }
+                    $pairs[$pairKey] = true;
+
                     DB::table('inventory.product_uom_conversions')->insert([
                         'company_id' => $companyId,
                         'product_id' => $productId,
-                        'from_unit_id' => (int) $row['from_unit_id'],
-                        'to_unit_id' => (int) $row['to_unit_id'],
-                        'conversion_factor' => $row['conversion_factor'],
+                        'from_unit_id' => $fromUnitId,
+                        'to_unit_id' => $toUnitId,
+                        'conversion_factor' => $factor,
                         'status' => (int) ($row['status'] ?? 1),
                         'created_at' => now(),
                     ]);
@@ -240,17 +364,26 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             }
 
             if (array_key_exists('wholesale_prices', $payload)) {
+                if (!$features[self::FEATURE_WHOLESALE_PRICING]) {
+                    throw new \RuntimeException('La empresa no tiene habilitados los precios mayoristas por escala.');
+                }
+
                 DB::table('sales.product_price_tier_values')
                     ->where('company_id', $companyId)
                     ->where('product_id', $productId)
                     ->delete();
 
-                foreach ($payload['wholesale_prices'] as $row) {
+                foreach (($payload['wholesale_prices'] ?? []) as $row) {
+                    $unitId = isset($row['unit_id']) && $row['unit_id'] !== null ? (int) $row['unit_id'] : null;
+                    if ($unitId !== null && !isset($allowedUnitMap[$unitId])) {
+                        throw new \RuntimeException('Los precios mayoristas por unidad deben usar unidades configuradas en el producto.');
+                    }
+
                     DB::table('sales.product_price_tier_values')->insert([
                         'company_id' => $companyId,
                         'product_id' => $productId,
                         'price_tier_id' => (int) $row['price_tier_id'],
-                        'unit_id' => isset($row['unit_id']) ? (int) $row['unit_id'] : null,
+                        'unit_id' => $unitId,
                         'unit_price' => $row['unit_price'],
                         'status' => (int) ($row['status'] ?? 1),
                         'updated_by' => $authUser->id,
@@ -290,54 +423,18 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
         return sprintf('inventory:product-commercial:%d:%s', $companyId, $suffix);
     }
 
-    private function ensureProductSaleUnitsTable(): void
+    private function assertCommercialTablesReady(): void
     {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS inventory.product_sale_units (
-                company_id BIGINT NOT NULL,
-                product_id BIGINT NOT NULL,
-                unit_id BIGINT NOT NULL,
-                is_base BOOLEAN NOT NULL DEFAULT FALSE,
-                status SMALLINT NOT NULL DEFAULT 1,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMPTZ NULL,
-                PRIMARY KEY (company_id, product_id, unit_id)
-            )'
-        );
-    }
+        $requiredTables = [
+            'inventory.product_sale_units',
+            'inventory.product_uom_conversions',
+            'sales.product_price_tier_values',
+        ];
 
-    private function ensureProductPriceTierValuesTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS sales.product_price_tier_values (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL,
-                product_id BIGINT NOT NULL,
-                price_tier_id BIGINT NOT NULL,
-                unit_id BIGINT NULL,
-                unit_price NUMERIC(18,6) NOT NULL,
-                status SMALLINT NOT NULL DEFAULT 1,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMPTZ NULL,
-                UNIQUE(company_id, product_id, price_tier_id, unit_id)
-            )'
-        );
-    }
-
-    private function ensureProductTierPricesTable(): void
-    {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS sales.product_tier_prices (
-                id BIGSERIAL PRIMARY KEY,
-                company_id BIGINT NOT NULL,
-                product_id BIGINT NOT NULL,
-                tier_id BIGINT NOT NULL,
-                currency_id BIGINT NOT NULL,
-                unit_price NUMERIC(14,4) NOT NULL,
-                valid_from TIMESTAMPTZ NULL,
-                valid_to TIMESTAMPTZ NULL,
-                status SMALLINT NOT NULL DEFAULT 1
-            )'
-        );
+        foreach ($requiredTables as $table) {
+            if (!DB::getSchemaBuilder()->hasTable($table)) {
+                throw new \RuntimeException('Falta la tabla ' . $table . '. Ejecuta migraciones antes de configurar multiples unidades.');
+            }
+        }
     }
 }

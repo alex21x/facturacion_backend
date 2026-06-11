@@ -87,6 +87,9 @@ class AppConfigController extends Controller
     ];
 
     private const ADMIN_COMMERCE_FEATURE_CODES = [
+        'PRODUCT_MULTI_UOM',
+        'PRODUCT_UOM_CONVERSIONS',
+        'PRODUCT_WHOLESALE_PRICING',
         'SALES_CUSTOMER_PRICE_PROFILE',
         'SALES_WORKSHOP_MULTI_VEHICLE',
         'SALES_ORDER_MULTI_PAYMENT_ENABLED',

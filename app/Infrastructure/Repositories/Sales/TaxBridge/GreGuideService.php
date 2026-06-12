@@ -1123,11 +1123,6 @@ class GreGuideService
             'body_first_200' => mb_substr($jsonRaw, 0, 200),
         ]);
 
-        // Log detailed headers for comparison with legacy
-        \Log::debug('[BRIDGE-GRE-DEBUG] Request headers sent', [
-            'headers' => $httpReq->getHeaders(),
-        ]);
-        
         // If successful or if we got a meaningful error, return the response
         if ($jsonResponse->successful() || !$this->shouldRetryGreAsFormData($jsonResponse, $jsonRaw)) {
             \Log::debug('[BRIDGE-GRE-DEBUG] Response headers received', [

@@ -37,7 +37,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Throwable;
@@ -1482,6 +1481,7 @@ class SalesController extends Controller
         }
 
         $request->attributes->set('resolved_company_id', $companyId);
+        $request->attributes->set('is_public_pdf_link', true);
         return $this->printableCommercialDocumentPdf($request, $id);
     }
 
@@ -1523,6 +1523,11 @@ class SalesController extends Controller
             ], 422);
         }
 
+        $isPublicPdfLink = (bool) $request->attributes->get('is_public_pdf_link', false);
+        if ($isPublicPdfLink) {
+            $doc['public_pdf_link'] = true;
+        }
+
         $format = in_array($request->query('format'), ['ticket', 'a4'], true)
             ? (string) $request->query('format')
             : 'a4';
@@ -1532,16 +1537,19 @@ class SalesController extends Controller
         $fileName = ($series !== '' ? $series : 'DOC') . '-' . ($number !== '' ? $number : '0') . '.pdf';
 
         $options = new Options();
-        // Local testing: avoid remote asset fetch timeouts during PDF rendering.
-        $options->set('isRemoteEnabled', false);
+        // Keep internal PDF generation local-only; public signed links can resolve remote frontend assets.
+        $options->set('isRemoteEnabled', $isPublicPdfLink);
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isPhpEnabled', false);
         $options->set('defaultMediaType', 'print');
         $options->set('dpi', 96);
 
-        $buildPdfOutput = function (array $pdfDoc) use ($options, $format): string {
+        $buildPdfOutput = function (array $pdfDoc) use ($options, $format, $isPublicPdfLink): string {
             $dompdf = new Dompdf($options);
             $html = $this->renderCommercialDocumentTicketHtml($pdfDoc, $format);
+            if ($isPublicPdfLink && $format === 'a4') {
+                $html = $this->applyPublicA4PdfLayoutAdjustments($html);
+            }
             $dompdf->loadHtml($html, 'UTF-8');
 
             if ($format === 'ticket') {
@@ -1602,6 +1610,23 @@ class SalesController extends Controller
         }
 
         return false;
+    }
+
+    private function applyPublicA4PdfLayoutAdjustments(string $html): string
+    {
+        return str_replace(
+            [
+                '@page { size: A4 portrait; margin: 8mm; }',
+                'body { margin: 0; padding: 0 1mm; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }',
+                '.sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }',
+            ],
+            [
+                '@page { size: A4 portrait; margin: 10mm; }',
+                'body { margin: 0; padding: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }',
+                '.sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }',
+            ],
+            $html
+        );
     }
 
         private function renderCommercialDocumentA4LegacyHtml(array $doc): string
@@ -1870,25 +1895,15 @@ class SalesController extends Controller
 
                 $paymentBrandsSection = '';
                 if ($showPaymentBrands) {
-                    $paymentBrandSources = [
-                        'Yape' => $this->resolvePaymentBrandImageSource('yape-official.png'),
-                        'Plin' => $this->resolvePaymentBrandImageSource('plin-official.png'),
-                        'Culqi' => $this->resolvePaymentBrandImageSource('culqi-official.png'),
-                    ];
+                    $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
+                    $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
+                    $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
 
-                    $paymentBrandBlocks = '';
-                    foreach ($paymentBrandSources as $brandName => $brandSource) {
-                        $resolvedSource = trim((string) $brandSource);
-                        if ($resolvedSource === '') {
-                            continue;
-                        }
-
-                        $paymentBrandBlocks .= '<div class="paybrand"><img src="' . $this->escapeHtml($resolvedSource) . '" alt="' . $this->escapeHtml($brandName) . '" /></div>';
-                    }
-
-                    if ($paymentBrandBlocks !== '') {
-                        $paymentBrandsSection = '<div class="pay-logos">' . $paymentBrandBlocks . '</div>';
-                    }
+                    $paymentBrandsSection = '<div class="pay-logos">'
+                        . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
+                        . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
+                        . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
+                        . '</div>';
                 }
 
                 $electronicSignatureRaw = $this->findFirstMetaStringValue($metaData, [
@@ -1952,10 +1967,10 @@ class SalesController extends Controller
     <meta charset="utf-8" />
     <title>{$documentFileName}</title>
     <style>
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A4 portrait; margin: 8mm; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-        .sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
+        body { margin: 0; padding: 0 1mm; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+        .sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
         .top-logo { width: 19%; padding-right: 3mm; }
@@ -2345,25 +2360,15 @@ HTML;
         $paymentBrandsSection = '';
         if ($showPaymentBrands) {
             $logosClass = $isA4 ? 'company-footer-logos company-footer-logos--a4' : 'company-footer-logos company-footer-logos--ticket';
-            $paymentBrandSources = [
-                'Yape' => $this->resolvePaymentBrandImageSource('yape-official.png'),
-                'Plin' => $this->resolvePaymentBrandImageSource('plin-official.png'),
-                'Culqi' => $this->resolvePaymentBrandImageSource('culqi-official.png'),
-            ];
+            $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
+            $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
+            $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
 
-            $paymentBrandBlocks = '';
-            foreach ($paymentBrandSources as $brandName => $brandSource) {
-                $resolvedSource = trim((string) $brandSource);
-                if ($resolvedSource === '') {
-                    continue;
-                }
-
-                $paymentBrandBlocks .= '<div class="paybrand"><img src="' . $this->escapeHtml($resolvedSource) . '" alt="' . $this->escapeHtml($brandName) . '" /></div>';
-            }
-
-            if ($paymentBrandBlocks !== '') {
-                $paymentBrandsSection = '<div class="' . $logosClass . '">' . $paymentBrandBlocks . '</div>';
-            }
+            $paymentBrandsSection = '<div class="' . $logosClass . '">'
+                . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
+                . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
+                . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
+                . '</div>';
         }
 
         $sheetWidth = $isA4 ? '100%' : '80mm';
@@ -2683,59 +2688,7 @@ HTML;
             }
         }
 
-        $remoteAssetUrl = $this->resolveFrontendAssetUrl($relativePath);
-        $remoteDataUri = $this->urlToImageDataUri($remoteAssetUrl);
-        if ($remoteDataUri !== null) {
-            return $remoteDataUri;
-        }
-
-        return '';
-    }
-
-    private function urlToImageDataUri(string $url): ?string
-    {
-        $target = trim($url);
-        if ($target === '' || preg_match('#^https?://#i', $target) !== 1) {
-            return null;
-        }
-
-        try {
-            $response = Http::timeout(5)->get($target);
-            if (!$response->successful()) {
-                return null;
-            }
-
-            $contents = $response->body();
-            if (!is_string($contents) || $contents === '') {
-                return null;
-            }
-
-            $contentType = strtolower(trim((string) $response->header('Content-Type', '')));
-            if (($pos = strpos($contentType, ';')) !== false) {
-                $contentType = trim(substr($contentType, 0, $pos));
-            }
-
-            if (!str_starts_with($contentType, 'image/')) {
-                $pathPart = (string) parse_url($target, PHP_URL_PATH);
-                $ext = strtolower(pathinfo($pathPart, PATHINFO_EXTENSION));
-                $contentType = match ($ext) {
-                    'png' => 'image/png',
-                    'jpg', 'jpeg' => 'image/jpeg',
-                    'gif' => 'image/gif',
-                    'webp' => 'image/webp',
-                    'svg' => 'image/svg+xml',
-                    default => '',
-                };
-            }
-
-            if ($contentType === '' || !str_starts_with($contentType, 'image/')) {
-                return null;
-            }
-
-            return 'data:' . $contentType . ';base64,' . base64_encode($contents);
-        } catch (\Throwable $e) {
-            return null;
-        }
+        return $this->resolveFrontendAssetUrl($relativePath);
     }
 
     private function filePathToImageDataUri(string $path): ?string

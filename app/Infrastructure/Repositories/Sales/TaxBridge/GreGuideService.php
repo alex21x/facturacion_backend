@@ -1861,19 +1861,22 @@ HTML;
         $driver = json_decode((string) ($row->driver ?? '{}'), true);
         $driver = is_array($driver) ? $driver : [];
 
+        $empresa = $this->buildCompanyAuthBlock($companyId, $config);
+
         $modalidad = (string) ($row->transport_mode_code ?? '02');
 
         $cabecera = [
             'tipo_documento' => '09',
             'guia_serie' => (string) ($row->series ?? ''),
-            'guia_numero' => str_pad((string) ($row->number ?? 0), 8, '0', STR_PAD_LEFT),
-            'ticket' => '',
+            // Legacy bridge accepts unpadded guide number and null ticket.
+            'guia_numero' => (string) ($row->number ?? 0),
+            'ticket' => null,
             'fecha_emision' => (string) ($row->issue_date ?? ''),
             'fecha_traslado' => (string) (($row->transfer_date ?? null) ?: ($row->issue_date ?? '')),
             'motivo_codigo' => (string) ($row->motivo_traslado ?? '01'),
-            'motivo_descripcion' => $this->resolveTransferReasonDescription((string) ($row->motivo_traslado ?? '01')),
+            'motivo_descripcion' => mb_strtoupper($this->resolveTransferReasonDescription((string) ($row->motivo_traslado ?? '01')), 'UTF-8'),
             'modalidad_codigo' => $modalidad,
-            'peso_total' => round((float) ($row->weight_kg ?? 0), 3),
+            'peso_total' => number_format((float) ($row->weight_kg ?? 0), 2, '.', ''),
             'numero_bultos' => (int) ($row->packages_count ?? 1),
             'ubigeo_partida' => (string) ($row->partida_ubigeo ?? ''),
             'partida_direccion' => (string) ($row->punto_partida ?? ''),
@@ -1882,26 +1885,19 @@ HTML;
             'destinatario_codigo' => (string) ($destinatario['doc_type'] ?? '6'),
             'destinatario_ruc' => (string) ($destinatario['doc_number'] ?? ''),
             'destinatario_razon_social' => (string) ($destinatario['name'] ?? ''),
+            // Keep transporter fields in payload for bridge compatibility even in private mode.
+            'transporte_codigo' => (string) ($transporter['doc_type'] ?? '6'),
+            'transporte_ruc' => (string) (($transporter['doc_number'] ?? '') !== '' ? $transporter['doc_number'] : ($empresa['ruc'] ?? '')),
+            'transporte_razon_social' => (string) (($transporter['name'] ?? '') !== '' ? $transporter['name'] : ($empresa['razon_social'] ?? '')),
         ];
 
         if ($modalidad === '02') {
             $cabecera['vehiculo_placa'] = (string) ($vehicle['placa'] ?? '');
-            $vehicleBrand = trim((string) ($vehicle['marca'] ?? ($vehicle['brand'] ?? '')));
-            $vehicleLicense = trim((string) ($vehicle['license'] ?? ($vehicle['licencia'] ?? ($vehicle['vehiculo_licencia'] ?? ''))));
-            if ($vehicleBrand !== '') {
-                $cabecera['vehiculo_marca'] = $vehicleBrand;
-            }
-            if ($vehicleLicense !== '') {
-                $cabecera['vehiculo_licencia'] = $vehicleLicense;
-            }
             $cabecera['conductor_codigo'] = (string) ($driver['doc_type'] ?? '1');
             $cabecera['conductor_ruc'] = (string) ($driver['doc_number'] ?? '');
             $cabecera['conductor_licencia'] = (string) ($driver['license'] ?? ($driver['licencia'] ?? ''));
             $cabecera['conductor_razon_social'] = (string) ($driver['name'] ?? '');
         } else {
-            $cabecera['transporte_codigo'] = (string) ($transporter['doc_type'] ?? '6');
-            $cabecera['transporte_ruc'] = (string) ($transporter['doc_number'] ?? '');
-            $cabecera['transporte_razon_social'] = (string) ($transporter['name'] ?? '');
             $nroMtc = trim((string) ($transporter['nro_mtc'] ?? ($transporter['mtc'] ?? '')));
             if ($nroMtc !== '') {
                 $cabecera['nro_mtc'] = $nroMtc;
@@ -1911,15 +1907,16 @@ HTML;
         $detalle = [];
         foreach ($items as $item) {
             $detalle[] = [
+                'sunat' => '',
                 'codigo' => (string) ($item['code'] ?? ''),
                 'descripcion' => (string) ($item['description'] ?? ''),
-                'cantidad' => (float) ($item['qty'] ?? 0),
+                'cantidad' => (string) ($item['qty'] ?? 0),
                 'unidad' => (string) ($item['unit'] ?? 'NIU'),
             ];
         }
 
         return [
-            'empresa' => $this->buildCompanyAuthBlock($companyId, $config),
+            'empresa' => $empresa,
             'cabecera' => $cabecera,
             'detalle' => $detalle,
         ];

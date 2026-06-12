@@ -167,6 +167,7 @@ class SalesController extends Controller
             'SALES_ANTICIPO_ENABLED' => false,
             'SALES_TAX_BRIDGE' => false,
             'SALES_TAX_BRIDGE_DEBUG_VIEW' => false,
+            'SALES_PRINT_SHOW_PRODUCT_CODES' => true,
             'SALES_GLOBAL_DISCOUNT_ENABLED' => false,
             'SALES_ITEM_DISCOUNT_ENABLED' => false,
             'SALES_FREE_ITEMS_ENABLED' => false,
@@ -1504,7 +1505,15 @@ class SalesController extends Controller
             ? (string) $request->query('format')
             : 'ticket';
 
-        $html = $this->renderCommercialDocumentTicketHtml($doc, $format);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $showProductCodes = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            null,
+            'SALES_PRINT_SHOW_PRODUCT_CODES',
+            true
+        );
+
+        $html = $this->renderCommercialDocumentTicketHtml($doc, $format, $showProductCodes);
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -1531,6 +1540,7 @@ class SalesController extends Controller
         $format = in_array($request->query('format'), ['ticket', 'a4'], true)
             ? (string) $request->query('format')
             : 'a4';
+        $resolvedCompanyId = (int) $request->attributes->get('resolved_company_id');
 
         $series = preg_replace('/[^A-Za-z0-9\-_]/', '', trim((string) ($doc['series'] ?? 'DOC')));
         $number = preg_replace('/[^0-9]/', '', trim((string) ($doc['number'] ?? '0')));
@@ -1544,9 +1554,13 @@ class SalesController extends Controller
         $options->set('defaultMediaType', 'print');
         $options->set('dpi', 96);
 
-        $buildPdfOutput = function (array $pdfDoc) use ($options, $format, $isPublicPdfLink): string {
+        $buildPdfOutput = function (array $pdfDoc) use ($options, $format, $isPublicPdfLink, $resolvedCompanyId): string {
+            $companyId = $resolvedCompanyId > 0 ? $resolvedCompanyId : (int) ($pdfDoc['companyId'] ?? $pdfDoc['company_id'] ?? 0);
+            $showProductCodes = $companyId > 0
+                ? $this->isCommerceFeatureEnabledForContextWithDefault($companyId, null, 'SALES_PRINT_SHOW_PRODUCT_CODES', true)
+                : true;
             $dompdf = new Dompdf($options);
-            $html = $this->renderCommercialDocumentTicketHtml($pdfDoc, $format);
+            $html = $this->renderCommercialDocumentTicketHtml($pdfDoc, $format, $showProductCodes);
             if ($isPublicPdfLink && $format === 'a4') {
                 $html = $this->applyPublicA4PdfLayoutAdjustments($html);
             }
@@ -1629,7 +1643,7 @@ class SalesController extends Controller
         );
     }
 
-        private function renderCommercialDocumentA4LegacyHtml(array $doc): string
+        private function renderCommercialDocumentA4LegacyHtml(array $doc, bool $showProductCodes = true): string
         {
                 $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
                 $metaData = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
@@ -1817,7 +1831,8 @@ class SalesController extends Controller
                         $discount = (float) ($item['discountTotal'] ?? $item['discount'] ?? 0);
                         $lineTotal = (float) ($item['lineTotal'] ?? 0);
 
-                        $itemRows .= '<tr>'
+                        if ($showProductCodes) {
+                            $itemRows .= '<tr>'
                                 . '<td class="c">' . (int) ($item['lineNo'] ?? 0) . '</td>'
                                 . '<td class="c">' . ($itemCodeRaw !== '' ? $this->escapeHtml($itemCodeRaw) : '-') . '</td>'
                                 . '<td class="r">' . $this->formatAmount((float) ($item['qty'] ?? 0)) . '</td>'
@@ -1828,9 +1843,21 @@ class SalesController extends Controller
                                 . '<td class="r">' . $this->formatAmount($discount) . '</td>'
                                 . '<td class="r">' . $this->formatAmount($lineTotal) . '</td>'
                                 . '</tr>';
+                        } else {
+                            $itemRows .= '<tr>'
+                                . '<td class="c">' . (int) ($item['lineNo'] ?? 0) . '</td>'
+                                . '<td class="r">' . $this->formatAmount((float) ($item['qty'] ?? 0)) . '</td>'
+                                . '<td class="c">' . $this->escapeHtml((string) ($item['unitLabel'] ?? 'NIU')) . '</td>'
+                                . '<td class="l">' . $this->escapeHtml((string) ($item['description'] ?? '-')) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($unitPrice) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($salePrice) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($discount) . '</td>'
+                                . '<td class="r">' . $this->formatAmount($lineTotal) . '</td>'
+                                . '</tr>';
+                        }
                 }
                 if ($itemRows === '') {
-                        $itemRows = '<tr><td colspan="9" class="c">SIN ITEMS</td></tr>';
+                        $itemRows = '<tr><td colspan="' . ($showProductCodes ? '9' : '8') . '" class="c">SIN ITEMS</td></tr>';
                 }
 
                 $documentFileName = $this->escapeHtml(trim((string) ($doc['series'] ?? '')) . '-' . trim((string) ($doc['number'] ?? '')) . '.pdf');
@@ -2100,17 +2127,7 @@ class SalesController extends Controller
 
         <table class="items">
             <thead>
-                <tr>
-                    <th style="width:5%">Item</th>
-                    <th style="width:12%">Codigo</th>
-                    <th style="width:8%">Cant.</th>
-                    <th style="width:8%">Unid.</th>
-                    <th style="width:33%">Descripcion</th>
-                    <th style="width:10%">Valor Unit.</th>
-                    <th style="width:10%">Precio Vta.</th>
-                    <th style="width:7%">Dscto.</th>
-                    <th style="width:7%">Valor Vta.</th>
-                </tr>
+                {$this->buildLegacyA4HeaderRow($showProductCodes)}
             </thead>
             <tbody>
                 {$itemRows}
@@ -2144,11 +2161,11 @@ class SalesController extends Controller
 HTML;
         }
 
-    private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket'): string
+        private function renderCommercialDocumentTicketHtml(array $doc, string $format = 'ticket', bool $showProductCodes = true): string
     {
         $isA4 = $format === 'a4';
                 if ($isA4) {
-                        return $this->renderCommercialDocumentA4LegacyHtml($doc);
+                return $this->renderCommercialDocumentA4LegacyHtml($doc, $showProductCodes);
                 }
 
         $company = is_array($doc['company'] ?? null) ? $doc['company'] : [];
@@ -2318,12 +2335,16 @@ HTML;
             if ($productCodeRaw === '' && !empty($item['productId'])) {
                 $productCodeRaw = 'ID-' . (int) $item['productId'];
             }
-            $itemCodeHtml = $productCodeRaw !== ''
+            $itemCodeHtml = $showProductCodes && $productCodeRaw !== ''
                 ? '<div class="item-code">COD: ' . $this->escapeHtml($productCodeRaw) . '</div>'
                 : '';
 
             if ($isA4) {
-                $itemRows .= "\n                <tr class=\"items-a4-row\"><td class=\"ta-c\">" . ($lineNo > 0 ? (string) $lineNo : '-') . "</td><td class=\"ta-c\">" . ($productCodeRaw !== '' ? $this->escapeHtml($productCodeRaw) : '-') . "</td><td class=\"ta-r\">{$qty}</td><td class=\"ta-c\">{$unitLabel}</td><td>{$description}</td><td class=\"ta-r\">{$currency} {$unitPrice}</td><td class=\"ta-r\">{$currency} {$lineTotal}</td></tr>\n";
+                if ($showProductCodes) {
+                    $itemRows .= "\n                <tr class=\"items-a4-row\"><td class=\"ta-c\">" . ($lineNo > 0 ? (string) $lineNo : '-') . "</td><td class=\"ta-c\">" . ($productCodeRaw !== '' ? $this->escapeHtml($productCodeRaw) : '-') . "</td><td class=\"ta-r\">{$qty}</td><td class=\"ta-c\">{$unitLabel}</td><td>{$description}</td><td class=\"ta-r\">{$currency} {$unitPrice}</td><td class=\"ta-r\">{$currency} {$lineTotal}</td></tr>\n";
+                } else {
+                    $itemRows .= "\n                <tr class=\"items-a4-row\"><td class=\"ta-c\">" . ($lineNo > 0 ? (string) $lineNo : '-') . "</td><td class=\"ta-r\">{$qty}</td><td class=\"ta-c\">{$unitLabel}</td><td>{$description}</td><td class=\"ta-r\">{$currency} {$unitPrice}</td><td class=\"ta-r\">{$currency} {$lineTotal}</td></tr>\n";
+                }
             } else {
                 $itemRows .= "\n                <tr class=\"item-desc-row\"><td class=\"item-desc\">{$itemCodeHtml}{$description}</td></tr>\n";
                 $itemRows .= "                <tr class=\"item-price-row\"><td><div class=\"item-price-wrap\"><span class=\"item-price-unit\">{$qty} x {$currency} {$unitPrice}</span><span class=\"item-price-total\">{$currency} {$lineTotal}</span></div></td></tr>\n";
@@ -2331,7 +2352,7 @@ HTML;
         }
 
         if ($itemRows === '') {
-            $itemRows = '<tr><td style="text-align:center;font-weight:800">Sin items</td></tr>';
+            $itemRows = '<tr><td colspan="' . ($isA4 ? ($showProductCodes ? '7' : '6') : '1') . '" style="text-align:center;font-weight:800">Sin items</td></tr>';
         }
 
         $logoUrl = $this->escapeHtml((string) ($company['logo_url'] ?? $company['logoUrl'] ?? ''));
@@ -2431,7 +2452,9 @@ HTML;
         $itemPricePaddingTop = $isA4 ? '0' : '0.1mm';
         $itemPricePaddingBottom = $isA4 ? '1mm' : '1.1mm';
         $a4ItemTableHead = $isA4
-            ? '<thead><tr><th style="width:7mm">#</th><th style="width:22mm">CODIGO</th><th style="width:16mm">CANT.</th><th style="width:14mm">UNID.</th><th>DESCRIPCION</th><th style="width:22mm">VALOR U.</th><th style="width:24mm">VALOR TOTAL</th></tr></thead>'
+            ? ($showProductCodes
+                ? '<thead><tr><th style="width:7mm">#</th><th style="width:22mm">CODIGO</th><th style="width:16mm">CANT.</th><th style="width:14mm">UNID.</th><th>DESCRIPCION</th><th style="width:22mm">VALOR U.</th><th style="width:24mm">VALOR TOTAL</th></tr></thead>'
+                : '<thead><tr><th style="width:8mm">#</th><th style="width:18mm">CANT.</th><th style="width:16mm">UNID.</th><th>DESCRIPCION</th><th style="width:25mm">VALOR U.</th><th style="width:26mm">VALOR TOTAL</th></tr></thead>')
             : '';
         $itemsTableClass = $isA4 ? 'items-a4' : '';
         $a4SummaryRows = $isA4
@@ -2644,6 +2667,34 @@ TICKETHEAD;
 </body>
 </html>
 HTML;
+    }
+
+    private function buildLegacyA4HeaderRow(bool $showProductCodes): string
+    {
+        if ($showProductCodes) {
+            return '<tr>'
+                . '<th style="width:5%">Item</th>'
+                . '<th style="width:12%">Codigo</th>'
+                . '<th style="width:8%">Cant.</th>'
+                . '<th style="width:8%">Unid.</th>'
+                . '<th style="width:33%">Descripcion</th>'
+                . '<th style="width:10%">Valor Unit.</th>'
+                . '<th style="width:10%">Precio Vta.</th>'
+                . '<th style="width:7%">Dscto.</th>'
+                . '<th style="width:7%">Valor Vta.</th>'
+                . '</tr>';
+        }
+
+        return '<tr>'
+            . '<th style="width:6%">Item</th>'
+            . '<th style="width:9%">Cant.</th>'
+            . '<th style="width:9%">Unid.</th>'
+            . '<th style="width:38%">Descripcion</th>'
+            . '<th style="width:11%">Valor Unit.</th>'
+            . '<th style="width:11%">Precio Vta.</th>'
+            . '<th style="width:8%">Dscto.</th>'
+            . '<th style="width:8%">Valor Vta.</th>'
+            . '</tr>';
     }
 
     private function findFirstMetaStringValue(array $source, array $keys): string

@@ -73,6 +73,7 @@ class AppConfigController extends Controller
         'SALES_ANTICIPO_ENABLED',
         'SALES_TAX_BRIDGE',
         'SALES_TAX_BRIDGE_DEBUG_VIEW',
+        'SALES_PRINT_SHOW_PRODUCT_CODES',
         'SALES_GLOBAL_DISCOUNT_ENABLED',
         'SALES_ITEM_DISCOUNT_ENABLED',
         'SALES_FREE_ITEMS_ENABLED',

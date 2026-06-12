@@ -216,15 +216,25 @@ class CustomerManagementService
 
     public function bulkImportCustomers(int $companyId, array $rows): array
     {
+        // Permit large imports: up to 120 s (overrides php.ini default of 30 s).
+        @set_time_limit(120);
+
         $activeTypesById = $this->customerRepository->getActiveCustomerTypeIdsMap();
+        // Pre-cache sunat-code → type-id to avoid N DB calls in the loop.
+        $sunatCodeToTypeIdCache = [];
 
         $existingByDoc = $this->customerRepository->getExistingCustomersByDocument($companyId);
 
-        $seenInFile = [];
-        $created = 0;
+        $seenInFile  = [];
+        $created     = 0;
         $reactivated = 0;
-        $skipped = 0;
-        $errors = [];
+        $skipped     = 0;
+        $errors      = [];
+
+        // Rows to INSERT in batch (new customers).
+        $insertBatch = [];
+        // Rows to UPDATE individually (reactivate inactive).
+        $reactivateQueue = [];
 
         foreach ($rows as $index => $row) {
             $rowNumber = $index + 2;
@@ -245,7 +255,6 @@ class CustomerManagementService
 
             if (isset($seenInFile[$docNumber])) {
                 $skipped++;
-                $errors[] = ['row' => $rowNumber, 'message' => 'Cliente duplicado dentro del archivo (mismo documento).'];
                 continue;
             }
             $seenInFile[$docNumber] = true;
@@ -263,7 +272,10 @@ class CustomerManagementService
                 );
 
                 if ($resolvedSunatCode !== null) {
-                    $resolvedTypeId = $this->resolveCustomerTypeIdBySunatCode($resolvedSunatCode);
+                    if (!isset($sunatCodeToTypeIdCache[$resolvedSunatCode])) {
+                        $sunatCodeToTypeIdCache[$resolvedSunatCode] = $this->resolveCustomerTypeIdBySunatCode($resolvedSunatCode);
+                    }
+                    $resolvedTypeId = $sunatCodeToTypeIdCache[$resolvedSunatCode];
                 }
             }
 
@@ -282,53 +294,65 @@ class CustomerManagementService
             }
 
             $payload = [
-                'doc_type' => (string) ((int) $resolvedDocType),
+                'doc_type'         => (string) ((int) $resolvedDocType),
                 'customer_type_id' => $resolvedTypeId,
-                'doc_number' => $docNumber,
-                'legal_name' => $legalName,
-                'trade_name' => $row['trade_name'] ?? null,
-                'first_name' => $row['first_name'] ?? null,
-                'last_name' => $row['last_name'] ?? null,
-                'plate' => $row['plate'] ?? null,
-                'address' => $row['address'] ?? null,
-                'phone' => $row['phone'] ?? null,
-                'status' => (int) ($row['status'] ?? 1),
+                'doc_number'       => $docNumber,
+                'legal_name'       => $legalName,
+                'trade_name'       => $row['trade_name'] ?? null,
+                'first_name'       => $row['first_name'] ?? null,
+                'last_name'        => $row['last_name'] ?? null,
+                'plate'            => $row['plate'] ?? null,
+                'address'          => $row['address'] ?? null,
+                'phone'            => $row['phone'] ?? null,
+                'status'           => (int) ($row['status'] ?? 1),
             ];
 
             $existing = $existingByDoc[$docNumber] ?? null;
             if ($existing) {
                 if ((int) ($existing['status'] ?? 0) === 1) {
                     $skipped++;
-                    $errors[] = ['row' => $rowNumber, 'message' => 'Cliente ya existe activo con ese documento.'];
                     continue;
                 }
 
-                $this->customerRepository->updateCustomerById(
-                    $companyId,
-                    (int) $existing['id'],
-                    array_merge($payload, ['status' => 1])
-                );
-
+                // Queue reactivation; will be executed in a single transaction below.
+                $reactivateQueue[] = [
+                    'id'      => (int) $existing['id'],
+                    'payload' => array_merge($payload, ['status' => 1]),
+                ];
                 $existingByDoc[$docNumber] = ['id' => (int) $existing['id'], 'status' => 1];
                 $reactivated++;
                 continue;
             }
 
-            $newId = $this->customerRepository->insertCustomer(array_merge($payload, [
-                'company_id' => $companyId,
-            ]));
-            $existingByDoc[$docNumber] = ['id' => $newId, 'status' => 1];
+            $insertBatch[] = array_merge($payload, ['company_id' => $companyId]);
+            $existingByDoc[$docNumber] = ['id' => 0, 'status' => 1]; // mark as seen
             $created++;
         }
+
+        // ── Persist in a single transaction ────────────────────────────────────
+        \DB::transaction(function () use ($companyId, $insertBatch, $reactivateQueue) {
+            // Batch INSERT in chunks of 500 to stay well under query size limits.
+            foreach (array_chunk($insertBatch, 500) as $chunk) {
+                \DB::table('sales.customers')->insert($chunk);
+            }
+
+            // Reactivations are typically few; run individually inside same tx.
+            foreach ($reactivateQueue as $item) {
+                \DB::table('sales.customers')
+                    ->where('id', $item['id'])
+                    ->where('company_id', $companyId)
+                    ->update($item['payload']);
+            }
+        });
 
         return [
             'message' => 'Importacion de clientes procesada.',
             'summary' => [
-                'total' => count($rows),
-                'created' => $created,
+                'total'       => count($rows),
+                'created'     => $created,
                 'reactivated' => $reactivated,
-                'skipped' => $skipped,
-                'errors' => count($errors),
+                'skipped'     => $skipped,
+                'errors'      => count($errors),
             ],
             'errors' => array_slice($errors, 0, 300),
         ];

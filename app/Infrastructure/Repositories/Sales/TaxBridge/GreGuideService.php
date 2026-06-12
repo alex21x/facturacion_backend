@@ -10,6 +10,16 @@ use Illuminate\Support\Facades\Storage;
 
 class GreGuideService
 {
+    private const GRE_SERIES_DOCUMENT_KIND_ALIASES = [
+        'GUIDE',
+        'GRE',
+        'GUIA',
+        'GUIA_REMISION',
+        'GRE_GUIDE',
+        'GUIDE_REMITENTE',
+        'GUIDE_TRANSPORTISTA',
+    ];
+
     private const STATUS_DRAFT = 'DRAFT';
     private const STATUS_SENDING = 'SENDING';
     private const STATUS_SENT = 'SENT';
@@ -83,18 +93,7 @@ class GreGuideService
             ->values()
             ->all();
 
-        if ($this->tableExists('core.series')) {
-            $series = DB::table('core.series')
-                ->where('company_id', $companyId)
-                ->where('status', 1)
-                ->whereRaw("UPPER(COALESCE(document_kind, '')) IN ('GUIDE', 'GRE', 'GUIA', 'GUIA_REMISION')")
-                ->orderBy('series')
-                ->get(['id', 'series', 'name'])
-                ->values()
-                ->all();
-        } else {
-            $series = [];
-        }
+        $series = $this->listGreSeriesOptions($companyId, $branchId);
 
         if (empty($guideTypes)) {
             $guideTypes = [
@@ -475,7 +474,17 @@ class GreGuideService
         $this->enforceBusinessRules($payload);
 
         $issueDate = (string) $payload['issue_date'];
-        $series = strtoupper(trim((string) ($payload['series'] ?? 'T001')));
+        $branchId = isset($payload['branch_id']) && $payload['branch_id'] !== null ? (int) $payload['branch_id'] : null;
+        $series = strtoupper(trim((string) ($payload['series'] ?? '')));
+
+        if ($series === '') {
+            throw new TaxBridgeException('Selecciona una serie GRE configurada en Maestros > Series.', 422);
+        }
+
+        if (!$this->isValidGreSeries($companyId, $series, $branchId)) {
+            throw new TaxBridgeException('La serie GRE seleccionada no esta habilitada en Maestros > Series.', 422);
+        }
+
         $number = $this->nextNumber($companyId, $series);
         $identifier = sprintf('%s-%08d', $series, $number);
 
@@ -2141,6 +2150,94 @@ HTML;
                 ->where('company_id', $companyId)
                 ->where('series', $series)
                 ->max('number') + 1;
+    }
+
+    private function listGreSeriesOptions(int $companyId, ?int $branchId = null): array
+    {
+        $aliases = self::GRE_SERIES_DOCUMENT_KIND_ALIASES;
+        $aliasPlaceholders = implode(',', array_fill(0, count($aliases), '?'));
+
+        if ($this->tableExists('sales.series_numbers')) {
+            $query = DB::table('sales.series_numbers as sn')
+                ->leftJoin('sales.document_kinds as dk', 'dk.id', '=', 'sn.document_kind_id')
+                ->where('sn.company_id', $companyId)
+                ->where('sn.is_enabled', true)
+                ->whereRaw("COALESCE(NULLIF(TRIM(sn.series), ''), '') <> ''")
+                ->where(function ($nested) use ($aliases, $aliasPlaceholders) {
+                    $nested->whereRaw("UPPER(COALESCE(dk.code, sn.document_kind, '')) IN ($aliasPlaceholders)", $aliases)
+                        ->orWhereRaw("COALESCE(NULLIF(TRIM(CAST(dk.sunat_code as text)), ''), '') = '09'");
+                })
+                ->selectRaw('MIN(sn.id) as id')
+                ->selectRaw('UPPER(TRIM(sn.series)) as series')
+                ->selectRaw("MIN(COALESCE(NULLIF(TRIM(dk.label), ''), NULLIF(TRIM(dk.code), ''), NULLIF(TRIM(sn.document_kind), ''), 'Guia de remision')) as name")
+                ->groupByRaw('UPPER(TRIM(sn.series))')
+                ->orderByRaw('UPPER(TRIM(sn.series))');
+
+            if ($branchId !== null) {
+                $query->where(function ($branchScope) use ($branchId) {
+                    $branchScope->where('sn.branch_id', $branchId)
+                        ->orWhereNull('sn.branch_id');
+                });
+            }
+
+            $seriesRows = $query->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => (int) ($row->id ?? 0),
+                        'series' => (string) ($row->series ?? ''),
+                        'name' => (string) ($row->name ?? 'Guia de remision'),
+                    ];
+                })
+                ->filter(function (array $row): bool {
+                    return trim($row['series']) !== '';
+                })
+                ->values()
+                ->all();
+
+            if (!empty($seriesRows)) {
+                return $seriesRows;
+            }
+        }
+
+        if ($this->tableExists('core.series')) {
+            return DB::table('core.series')
+                ->where('company_id', $companyId)
+                ->where('status', 1)
+                ->whereRaw("UPPER(COALESCE(document_kind, '')) IN ($aliasPlaceholders)", $aliases)
+                ->orderBy('series')
+                ->get(['id', 'series', 'name'])
+                ->map(function ($row) {
+                    return [
+                        'id' => (int) ($row->id ?? 0),
+                        'series' => strtoupper(trim((string) ($row->series ?? ''))),
+                        'name' => (string) ($row->name ?? 'Guia de remision'),
+                    ];
+                })
+                ->filter(function (array $row): bool {
+                    return trim($row['series']) !== '';
+                })
+                ->values()
+                ->all();
+        }
+
+        return [];
+    }
+
+    private function isValidGreSeries(int $companyId, string $series, ?int $branchId = null): bool
+    {
+        $normalizedSeries = strtoupper(trim($series));
+        if ($normalizedSeries === '') {
+            return false;
+        }
+
+        $allowed = $this->listGreSeriesOptions($companyId, $branchId);
+        foreach ($allowed as $row) {
+            if ($normalizedSeries === strtoupper(trim((string) ($row['series'] ?? '')))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function normalizeGuideRow(object $row): array

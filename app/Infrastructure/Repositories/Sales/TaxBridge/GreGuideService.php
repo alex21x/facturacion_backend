@@ -1102,16 +1102,43 @@ class GreGuideService
 
     private function postBridgeGreRequest($httpReq, string $endpoint, string $payloadJson)
     {
+        \Log::debug('[BRIDGE-GRE] Attempt 1: Sending as form-data', [
+            'endpoint' => $endpoint,
+            'content_type' => 'application/x-www-form-urlencoded',
+            'payload_json' => $payloadJson,
+        ]);
+
         $formResponse = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
         $formRaw = (string) $formResponse->body();
+
+        \Log::debug('[BRIDGE-GRE] Response from form-data attempt', [
+            'status_code' => $formResponse->status(),
+            'body_length' => strlen($formRaw),
+            'body_first_200' => mb_substr($formRaw, 0, 200),
+        ]);
+
         if (!$this->shouldRetryGreAsRawJson($formResponse, $formRaw)) {
             return $formResponse;
         }
 
-        return $httpReq
+        \Log::debug('[BRIDGE-GRE] Attempt 2: Retrying as JSON (form-data failed)', [
+            'endpoint' => $endpoint,
+            'content_type' => 'application/json',
+            'payload_json' => $payloadJson,
+        ]);
+
+        $jsonResponse = $httpReq
             ->withHeaders(['Content-Type' => 'application/json'])
             ->withBody($payloadJson, 'application/json')
             ->post($endpoint);
+
+        \Log::debug('[BRIDGE-GRE] Response from JSON retry', [
+            'status_code' => $jsonResponse->status(),
+            'body_length' => strlen((string) $jsonResponse->body()),
+            'body_first_200' => mb_substr((string) $jsonResponse->body(), 0, 200),
+        ]);
+
+        return $jsonResponse;
     }
 
     private function extractBridgeMessageFromRaw(string $raw): ?string

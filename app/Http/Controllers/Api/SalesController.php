@@ -275,7 +275,7 @@ class SalesController extends Controller
 
         $search = trim((string) $request->query('q', ''));
         $status = $request->query('status');
-        $limit = (int) $request->query('limit', 1000);
+        $limit = (int) $request->query('limit', 10000);
 
         $rows = $this->customerQueryService->listCustomers(
             $companyId,
@@ -1943,8 +1943,8 @@ class SalesController extends Controller
     <style>
         @page { size: A4 portrait; margin: 8mm; }
         * { box-sizing: border-box; }
-        body { margin: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-        .sheet { width: 100%; border: 1px solid #111; padding: 5mm; }
+        body { margin: 0; padding: 0 1mm; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+        .sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
         .top-logo { width: 19%; padding-right: 3mm; }
@@ -2334,9 +2334,9 @@ HTML;
         $paymentBrandsSection = '';
         if ($showPaymentBrands) {
             $logosClass = $isA4 ? 'company-footer-logos company-footer-logos--a4' : 'company-footer-logos company-footer-logos--ticket';
-            $yapeLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/yape-official.png'));
-            $plinLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/plin-official.png'));
-            $culqiLogo = $this->escapeHtml($this->resolveFrontendAssetUrl('/assets/payment-logos/culqi-official.png'));
+            $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
+            $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
+            $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
 
             $paymentBrandsSection = '<div class="' . $logosClass . '">'
                 . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
@@ -2345,8 +2345,10 @@ HTML;
                 . '</div>';
         }
 
-        $sheetWidth = $isA4 ? '210mm' : '80mm';
+        $sheetWidth = $isA4 ? '100%' : '80mm';
+        $sheetMaxWidth = $isA4 ? '194mm' : '80mm';
         $pageSize = $isA4 ? 'A4 portrait' : '80mm auto';
+        $pageMargin = $isA4 ? '8mm' : '0';
         $logoMaxWidth = $isA4 ? '140px' : '74mm';
         $logoMaxHeight = $isA4 ? '90px' : '40mm';
         $headerClass = $isA4 ? 'header header--a4' : 'header';
@@ -2480,11 +2482,11 @@ TICKETHEAD;
   <meta charset="utf-8" />
   <title>{$fileName}</title>
   <style>
-    @media print { @page { size: {$pageSize}; margin: 0; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
+    @media print { @page { size: {$pageSize}; margin: {$pageMargin}; } .no-print { display: none !important; } body { margin: 0; padding: 0; } }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body { font-family: 'Arial', 'Helvetica', sans-serif; background: #fff; color: #000; font-size: {$bodyFontSize}; line-height: 1.3; font-weight: 700; }
-    .sheet { width: {$sheetWidth}; margin: 0 auto; padding: {$sheetPadding}; }
+    .sheet { width: {$sheetWidth}; max-width: {$sheetMaxWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* A4 header: 2 cols, left=brand, right=fiscal box */
     /* A4 header: 3 cols (logo | company info | fiscal box) */
     .header--a4 { display: grid; grid-template-columns: auto 1fr 58mm; gap: 4mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
@@ -2644,10 +2646,6 @@ HTML;
         }
 
         $relativePath = '/assets/payment-logos/' . $safeName;
-        if (!function_exists('imagecreatetruecolor')) {
-            return $this->resolveFrontendAssetUrl($relativePath);
-        }
-
         $candidates = [
             public_path('assets/payment-logos/' . $safeName),
             dirname(base_path()) . DIRECTORY_SEPARATOR . 'facturacion_frontend' . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'payment-logos' . DIRECTORY_SEPARATOR . $safeName,

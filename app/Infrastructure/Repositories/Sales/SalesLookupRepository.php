@@ -501,7 +501,7 @@ class SalesLookupRepository
 
     public function ensureDocumentKindsTable(): void
     {
-        $bootstrapCacheKey = 'sales_lookup:document_kinds_bootstrap:v3';
+        $bootstrapCacheKey = 'sales_lookup:document_kinds_bootstrap:v4';
         if (Cache::get($bootstrapCacheKey) === true) {
             return;
         }
@@ -522,6 +522,7 @@ class SalesLookupRepository
             ['code' => 'RECEIPT',     'label' => 'Boleta',          'sort_order' => 40, 'sunat_code' => '03'],
             ['code' => 'CREDIT_NOTE', 'label' => 'Nota de Credito', 'sort_order' => 50, 'sunat_code' => '07'],
             ['code' => 'DEBIT_NOTE',  'label' => 'Nota de Debito',  'sort_order' => 60, 'sunat_code' => '08'],
+            ['code' => 'GRE_GUIDE',   'label' => 'Guia de Remision','sort_order' => 70, 'sunat_code' => '09'],
         ];
 
         $defaultCodes = array_map(function (array $row): string {

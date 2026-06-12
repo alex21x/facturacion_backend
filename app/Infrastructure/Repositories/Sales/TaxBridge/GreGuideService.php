@@ -1456,14 +1456,26 @@ class GreGuideService
 
         // Company data
         $company        = \DB::table('core.companies')->where('id', $companyId)->first(['tax_id', 'legal_name', 'trade_name', 'address']);
-        $companySettings = \DB::table('core.company_settings')->where('company_id', $companyId)->first(['address', 'logo_path']);
+        $companySettings = \DB::table('core.company_settings')->where('company_id', $companyId)->first(['address', 'logo_path', 'extra_data']);
         $companyRuc     = htmlspecialchars((string) ($company->tax_id ?? ''), ENT_QUOTES, 'UTF-8');
         $companyName    = htmlspecialchars((string) ($company->legal_name ?? 'EMPRESA'), ENT_QUOTES, 'UTF-8');
         $companyTrade   = htmlspecialchars((string) ($company->trade_name ?? ''), ENT_QUOTES, 'UTF-8');
         $companyAddress = htmlspecialchars((string) (($companySettings->address ?? '') ?: ($company->address ?? '')), ENT_QUOTES, 'UTF-8');
 
         $logoPath = trim((string) ($companySettings->logo_path ?? ''));
-        $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
+        $logoUrl = '';
+
+        $companyExtraData = json_decode((string) ($companySettings->extra_data ?? '{}'), true);
+        if (is_array($companyExtraData)) {
+            $companyLogoDataUri = trim((string) ($companyExtraData['company_logo_data_uri'] ?? ''));
+            if ($companyLogoDataUri !== '' && str_starts_with(strtolower($companyLogoDataUri), 'data:image/')) {
+                $logoUrl = $companyLogoDataUri;
+            }
+        }
+
+        if ($logoUrl === '') {
+            $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
+        }
         $logoHtmlA4 = $logoUrl !== ''
             ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="Logo empresa" class="brand-logo" />'
             : '';
@@ -2094,6 +2106,11 @@ HTML;
         $appUrl = rtrim((string) config('app.url', ''), '/');
         if ($appUrl !== '') {
             return $appUrl . '/storage/' . ltrim($normalized, '/');
+        }
+
+        $request = request();
+        if ($request !== null) {
+            return rtrim((string) $request->getSchemeAndHttpHost(), '/') . '/storage/' . ltrim($normalized, '/');
         }
 
         return '/storage/' . ltrim($normalized, '/');

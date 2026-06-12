@@ -401,7 +401,7 @@ class GreGuideController extends Controller
     {
         $html = preg_replace(
             '/<section class="head">\s*<article class="brand">(.*?)<\/article>\s*<article class="voucher">(.*?)<\/article>\s*<\/section>/s',
-            '<table class="head" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-bottom:8px"><tr><td class="head-brand" style="width:29%;padding-right:0;vertical-align:top"><article class="brand">$1</article></td><td class="head-gap" style="width:3%;padding:0;border:none"></td><td class="head-voucher" style="width:68%;padding-left:0;vertical-align:top"><article class="voucher">$2</article></td></tr></table>',
+            '<table class="head" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-bottom:8px"><tr><td class="head-brand" style="width:38%;padding-right:0;vertical-align:top"><article class="brand">$1</article></td><td class="head-gap" style="width:2%;padding:0;border:none"></td><td class="head-voucher" style="width:60%;padding-left:0;vertical-align:top"><article class="voucher">$2</article></td></tr></table>',
             $html,
             1
         ) ?? $html;
@@ -426,7 +426,7 @@ class GreGuideController extends Controller
                 '.head { width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 8px; }',
                 '.head td { vertical-align: top; }',
                 '.brand { width: auto; border: 1px solid #111; padding: 8px; }',
-                '.voucher { width: auto; border: 1px solid #111; padding: 8px; text-align: center; } .voucher .ruc { font-size: 20px; word-break: break-word; }',
+                '.voucher { width: auto; border: 1px solid #111; padding: 8px; text-align: center; } .voucher .ruc { font-size: 18px; word-break: break-word; }',
                 '.party { margin-top: 8px; border: 1px solid #111; width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }',
                 '.party td { vertical-align: top; padding: 6px 8px; }',
             ],

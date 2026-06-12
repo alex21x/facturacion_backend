@@ -1578,12 +1578,6 @@ class GreGuideService
             }
 
             $sunatInfo = '';
-            if ($ticket !== '') {
-                $sunatInfo .= "<div style=\"font-size:7px;color:#555;word-break:break-all;margin:0.3mm 0\">Ticket: {$ticket}</div>";
-            }
-            if ($cdrCode !== '') {
-                $sunatInfo .= "<div style=\"font-size:7px;color:#555\">CDR: {$cdrCode}</div>";
-            }
             if ($sunatLink !== '') {
                 $sunatInfo .= "<div style=\"font-size:7px;color:#555;word-break:break-all;margin:0.3mm 0\">SUNAT: {$sunatLink}</div>";
                 if ($sunatQr !== '') {
@@ -1613,7 +1607,7 @@ class GreGuideService
   .section-title { font-weight: 700; text-transform: uppercase; font-size: 8px; margin-bottom: 1mm; border-bottom: 1px solid #000; padding-bottom: 0.5mm; }
   .info-row { display: flex; justify-content: space-between; font-size: 8px; margin: 0.3mm 0; }
   .info-label { font-weight: 600; flex: 0 0 auto; margin-right: 2mm; }
-  .info-value { flex: 1; text-align: right; }
+    .info-value { flex: 1; text-align: right; word-break: break-word; overflow-wrap: anywhere; }
   .items { margin-bottom: 2mm; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 1mm 0; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: 0.5mm 0; font-size: 8px; }
@@ -1629,7 +1623,7 @@ class GreGuideService
     {$logoHtmlTicket}
   <div class="c b" style="font-size:11px">{$companyName}</div>
   <div class="c" style="font-size:8px;color:#555">R.U.C. {$companyRuc}</div>
-  <div class="c" style="font-size:8px;color:#555">{$companyAddress}</div>
+    <div class="c" style="font-size:8px;color:#555;word-break:break-word;overflow-wrap:anywhere">{$companyAddress}</div>
   <div class="divider"></div>
   <div class="c title">GUIA DE REMISION ELECTRONICA</div>
   <div class="c docno">{$identifier}</div>
@@ -1701,12 +1695,6 @@ HTML;
         }
 
         $sunatRowsA4 = "<tr><td class=\"label\">Estado:</td><td class=\"value\">{$status}</td></tr>";
-        if ($ticket !== '') {
-            $sunatRowsA4 .= "<tr><td class=\"label\">Ticket SUNAT:</td><td class=\"value\"><code style=\"font-size:10px;word-break:break-all\">{$ticket}</code></td></tr>";
-        }
-        if ($cdrCode !== '') {
-            $sunatRowsA4 .= "<tr><td class=\"label\">CDR:</td><td class=\"value\">{$cdrCode} {$cdrDesc}</td></tr>";
-        }
         if ($sunatLink !== '') {
             $sunatRowsA4 .= "<tr><td class=\"label\">Consulta SUNAT:</td><td class=\"value\" style=\"word-break:break-all\">{$sunatLink}</td></tr>";
             if ($sunatQr !== '') {
@@ -1731,7 +1719,7 @@ HTML;
     .brand { border: 1px solid #111; padding: 8px; }
     .brand-logo { width: 74px; height: 74px; object-fit: contain; border: 1px solid #111; background: #fff; margin-bottom: 6px; }
     .brand h1 { margin: 0; font-size: 20px; letter-spacing: 0.2px; text-transform: uppercase; }
-    .brand p { margin: 2px 0; font-size: 11px; color: #111; }
+    .brand p { margin: 2px 0; font-size: 11px; color: #111; word-break: break-word; overflow-wrap: anywhere; }
     .voucher { border: 1px solid #111; padding: 8px; text-align: center; }
     .voucher .ruc { font-size: 24px; font-weight: 700; letter-spacing: 0.6px; }
     .voucher .v-title { font-size: 13px; margin-top: 6px; letter-spacing: 0.8px; text-transform: uppercase; font-weight: 700; }

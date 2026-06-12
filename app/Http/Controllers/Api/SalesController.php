@@ -1987,14 +1987,14 @@ class SalesController extends Controller
         .sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
-        .top-logo { width: 19%; padding-right: 3mm; }
-        .top-company { width: 53%; padding-right: 3mm; }
-        .top-voucher { width: 28%; }
+        .top-logo { width: 16%; padding-right: 3mm; }
+        .top-company { width: 58%; padding-right: 3mm; }
+        .top-voucher { width: 26%; }
         .logo-wrap { min-height: 82px; display: flex; align-items: center; justify-content: center; }
         .logo { max-width: 100%; max-height: 86px; display: block; }
         .company-title { font-size: 18px; font-weight: 700; letter-spacing: 0.25px; text-transform: uppercase; margin-bottom: 3px; }
-        .company-legal { font-size: 12px; margin-bottom: 2px; }
-        .company-meta { font-size: 11px; line-height: 1.25; }
+        .company-legal { font-size: 12px; margin-bottom: 2px; word-break: break-word; overflow-wrap: anywhere; }
+        .company-meta { font-size: 11px; line-height: 1.25; word-break: break-word; overflow-wrap: anywhere; }
         .voucher-box { border: 1px solid #111; text-align: center; padding: 12px 8px; min-height: 112px; }
         .voucher-ruc { font-size: 12px; font-weight: 700; margin-bottom: 11px; letter-spacing: 0.6px; }
         .voucher-kind { font-size: 12px; font-weight: 700; margin-bottom: 11px; letter-spacing: 0.5px; text-transform: uppercase; }
@@ -2180,7 +2180,16 @@ HTML;
         $docKind = $this->escapeHtml($docKindLabel);
         $series = $this->escapeHtml((string) ($doc['series'] ?? ''));
         $number = str_pad((string) ((int) ($doc['number'] ?? 0)), 6, '0', STR_PAD_LEFT);
-        $issueAt = $this->escapeHtml($this->formatIssueDateTime((string) ($doc['issueDate'] ?? '')));
+        $issueAtRaw = (string) ($doc['issueDate'] ?? '');
+        $issueAt = $this->escapeHtml($this->formatIssueDateTime($issueAtRaw));
+        $issueDateOnlyForTicket = '-';
+        if (trim($issueAtRaw) !== '') {
+            try {
+                $issueDateOnlyForTicket = $this->escapeHtml(Carbon::parse($issueAtRaw)->format('d/m/Y'));
+            } catch (\Throwable $e) {
+                $issueDateOnlyForTicket = $issueAt;
+            }
+        }
         $docMetadata = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
         $customer = $this->escapeHtml((string) ($doc['customerName'] ?? '-'));
         $customerDoc = $this->escapeHtml((string) ($doc['customerDocNumber'] ?? '-'));
@@ -2522,7 +2531,7 @@ A4HEAD
     {$emailRow}
     <div class="title">{$docKind}</div>
     <div class="docno">{$series}-{$number}</div>
-    <div class="meta">{$issueAt}</div>
+        <div class="meta">{$issueDateOnlyForTicket}</div>
   </div>
 </div>
 TICKETHEAD;
@@ -2541,13 +2550,13 @@ TICKETHEAD;
     .sheet { width: {$sheetWidth}; max-width: {$sheetMaxWidth}; margin: 0 auto; padding: {$sheetPadding}; }
     /* A4 header: 2 cols, left=brand, right=fiscal box */
     /* A4 header: 3 cols (logo | company info | fiscal box) */
-    .header--a4 { display: grid; grid-template-columns: auto 1fr 58mm; gap: 4mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
+    .header--a4 { display: grid; grid-template-columns: 28mm minmax(0, 1fr) 54mm; gap: 3mm; align-items: stretch; margin-bottom: 4mm; padding-bottom: 3mm; border-bottom: 2px solid #1e3a8a; }
     .logo-col { display: flex; align-items: center; justify-content: center; padding-right: 2mm; border-right: 1px solid #e2e8f0; }
-    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.4mm; }
+    .brand-col { display: flex; flex-direction: column; justify-content: center; gap: 0.4mm; min-width: 0; }
     .header-logo { display: block; max-width: {$logoMaxWidth}; max-height: {$logoMaxHeight}; height: auto; object-fit: contain; margin: 0 auto; }
     .brand-name { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; color: #1e3a8a; margin-bottom: 0.3mm; }
-    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.8mm; }
-    .company-description { font-size: 8.5pt; font-weight: 700; color: #374151; }
+    .brand-legal { font-size: 8pt; font-weight: 700; color: #374151; text-transform: uppercase; margin-bottom: 0.8mm; word-break: break-word; overflow-wrap: anywhere; }
+    .company-description { font-size: 8.5pt; font-weight: 700; color: #374151; word-break: break-word; overflow-wrap: anywhere; }
     /* Fiscal box (right) */
     .voucher-box { border: 2px solid #1e3a8a; border-radius: 4px; overflow: hidden; text-align: center; }
     .voucher-ruc { padding: 2.5mm 3mm; font-size: 9.5pt; font-weight: 900; color: #1e3a8a; background: #fff; }
@@ -2559,11 +2568,11 @@ TICKETHEAD;
     .header-copy--a4 { text-align: left; }
     .title { font-size: {$titleFontSize}; font-weight: 900; text-transform: uppercase; margin-bottom: 0.6mm; }
     .docno { font-size: {$docNoFontSize}; font-weight: 900; letter-spacing: 0.4px; margin-bottom: 0.6mm; }
-    .meta { font-size: {$metaFontSize}; font-weight: 800; margin: 0.2mm 0; }
+    .meta { font-size: {$metaFontSize}; font-weight: 800; margin: 0.2mm 0; word-break: break-word; overflow-wrap: anywhere; }
     .divider { border-top: 1px dashed #000; margin: 2mm 0; }
     .info-row { display: flex; justify-content: space-between; gap: 2mm; font-size: {$infoFontSize}; margin: 0.5mm 0; }
     .info-label { font-weight: 900; flex-shrink: 0; }
-    .info-value { font-weight: 800; text-align: right; flex: 1; }
+    .info-value { font-weight: 800; text-align: right; flex: 1; word-break: break-word; overflow-wrap: anywhere; }
     table { width: 100%; border-collapse: collapse; }
     .items-a4 { border: 1px solid #cbd5e1; overflow: hidden; }
     .items-a4 thead th { background: #1e3a8a; color: #fff; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.2px; padding: 1.5mm 2mm; border-bottom: 1px solid #1e3a8a; font-weight: 700; }

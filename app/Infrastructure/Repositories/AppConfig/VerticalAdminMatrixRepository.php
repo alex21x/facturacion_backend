@@ -49,10 +49,39 @@ class VerticalAdminMatrixRepository
 
     public function listNonSystemCompanies(int $systemCompanyId): Collection
     {
-        return DB::table('core.companies')
-            ->where('id', '!=', $systemCompanyId)
-            ->orderBy('legal_name')
-            ->get(['id', 'tax_id', 'legal_name', 'trade_name', 'status']);
+        $query = DB::table('core.companies as c')
+            ->where('c.id', '!=', $systemCompanyId)
+            ->orderBy('c.legal_name');
+
+        if ($this->tableExists('sales', 'commercial_documents')) {
+            $issuedDocumentsSubQuery = DB::table('sales.commercial_documents as d')
+                ->select('d.company_id', DB::raw('COUNT(*) as issued_documents_count'))
+                ->where('d.status', 'ISSUED')
+                ->whereIn('d.document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+                ->groupBy('d.company_id');
+
+            $query->leftJoinSub($issuedDocumentsSubQuery, 'docs', function ($join) {
+                $join->on('docs.company_id', '=', 'c.id');
+            });
+
+            return $query->get([
+                'c.id',
+                'c.tax_id',
+                'c.legal_name',
+                'c.trade_name',
+                'c.status',
+                DB::raw('COALESCE(docs.issued_documents_count, 0) as issued_documents_count'),
+            ]);
+        }
+
+        return $query->get([
+            'c.id',
+            'c.tax_id',
+            'c.legal_name',
+            'c.trade_name',
+            'c.status',
+            DB::raw('0 as issued_documents_count'),
+        ]);
     }
 
     public function listAssignmentsByCompanyIds(array $companyIds): Collection

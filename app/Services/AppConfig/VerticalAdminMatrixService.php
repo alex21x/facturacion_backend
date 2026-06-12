@@ -124,6 +124,7 @@ class VerticalAdminMatrixService
                     'legal_name' => $company->legal_name,
                     'trade_name' => $company->trade_name,
                     'company_status' => (int) $company->status,
+                    'issued_documents_count' => (int) ($company->issued_documents_count ?? 0),
                     'active_vertical_code' => $active['vertical_code'] ?? null,
                     'active_vertical_name' => $active['vertical_name'] ?? null,
                     'access_slug' => $accessSlug,

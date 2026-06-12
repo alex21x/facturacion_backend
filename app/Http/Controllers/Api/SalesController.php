@@ -37,6 +37,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Throwable;
@@ -1869,15 +1870,25 @@ class SalesController extends Controller
 
                 $paymentBrandsSection = '';
                 if ($showPaymentBrands) {
-                    $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
-                    $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
-                    $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
+                    $paymentBrandSources = [
+                        'Yape' => $this->resolvePaymentBrandImageSource('yape-official.png'),
+                        'Plin' => $this->resolvePaymentBrandImageSource('plin-official.png'),
+                        'Culqi' => $this->resolvePaymentBrandImageSource('culqi-official.png'),
+                    ];
 
-                    $paymentBrandsSection = '<div class="pay-logos">'
-                        . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
-                        . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
-                        . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
-                        . '</div>';
+                    $paymentBrandBlocks = '';
+                    foreach ($paymentBrandSources as $brandName => $brandSource) {
+                        $resolvedSource = trim((string) $brandSource);
+                        if ($resolvedSource === '') {
+                            continue;
+                        }
+
+                        $paymentBrandBlocks .= '<div class="paybrand"><img src="' . $this->escapeHtml($resolvedSource) . '" alt="' . $this->escapeHtml($brandName) . '" /></div>';
+                    }
+
+                    if ($paymentBrandBlocks !== '') {
+                        $paymentBrandsSection = '<div class="pay-logos">' . $paymentBrandBlocks . '</div>';
+                    }
                 }
 
                 $electronicSignatureRaw = $this->findFirstMetaStringValue($metaData, [
@@ -1941,10 +1952,10 @@ class SalesController extends Controller
     <meta charset="utf-8" />
     <title>{$documentFileName}</title>
     <style>
-        @page { size: A4 portrait; margin: 8mm; }
+        @page { size: A4 portrait; margin: 10mm; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 0 1mm; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-        .sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
+        body { margin: 0; padding: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+        .sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
         .top-logo { width: 19%; padding-right: 3mm; }
@@ -2334,15 +2345,25 @@ HTML;
         $paymentBrandsSection = '';
         if ($showPaymentBrands) {
             $logosClass = $isA4 ? 'company-footer-logos company-footer-logos--a4' : 'company-footer-logos company-footer-logos--ticket';
-            $yapeLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('yape-official.png'));
-            $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
-            $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
+            $paymentBrandSources = [
+                'Yape' => $this->resolvePaymentBrandImageSource('yape-official.png'),
+                'Plin' => $this->resolvePaymentBrandImageSource('plin-official.png'),
+                'Culqi' => $this->resolvePaymentBrandImageSource('culqi-official.png'),
+            ];
 
-            $paymentBrandsSection = '<div class="' . $logosClass . '">'
-                . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
-                . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
-                . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
-                . '</div>';
+            $paymentBrandBlocks = '';
+            foreach ($paymentBrandSources as $brandName => $brandSource) {
+                $resolvedSource = trim((string) $brandSource);
+                if ($resolvedSource === '') {
+                    continue;
+                }
+
+                $paymentBrandBlocks .= '<div class="paybrand"><img src="' . $this->escapeHtml($resolvedSource) . '" alt="' . $this->escapeHtml($brandName) . '" /></div>';
+            }
+
+            if ($paymentBrandBlocks !== '') {
+                $paymentBrandsSection = '<div class="' . $logosClass . '">' . $paymentBrandBlocks . '</div>';
+            }
         }
 
         $sheetWidth = $isA4 ? '100%' : '80mm';
@@ -2662,7 +2683,59 @@ HTML;
             }
         }
 
-        return $this->resolveFrontendAssetUrl($relativePath);
+        $remoteAssetUrl = $this->resolveFrontendAssetUrl($relativePath);
+        $remoteDataUri = $this->urlToImageDataUri($remoteAssetUrl);
+        if ($remoteDataUri !== null) {
+            return $remoteDataUri;
+        }
+
+        return '';
+    }
+
+    private function urlToImageDataUri(string $url): ?string
+    {
+        $target = trim($url);
+        if ($target === '' || preg_match('#^https?://#i', $target) !== 1) {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout(5)->get($target);
+            if (!$response->successful()) {
+                return null;
+            }
+
+            $contents = $response->body();
+            if (!is_string($contents) || $contents === '') {
+                return null;
+            }
+
+            $contentType = strtolower(trim((string) $response->header('Content-Type', '')));
+            if (($pos = strpos($contentType, ';')) !== false) {
+                $contentType = trim(substr($contentType, 0, $pos));
+            }
+
+            if (!str_starts_with($contentType, 'image/')) {
+                $pathPart = (string) parse_url($target, PHP_URL_PATH);
+                $ext = strtolower(pathinfo($pathPart, PATHINFO_EXTENSION));
+                $contentType = match ($ext) {
+                    'png' => 'image/png',
+                    'jpg', 'jpeg' => 'image/jpeg',
+                    'gif' => 'image/gif',
+                    'webp' => 'image/webp',
+                    'svg' => 'image/svg+xml',
+                    default => '',
+                };
+            }
+
+            if ($contentType === '' || !str_starts_with($contentType, 'image/')) {
+                return null;
+            }
+
+            return 'data:' . $contentType . ';base64,' . base64_encode($contents);
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function filePathToImageDataUri(string $path): ?string

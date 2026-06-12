@@ -125,6 +125,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::get('/sales/bootstrap', 'Api\\SalesLookupController@bootstrap');
             Route::get('/sales/lookups', 'Api\\SalesLookupController@lookups');
             Route::get('/sales/price-tiers', 'Api\\SalesLookupController@priceTiers');
+            Route::get('/sales/top-products', 'Api\\SalesLookupController@topProducts');
             Route::get('/sales/reference-documents', 'Api\\SalesLookupController@referenceDocuments');
             Route::get('/sales/series-numbers', 'Api\\SalesLookupController@seriesNumbers');
             Route::get('/sales/customer-types', 'Api\\SalesCustomerController@customerTypes');

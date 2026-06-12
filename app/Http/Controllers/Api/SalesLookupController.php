@@ -121,7 +121,7 @@ class SalesLookupController extends Controller
 
     public function seriesNumbers(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
+        $authUser  = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
         $branchId = $request->query('branch_id', $authUser->branch_id);
         $warehouseId = $request->query('warehouse_id');
@@ -166,6 +166,79 @@ class SalesLookupController extends Controller
         return response()->json([
             'data' => $rows,
         ]);
+    }
+
+    public function topProducts(Request $request)
+    {
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $limit     = max(1, min(12, (int) $request->query('limit', 4)));
+        $days      = max(7, min(365, (int) $request->query('days', 30)));
+
+        $since = now()->subDays($days)->format('Y-m-d H:i:s');
+
+        // Aggregate sold qty per product from commercial document items,
+        // joining active inventory product data so the response matches
+        // the InventoryProduct type expected by the frontend.
+        $rows = \DB::table('sales.commercial_document_items as cdi')
+            ->join('sales.commercial_documents as cd', function ($j) use ($companyId) {
+                $j->on('cd.id', '=', 'cdi.document_id')
+                  ->where('cd.company_id', $companyId)
+                                    ->whereNotIn('cd.document_kind', ['CREDIT_NOTE', 'DEBIT_NOTE']);
+            })
+            ->join('inventory.products as p', function ($j) {
+                $j->on('p.id', '=', 'cdi.product_id')
+                  ->whereNull('p.deleted_at')
+                  ->where('p.status', 1);
+            })
+            ->leftJoin('inventory.product_units as pu', function ($j) {
+                $j->on('pu.unit_id', '=', 'p.unit_id')
+                  ->on('pu.product_id', '=', 'p.id')
+                  ->where('pu.is_base', true);
+            })
+            ->leftJoin('inventory.units as u', 'u.id', '=', 'p.unit_id')
+            ->leftJoin('inventory.product_categories as pc', 'pc.id', '=', 'p.category_id')
+            ->where('cd.issue_at', '>=', $since)
+            ->whereNotNull('cdi.product_id')
+            ->select([
+                'p.id',
+                'p.unit_id',
+                'p.sku',
+                'p.barcode',
+                'p.name',
+                \DB::raw("COALESCE(CAST(p.sale_price AS TEXT), '0') as sale_price"),
+                \DB::raw("COALESCE(CAST(p.cost_price AS TEXT), '0') as cost_price"),
+                'p.is_stockable',
+                \DB::raw('false as lot_tracking'),
+                \DB::raw('false as has_expiration'),
+                'p.status',
+                'pc.name as category_name',
+                'u.code as unit_code',
+                'u.name as unit_name',
+                'p.sunat_code',
+                \DB::raw("COALESCE(p.image_url, '') as image_url"),
+                \DB::raw("COALESCE(CAST(p.seller_commission_percent AS TEXT), '0') as seller_commission_percent"),
+                \DB::raw("'PRODUCT' as product_nature"),
+                \DB::raw("NULL::int as line_id"),
+                \DB::raw("NULL::int as brand_id"),
+                \DB::raw("NULL::int as location_id"),
+                \DB::raw("NULL::int as warranty_id"),
+                \DB::raw("NULL as line_name"),
+                \DB::raw("NULL as brand_name"),
+                \DB::raw("NULL as location_name"),
+                \DB::raw("NULL as warranty_name"),
+                \DB::raw('SUM(cdi.qty) as total_sold'),
+            ])
+            ->groupBy([
+                'p.id', 'p.unit_id', 'p.sku', 'p.barcode', 'p.name',
+                'p.sale_price', 'p.cost_price', 'p.is_stockable', 'p.status',
+                'p.sunat_code', 'p.image_url', 'p.seller_commission_percent',
+                'pc.name', 'u.code', 'u.name',
+            ])
+            ->orderByDesc('total_sold')
+            ->limit($limit)
+            ->get();
+
+        return response()->json(['data' => $rows->values()->all()]);
     }
 
     private function documentKindCatalog(): \Illuminate\Support\Collection

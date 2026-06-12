@@ -647,10 +647,10 @@ class GreGuideService
                     $label = 'Guia rechazada';
                 }
             } elseif ($response->successful() && $nullLikeBridgeResponse) {
-                $status = self::STATUS_SENT;
-                $label = 'Pendiente confirmacion SUNAT';
+                $status = self::STATUS_ERROR;
+                $label = 'Respuesta vacia del puente';
                 if ($cdrDesc === null) {
-                    $cdrDesc = 'El puente no devolvio respuesta valida; pendiente de confirmacion/reintento manual.';
+                    $cdrDesc = 'El puente no devolvio respuesta valida; requiere reenvio manual.';
                 }
             } elseif ($response->successful() && $bridgeRes === 0 && $ticket === null) {
                 $status = self::STATUS_ERROR;
@@ -659,10 +659,10 @@ class GreGuideService
                 $status = self::STATUS_SENT;
                 $label = 'Ticket generado';
             } elseif ($response->successful() && $ticket === null) {
-                $status = self::STATUS_SENT;
-                $label = 'Pendiente confirmacion SUNAT';
+                $status = self::STATUS_ERROR;
+                $label = 'Envio sin ticket';
                 if ($cdrDesc === null) {
-                    $cdrDesc = 'El puente no devolvio ticket SUNAT; pendiente de confirmacion/reintento manual.';
+                    $cdrDesc = 'El puente no devolvio ticket SUNAT para consultar estado';
                 }
             }
 
@@ -1087,13 +1087,17 @@ class GreGuideService
             return false;
         }
 
+        $decoded = json_decode($raw, true);
+        if ($this->isBridgeNullLikeResponse($decoded, $raw)) {
+            return true;
+        }
+
         $status = (int) $response->status();
         if ($status < 500) {
             return false;
         }
 
-        $decoded = json_decode($raw, true);
-        return $this->isBridgeNullLikeResponse($decoded, $raw);
+        return false;
     }
 
     private function postBridgeGreRequest($httpReq, string $endpoint, string $payloadJson)

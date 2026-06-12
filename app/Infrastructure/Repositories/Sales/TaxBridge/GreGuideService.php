@@ -1102,64 +1102,30 @@ class GreGuideService
 
     private function postBridgeGreRequest($httpReq, string $endpoint, string $payloadJson)
     {
-        // GRE endpoint expects raw JSON in body, not form-data wrapper. 
-        // Try JSON first (matches legacy system behavior).
-        \Log::debug('[BRIDGE-GRE] Attempt 1: Sending as JSON (primary)', [
-            'endpoint' => $endpoint,
-            'content_type' => 'application/json',
-            'payload_json' => $payloadJson,
-        ]);
-
-        $jsonResponse = $httpReq
-            ->withHeaders(['Content-Type' => 'application/json'])
-            ->withBody($payloadJson, 'application/json')
-            ->post($endpoint);
-
-        $jsonRaw = (string) $jsonResponse->body();
-
-        \Log::debug('[BRIDGE-GRE] Response from JSON attempt', [
-            'status_code' => $jsonResponse->status(),
-            'body_length' => strlen($jsonRaw),
-            'body_first_200' => mb_substr($jsonRaw, 0, 200),
-        ]);
-
-        // If successful or if we got a meaningful error, return the response
-        if ($jsonResponse->successful() || !$this->shouldRetryGreAsFormData($jsonResponse, $jsonRaw)) {
-            \Log::debug('[BRIDGE-GRE-DEBUG] Response headers received', [
-                'headers' => $jsonResponse->headers(),
-                'full_body' => mb_substr($jsonRaw, 0, 5000),
-                'encoding' => mb_detect_encoding($jsonRaw),
-            ]);
-            return $jsonResponse;
-        }
-
-        // Only retry as form-data if JSON failed with a connection/format error
-        \Log::debug('[BRIDGE-GRE] Attempt 2: Retrying as form-data (JSON connection failed)', [
+        // Use the exact same transport strategy as Sales:
+        // application/x-www-form-urlencoded with datosJSON.
+        \Log::debug('[BRIDGE-GRE] Sending as form-data (sales-compatible)', [
             'endpoint' => $endpoint,
             'content_type' => 'application/x-www-form-urlencoded',
             'payload_json' => $payloadJson,
         ]);
 
-        $formResponse = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
-        $formRaw = (string) $formResponse->body();
+        $response = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
+        $raw = (string) $response->body();
 
-        \Log::debug('[BRIDGE-GRE] Response from form-data retry', [
-            'status_code' => $formResponse->status(),
-            'body_length' => strlen($formRaw),
-            'body_first_200' => mb_substr($formRaw, 0, 200),
+        \Log::debug('[BRIDGE-GRE] Response from form-data', [
+            'status_code' => $response->status(),
+            'body_length' => strlen($raw),
+            'body_first_200' => mb_substr($raw, 0, 200),
         ]);
 
-        return $formResponse;
-    }
+        \Log::debug('[BRIDGE-GRE-DEBUG] Response headers received', [
+            'headers' => $response->headers(),
+            'full_body' => mb_substr($raw, 0, 5000),
+            'encoding' => mb_detect_encoding($raw),
+        ]);
 
-    private function shouldRetryGreAsFormData($response, string $raw): bool
-    {
-        // Retry as form-data only if we got a connection-level error or timeout,
-        // not if we got an application-level error (200, 400, 500 with body)
-        if ($response->status() >= 200 && $response->status() < 600) {
-            return false; // Got a response (even error), don't retry
-        }
-        return true; // Connection error or timeout, try fallback
+        return $response;
     }
 
     private function extractBridgeMessageFromRaw(string $raw): ?string

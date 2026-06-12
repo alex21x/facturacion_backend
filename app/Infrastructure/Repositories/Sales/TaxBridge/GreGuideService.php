@@ -1837,8 +1837,6 @@ HTML;
             // Legacy bridge accepts unpadded guide number and null ticket.
             'guia_numero' => (string) ($row->number ?? 0),
             'ticket' => null,
-            'fecha_emision' => (string) ($row->issue_date ?? ''),
-            'fecha_traslado' => (string) (($row->transfer_date ?? null) ?: ($row->issue_date ?? '')),
             'motivo_codigo' => (string) ($row->motivo_traslado ?? '01'),
             'motivo_descripcion' => mb_strtoupper($this->resolveTransferReasonDescription((string) ($row->motivo_traslado ?? '01')), 'UTF-8'),
             'modalidad_codigo' => $modalidad,

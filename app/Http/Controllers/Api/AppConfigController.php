@@ -2557,6 +2557,13 @@ class AppConfigController extends Controller
             'sunat_secondary_pass' => $extraData['sunat_secondary_pass'] ?? null,
             'client_id'       => $extraData['client_id'] ?? null,
             'client_secret'   => $extraData['client_secret'] ?? null,
+            'smtp_host'       => $extraData['smtp_host'] ?? null,
+            'smtp_port'       => isset($extraData['smtp_port']) ? (int) $extraData['smtp_port'] : null,
+            'smtp_encryption' => $extraData['smtp_encryption'] ?? null,
+            'smtp_username'   => $extraData['smtp_username'] ?? null,
+            'smtp_from_email' => $extraData['smtp_from_email'] ?? null,
+            'smtp_from_name'  => $extraData['smtp_from_name'] ?? null,
+            'smtp_password_set' => !empty($extraData['smtp_password_enc']),
             'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
                 ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
                 : true,
@@ -2618,13 +2625,36 @@ class AppConfigController extends Controller
                 $settingsUpdates['bank_accounts'] = json_encode($payload['bank_accounts'] ?? []);
             }
 
-            $extraDataFields = ['ubigeo', 'departamento', 'provincia', 'distrito', 'urbanizacion', 'telefono_movil', 'telefono_fijo', 'company_description', 'sunat_secondary_user', 'sunat_secondary_pass', 'client_id', 'client_secret', 'show_payment_brand_icons'];
+            $extraDataFields = [
+                'ubigeo',
+                'departamento',
+                'provincia',
+                'distrito',
+                'urbanizacion',
+                'telefono_movil',
+                'telefono_fijo',
+                'company_description',
+                'sunat_secondary_user',
+                'sunat_secondary_pass',
+                'client_id',
+                'client_secret',
+                'smtp_host',
+                'smtp_port',
+                'smtp_encryption',
+                'smtp_username',
+                'smtp_from_email',
+                'smtp_from_name',
+                'show_payment_brand_icons',
+            ];
             $hasExtraDataUpdates = false;
             foreach ($extraDataFields as $field) {
                 if (array_key_exists($field, $payload)) {
                     $hasExtraDataUpdates = true;
                     break;
                 }
+            }
+            if (array_key_exists('smtp_password', $payload) || !empty($payload['smtp_password_clear'])) {
+                $hasExtraDataUpdates = true;
             }
 
             if ($hasExtraDataUpdates) {
@@ -2639,8 +2669,19 @@ class AppConfigController extends Controller
                         } else {
                             $currentExtra[$field] = $field === 'show_payment_brand_icons'
                                 ? (bool) $payload[$field]
-                                : $payload[$field];
+                                : ($field === 'smtp_port' ? (int) $payload[$field] : $payload[$field]);
                         }
+                    }
+                }
+
+                if (!empty($payload['smtp_password_clear'])) {
+                    unset($currentExtra['smtp_password_enc']);
+                }
+
+                if (array_key_exists('smtp_password', $payload)) {
+                    $smtpPassword = trim((string) ($payload['smtp_password'] ?? ''));
+                    if ($smtpPassword !== '') {
+                        $currentExtra['smtp_password_enc'] = Crypt::encryptString($smtpPassword);
                     }
                 }
 

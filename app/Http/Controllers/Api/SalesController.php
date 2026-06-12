@@ -35,7 +35,11 @@ use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
+use Throwable;
 
 class SalesController extends Controller
 {    
@@ -912,7 +916,7 @@ class SalesController extends Controller
 
     public function showCommercialDocument(Request $request, $id)
     {
-        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $companyId = (int) ($request->attributes->get('resolved_company_id') ?? $request->query('company_id', 0));
         $documentId = (int) $id;
 
         $doc = $this->salesDocumentReadService->findDocumentForShow($companyId, $documentId);
@@ -1155,9 +1159,11 @@ class SalesController extends Controller
                 'customerName' => (string) ($doc->customer_name ?? '-'),
                 'customerDocNumber' => (string) ($doc->customer_doc_number ?? '-'),
                 'customerAddress' => (string) ($doc->customer_address ?? '-'),
-                'customerPhone' => isset($docMetadata['customer_phone'])
-                    ? (string) $docMetadata['customer_phone']
-                    : (isset($docMetadata['customerPhone']) ? (string) $docMetadata['customerPhone'] : ''),
+                'customerPhone' => (string) (
+                    $doc->customer_phone
+                    ?? ($docMetadata['customer_phone'] ?? $docMetadata['customerPhone'] ?? '')
+                ),
+                'customerEmail' => (string) ($doc->customer_email ?? ''),
                 'notes' => isset($doc->notes) ? (trim((string) $doc->notes) !== '' ? (string) $doc->notes : null) : null,
                 'subtotal' => (float) (($doc->subtotal ?? 0) ?: ($gravadaTotal + $inafectaTotal + $exoneradaTotal)),
                 'taxTotal' => (float) $taxTotal,
@@ -1174,6 +1180,282 @@ class SalesController extends Controller
                 'items' => $mappedItems,
             ],
         ]);
+    }
+
+    public function commercialDocumentShareLink(Request $request, int $id)
+    {
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $format = strtolower(trim((string) $request->query('format', 'a4')));
+        if (!in_array($format, ['a4', 'ticket'], true)) {
+            $format = 'a4';
+        }
+
+        $ttlDays = (int) env('COMMERCIAL_DOCUMENT_SHARE_LINK_TTL_DAYS', 7);
+        if ($ttlDays <= 0) {
+            $ttlDays = 7;
+        }
+
+        $expiresAt = now()->addDays($ttlDays);
+        $url = URL::temporarySignedRoute(
+            'sales.commercial-documents.public-pdf',
+            $expiresAt,
+            [
+                'id' => $id,
+                'company_id' => $companyId,
+                'format' => $format,
+            ]
+        );
+
+        return response()->json([
+            'data' => [
+                'url' => $url,
+                'expiresAt' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    public function sendCommercialDocumentShareEmail(Request $request, int $id)
+    {
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        if ($companyId <= 0) {
+            return response()->json([
+                'message' => 'No se pudo resolver la empresa para el envío.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'to_email' => ['required', 'email', 'max:190'],
+            'subject' => ['nullable', 'string', 'max:200'],
+            'message' => ['nullable', 'string', 'max:4000'],
+            'format' => ['nullable', 'in:a4,ticket'],
+        ]);
+
+        $format = strtolower(trim((string) ($validated['format'] ?? 'a4')));
+        if (!in_array($format, ['a4', 'ticket'], true)) {
+            $format = 'a4';
+        }
+
+        $ttlDays = (int) env('COMMERCIAL_DOCUMENT_SHARE_LINK_TTL_DAYS', 7);
+        if ($ttlDays <= 0) {
+            $ttlDays = 7;
+        }
+
+        $expiresAt = now()->addDays($ttlDays);
+        $pdfUrl = URL::temporarySignedRoute(
+            'sales.commercial-documents.public-pdf',
+            $expiresAt,
+            [
+                'id' => $id,
+                'company_id' => $companyId,
+                'format' => $format,
+            ]
+        );
+
+        $detailsResponse = $this->showCommercialDocument($request, $id);
+        if ($detailsResponse->getStatusCode() >= 400) {
+            return $detailsResponse;
+        }
+
+        $payload = $detailsResponse->getData(true);
+        $doc = is_array($payload['data'] ?? null) ? $payload['data'] : null;
+        if (!$doc) {
+            return response()->json([
+                'message' => 'No se pudo obtener el comprobante para compartir.',
+            ], 422);
+        }
+
+        $series = trim((string) ($doc['series'] ?? ''));
+        $number = trim((string) ($doc['number'] ?? ''));
+        $docKind = trim((string) ($doc['documentKind'] ?? 'Comprobante'));
+        $docLabel = trim($docKind . ' ' . ($series !== '' ? $series : '-') . '-' . ($number !== '' ? $number : '0'));
+
+        $company = $this->resolveCompanyPrintProfile($companyId);
+        $smtpProfile = $this->resolveCompanySmtpProfile($companyId);
+        $companyName = trim((string) (
+            $smtpProfile['from_name']
+            ?? $company['trade_name']
+            ?? $company['legal_name']
+            ?? config('mail.from.name', config('app.name', 'Facturacion'))
+        ));
+        $configuredFromEmail = trim((string) ($smtpProfile['from_email'] ?? $company['email'] ?? ''));
+        $defaultFromEmail = trim((string) config('mail.from.address', ''));
+        $fromEmail = filter_var($configuredFromEmail, FILTER_VALIDATE_EMAIL)
+            ? $configuredFromEmail
+            : $defaultFromEmail;
+
+        if (!filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+            return response()->json([
+                'message' => 'No hay correo remitente configurado para la empresa.',
+            ], 422);
+        }
+
+        $toEmail = trim((string) $validated['to_email']);
+        $subject = trim((string) ($validated['subject'] ?? ''));
+        if ($subject === '') {
+            $subject = $docLabel . ' emitido';
+        }
+
+        $customMessage = trim((string) ($validated['message'] ?? ''));
+        $bodyText = $customMessage !== ''
+            ? $customMessage
+            : "Hola,\n\nTe compartimos tu {$docLabel}.\n\nDescarga PDF: {$pdfUrl}\n\nGracias por tu compra.";
+
+        $shouldUseCustomSmtp = $smtpProfile['host'] !== '' && $smtpProfile['port'] > 0;
+        $originalMailConfig = [
+            'driver' => config('mail.driver'),
+            'host' => config('mail.host'),
+            'port' => config('mail.port'),
+            'encryption' => config('mail.encryption'),
+            'username' => config('mail.username'),
+            'password' => config('mail.password'),
+            'from_address' => config('mail.from.address'),
+            'from_name' => config('mail.from.name'),
+        ];
+
+        if ($shouldUseCustomSmtp) {
+            config([
+                'mail.driver' => 'smtp',
+                'mail.host' => $smtpProfile['host'],
+                'mail.port' => $smtpProfile['port'],
+                'mail.encryption' => $smtpProfile['encryption'],
+                'mail.username' => $smtpProfile['username'] !== '' ? $smtpProfile['username'] : null,
+                'mail.password' => $smtpProfile['password'] !== '' ? $smtpProfile['password'] : null,
+                'mail.from.address' => $fromEmail,
+                'mail.from.name' => $companyName !== '' ? $companyName : config('app.name', 'Facturacion'),
+            ]);
+        }
+
+        try {
+            Mail::html(
+                nl2br($this->escapeHtml($bodyText), false),
+                function ($message) use ($toEmail, $fromEmail, $companyName, $subject) {
+                    $message
+                        ->to($toEmail)
+                        ->from($fromEmail, $companyName !== '' ? $companyName : null)
+                        ->subject($subject);
+                }
+            );
+        } catch (Throwable $e) {
+            return response()->json([
+                'message' => 'No se pudo enviar el correo de compartido.',
+                'error' => $e->getMessage(),
+            ], 422);
+        } finally {
+            if ($shouldUseCustomSmtp) {
+                config([
+                    'mail.driver' => $originalMailConfig['driver'],
+                    'mail.host' => $originalMailConfig['host'],
+                    'mail.port' => $originalMailConfig['port'],
+                    'mail.encryption' => $originalMailConfig['encryption'],
+                    'mail.username' => $originalMailConfig['username'],
+                    'mail.password' => $originalMailConfig['password'],
+                    'mail.from.address' => $originalMailConfig['from_address'],
+                    'mail.from.name' => $originalMailConfig['from_name'],
+                ]);
+            }
+        }
+
+        return response()->json([
+            'message' => 'Correo enviado correctamente.',
+            'data' => [
+                'to' => $toEmail,
+                'from' => $fromEmail,
+                'subject' => $subject,
+                'url' => $pdfUrl,
+                'expiresAt' => $expiresAt->toIso8601String(),
+            ],
+        ]);
+    }
+
+    private function resolveCompanySmtpProfile(int $companyId): array
+    {
+        $empty = [
+            'host' => '',
+            'port' => 0,
+            'encryption' => null,
+            'username' => '',
+            'password' => '',
+            'from_email' => '',
+            'from_name' => '',
+        ];
+
+        if (!$this->tableExists('core.company_settings')) {
+            return $empty;
+        }
+
+        $columns = $this->tableColumns('core.company_settings');
+        if (!in_array('extra_data', $columns, true)) {
+            return $empty;
+        }
+
+        $settings = $this->salesLookupService->findLatestCompanySettings(
+            $companyId,
+            ['extra_data'],
+            false,
+            in_array('updated_at', $columns, true),
+            in_array('created_at', $columns, true)
+        );
+
+        if (!$settings || !isset($settings->extra_data)) {
+            return $empty;
+        }
+
+        $extraData = json_decode((string) $settings->extra_data, true);
+        if (!is_array($extraData)) {
+            return $empty;
+        }
+
+        $host = trim((string) ($extraData['smtp_host'] ?? ''));
+        $port = (int) ($extraData['smtp_port'] ?? 0);
+        if ($port < 1 || $port > 65535) {
+            $port = 0;
+        }
+
+        $encryptionRaw = strtolower(trim((string) ($extraData['smtp_encryption'] ?? '')));
+        $encryption = in_array($encryptionRaw, ['tls', 'ssl', 'starttls'], true)
+            ? $encryptionRaw
+            : null;
+
+        $username = trim((string) ($extraData['smtp_username'] ?? ''));
+        $password = '';
+        $encryptedPassword = trim((string) ($extraData['smtp_password_enc'] ?? ''));
+        if ($encryptedPassword !== '') {
+            try {
+                $password = (string) Crypt::decryptString($encryptedPassword);
+            } catch (Throwable $e) {
+                $password = '';
+            }
+        }
+
+        $fromEmail = trim((string) ($extraData['smtp_from_email'] ?? ''));
+        if (!filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+            $fromEmail = '';
+        }
+
+        $fromName = trim((string) ($extraData['smtp_from_name'] ?? ''));
+
+        return [
+            'host' => $host,
+            'port' => $port,
+            'encryption' => $encryption,
+            'username' => $username,
+            'password' => $password,
+            'from_email' => $fromEmail,
+            'from_name' => $fromName,
+        ];
+    }
+
+    public function publicPrintableCommercialDocumentPdf(Request $request, int $id)
+    {
+        $companyId = (int) $request->query('company_id', 0);
+        if ($companyId <= 0) {
+            return response()->json([
+                'message' => 'company_id inválido para enlace público.',
+            ], 422);
+        }
+
+        $request->attributes->set('resolved_company_id', $companyId);
+        return $this->printableCommercialDocumentPdf($request, $id);
     }
 
     public function printableCommercialDocument(Request $request, int $id)
@@ -1636,7 +1918,7 @@ class SalesController extends Controller
         @page { size: A4 portrait; margin: 8mm; }
         * { box-sizing: border-box; }
         body { margin: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-        .sheet { width: 100%; border: 1px solid #111; min-height: 279mm; padding: 5mm; }
+        .sheet { width: 100%; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
         .top-logo { width: 19%; padding-right: 3mm; }

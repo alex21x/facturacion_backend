@@ -63,6 +63,8 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                 'c.doc_number as customer_doc_number',
                 'c.address as customer_address',
+                'c.phone as customer_phone',
+                'c.email as customer_email',
             ])
             ->where('d.id', $documentId)
             ->where('d.company_id', $companyId)

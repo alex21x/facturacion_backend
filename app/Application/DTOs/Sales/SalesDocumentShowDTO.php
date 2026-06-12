@@ -32,7 +32,9 @@ final class SalesDocumentShowDTO
         public readonly ?string $payment_method_name,
         public readonly ?string $customer_name,
         public readonly ?string $customer_doc_number,
-        public readonly ?string $customer_address
+        public readonly ?string $customer_address,
+        public readonly ?string $customer_phone,
+        public readonly ?string $customer_email
     ) {
     }
 
@@ -67,6 +69,8 @@ final class SalesDocumentShowDTO
             customer_name: isset($row->customer_name) ? (string) $row->customer_name : null,
             customer_doc_number: isset($row->customer_doc_number) ? (string) $row->customer_doc_number : null,
             customer_address: isset($row->customer_address) ? (string) $row->customer_address : null,
+            customer_phone: isset($row->customer_phone) ? (string) $row->customer_phone : null,
+            customer_email: isset($row->customer_email) ? (string) $row->customer_email : null,
         );
     }
 }

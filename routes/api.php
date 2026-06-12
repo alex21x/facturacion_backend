@@ -137,6 +137,8 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::get('/sales/commercial-documents/{id}', 'Api\\SalesDocumentController@showCommercialDocument');
             Route::get('/sales/commercial-documents/{id}/print', 'Api\\SalesDocumentController@printableCommercialDocument');
             Route::get('/sales/commercial-documents/{id}/print-pdf', 'Api\\SalesDocumentController@printableCommercialDocumentPdf');
+            Route::get('/sales/commercial-documents/{id}/share-link', 'Api\SalesDocumentController@commercialDocumentShareLink');
+            Route::post('/sales/commercial-documents/{id}/share-email', 'Api\\SalesDocumentController@sendCommercialDocumentShareEmail');
             Route::get('/sales/commercial-documents/{id}/tax-bridge-preview', 'Api\\SalesDocumentController@previewTaxBridgePayload');
             Route::get('/sales/commercial-documents/{id}/tax-bridge-debug', 'Api\\SalesDocumentController@taxBridgeDebug');
             Route::get('/sales/commercial-documents/{id}/download-xml', 'Api\\SalesDocumentController@downloadSunatXml');
@@ -215,6 +217,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::post('/sales/customers/bulk-import', 'Api\\SalesCustomerController@bulkImportCustomers');
             Route::put('/sales/customers/{id}', 'Api\\SalesCustomerController@updateCustomer');
             Route::post('/sales/customers/{id}/vehicles', 'Api\\SalesCustomerController@createCustomerVehicle');
+
             Route::put('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesCustomerController@updateCustomerVehicle');
             Route::delete('/sales/customers/{id}/vehicles/{vehicleId}', 'Api\\SalesCustomerController@deleteCustomerVehicle');
         });
@@ -314,6 +317,10 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::post('/requests', 'Api\\ReportsController@store');
     });
 });
+
+Route::get('/sales/public/commercial-documents/{id}/print-pdf', 'Api\\SalesDocumentController@publicPrintableCommercialDocumentPdf')
+    ->name('sales.commercial-documents.public-pdf')
+    ->middleware('signed');
 
 Route::get('/health', function () {
     return response()->json([

@@ -611,7 +611,7 @@ class GreGuideService
                 $httpReq = $httpReq->withToken((string) $config['token']);
             }
 
-            $response = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
+            $response = $this->postBridgeGreRequest($httpReq, $endpoint, $payloadJson);
 
             $raw = (string) $response->body();
             $decoded = json_decode($raw, true);
@@ -834,7 +834,7 @@ class GreGuideService
         }
 
         $requestStartedAt = microtime(true);
-        $response = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
+        $response = $this->postBridgeGreRequest($httpReq, $endpoint, $payloadJson);
         $raw = (string) $response->body();
         $decoded = json_decode($raw, true);
         if (is_string($decoded)) {
@@ -1075,6 +1075,35 @@ class GreGuideService
         }
 
         return false;
+    }
+
+    private function shouldRetryGreAsRawJson($response, string $raw): bool
+    {
+        if (!$response || !method_exists($response, 'status')) {
+            return false;
+        }
+
+        $status = (int) $response->status();
+        if ($status < 500) {
+            return false;
+        }
+
+        $decoded = json_decode($raw, true);
+        return $this->isBridgeNullLikeResponse($decoded, $raw);
+    }
+
+    private function postBridgeGreRequest($httpReq, string $endpoint, string $payloadJson)
+    {
+        $formResponse = $httpReq->asForm()->post($endpoint, ['datosJSON' => $payloadJson]);
+        $formRaw = (string) $formResponse->body();
+        if (!$this->shouldRetryGreAsRawJson($formResponse, $formRaw)) {
+            return $formResponse;
+        }
+
+        return $httpReq
+            ->withHeaders(['Content-Type' => 'application/json'])
+            ->withBody($payloadJson, 'application/json')
+            ->post($endpoint);
     }
 
     private function extractBridgeMessageFromRaw(string $raw): ?string
@@ -1782,6 +1811,7 @@ HTML;
             'tipo_documento' => '09',
             'guia_serie' => (string) ($row->series ?? ''),
             'guia_numero' => str_pad((string) ($row->number ?? 0), 8, '0', STR_PAD_LEFT),
+            'ticket' => '',
             'fecha_emision' => (string) ($row->issue_date ?? ''),
             'fecha_traslado' => (string) (($row->transfer_date ?? null) ?: ($row->issue_date ?? '')),
             'motivo_codigo' => (string) ($row->motivo_traslado ?? '01'),

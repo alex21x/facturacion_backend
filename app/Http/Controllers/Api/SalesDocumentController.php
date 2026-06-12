@@ -48,6 +48,21 @@ class SalesDocumentController extends Controller
         return $this->salesController->printableCommercialDocumentPdf($request, $id);
     }
 
+    public function commercialDocumentShareLink(Request $request, int $id)
+    {
+        return $this->salesController->commercialDocumentShareLink($request, $id);
+    }
+
+    public function sendCommercialDocumentShareEmail(Request $request, int $id)
+    {
+        return $this->salesController->sendCommercialDocumentShareEmail($request, $id);
+    }
+
+    public function publicPrintableCommercialDocumentPdf(Request $request, int $id)
+    {
+        return $this->salesController->publicPrintableCommercialDocumentPdf($request, $id);
+    }
+
     public function previewTaxBridgePayload(Request $request, int $id)
     {
         return $this->salesController->previewTaxBridgePayload($request, $id);

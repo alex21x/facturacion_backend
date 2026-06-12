@@ -427,6 +427,7 @@ class CustomerManagementService
             'doc_number' => $row->doc_number,
             'name' => $name ?: ('Cliente #' . $row->id),
             'trade_name' => $row->trade_name,
+            'email' => $row->email,
             'plate' => $row->plate,
             'address' => $row->address,
             'phone' => $row->phone,

@@ -1904,6 +1904,18 @@ HTML;
             }
         }
 
+        // Some tenants store company address metadata already truncated (with "...").
+        // Bridge may reject silently when these values are malformed.
+        $empresaDireccion = trim((string) ($empresa['direccion'] ?? ''));
+        if ($this->isLikelyTruncatedBridgeText($empresaDireccion)) {
+            $empresa['direccion'] = (string) ($cabecera['partida_direccion'] ?? $empresaDireccion);
+        }
+
+        $empresaUrbanizacion = trim((string) ($empresa['urbanizacion'] ?? ''));
+        if ($this->isLikelyTruncatedBridgeText($empresaUrbanizacion)) {
+            $empresa['urbanizacion'] = '';
+        }
+
         $detalle = [];
         foreach ($items as $item) {
             $detalle[] = [
@@ -1920,6 +1932,16 @@ HTML;
             'cabecera' => $cabecera,
             'detalle' => $detalle,
         ];
+    }
+
+    private function isLikelyTruncatedBridgeText(string $value): bool
+    {
+        $normalized = trim($value);
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_contains($normalized, '...') || str_ends_with($normalized, '..');
     }
 
     private function buildCompanyAuthBlock(int $companyId, array $config): array

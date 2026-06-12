@@ -166,6 +166,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
             Route::get('/sales/gre-guides/{id}', 'Api\\GreGuideController@show');
             Route::get('/sales/gre-guides/{id}/tax-bridge-audit', 'Api\\GreGuideController@taxBridgeAuditHistory');
             Route::get('/sales/gre-guides/{id}/print', 'Api\\GreGuideController@printable');
+            Route::get('/sales/gre-guides/{id}/print-pdf', 'Api\\GreGuideController@printablePdf');
         });
 
         Route::middleware('company.scope')->group(function () {

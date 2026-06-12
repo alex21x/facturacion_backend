@@ -1750,7 +1750,12 @@ class SalesController extends Controller
                 $currency = $this->escapeHtml((string) ($doc['currencySymbol'] ?? ($currencyCode === 'PEN' ? 'S/' : $currencyCode)));
                 $currencyLabel = $currencyCode === 'PEN' ? 'SOLES' : $currencyCode;
 
-                $guideNo = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['guia', 'nro_guia', 'guide_number', 'guideNumber']));
+                $guideNoRaw = $this->resolveLinkedGuideReference(
+                    (int) ($company['company_id'] ?? $company['id'] ?? 0),
+                    (int) ($doc['id'] ?? 0),
+                    $metaData
+                );
+                $guideNo = $this->escapeHtml($guideNoRaw !== '' ? $guideNoRaw : '-');
                 $seller = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['seller_name', 'vendedor', 'salesperson_name']));
                 $orderPurchase = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['purchase_order', 'orden_compra', 'order_purchase']));
                 $customerCode = $this->escapeHtml($this->findFirstMetaStringValue($metaData, ['customer_code', 'codigo_cliente', 'client_code']));
@@ -1899,11 +1904,20 @@ class SalesController extends Controller
                     $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
                     $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
 
-                    $paymentBrandsSection = '<div class="pay-logos">'
-                        . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
-                        . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
-                        . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
-                        . '</div>';
+                    $brandImages = '';
+                    if ($yapeLogo !== '') {
+                        $brandImages .= '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>';
+                    }
+                    if ($plinLogo !== '') {
+                        $brandImages .= '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>';
+                    }
+                    if ($culqiLogo !== '') {
+                        $brandImages .= '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>';
+                    }
+
+                    if ($brandImages !== '') {
+                        $paymentBrandsSection = '<div class="pay-logos">' . $brandImages . '</div>';
+                    }
                 }
 
                 $electronicSignatureRaw = $this->findFirstMetaStringValue($metaData, [
@@ -1967,10 +1981,10 @@ class SalesController extends Controller
     <meta charset="utf-8" />
     <title>{$documentFileName}</title>
     <style>
-        @page { size: A4 portrait; margin: 8mm; }
+        @page { size: A4 portrait; margin: 10mm; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 0 1mm; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-        .sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
+        body { margin: 0; padding: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+        .sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }
         .top-3 { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
         .top-3 td { vertical-align: top; }
         .top-logo { width: 19%; padding-right: 3mm; }
@@ -2185,6 +2199,9 @@ HTML;
         $branchId = isset($doc['branchId']) && $doc['branchId'] !== null
             ? (int) $doc['branchId']
             : null;
+        $guideNoRaw = $this->resolveLinkedGuideReference($companyId, (int) ($doc['id'] ?? 0), $docMetadata);
+        $guideNo = $this->escapeHtml($guideNoRaw !== '' ? $guideNoRaw : '-');
+        $guideRow = '<div class="info-row"><div class="info-label">NRO GUIA:</div><div class="info-value">' . $guideNo . '</div></div>';
         $salesOrderMultiPaymentEnabled = $companyId > 0
             ? $this->isSalesOrderMultiPaymentEnabledForContext($companyId, $branchId)
             : false;
@@ -2364,11 +2381,20 @@ HTML;
             $plinLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('plin-official.png'));
             $culqiLogo = $this->escapeHtml($this->resolvePaymentBrandImageSource('culqi-official.png'));
 
-            $paymentBrandsSection = '<div class="' . $logosClass . '">'
-                . '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>'
-                . '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>'
-                . '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>'
-                . '</div>';
+            $brandImages = '';
+            if ($yapeLogo !== '') {
+                $brandImages .= '<div class="paybrand"><img src="' . $yapeLogo . '" alt="Yape" /></div>';
+            }
+            if ($plinLogo !== '') {
+                $brandImages .= '<div class="paybrand"><img src="' . $plinLogo . '" alt="Plin" /></div>';
+            }
+            if ($culqiLogo !== '') {
+                $brandImages .= '<div class="paybrand"><img src="' . $culqiLogo . '" alt="Culqi" /></div>';
+            }
+
+            if ($brandImages !== '') {
+                $paymentBrandsSection = '<div class="' . $logosClass . '">' . $brandImages . '</div>';
+            }
         }
 
         $sheetWidth = $isA4 ? '100%' : '80mm';
@@ -2577,6 +2603,7 @@ TICKETHEAD;
 
     <div class="info-row"><div class="info-label">CLIENTE:</div><div class="info-value">{$customer}</div></div>
     <div class="info-row"><div class="info-label">DOC.:</div><div class="info-value">{$customerDoc}</div></div>
+    {$guideRow}
     <div class="info-row"><div class="info-label">DIRECCI&Oacute;N:</div><div class="info-value">{$customerAddress}</div></div>
     {$customerPhoneRow}
     {$documentNotesRow}
@@ -2639,6 +2666,48 @@ HTML;
         return '';
     }
 
+    private function resolveLinkedGuideReference(int $companyId, int $documentId, array $metadata): string
+    {
+        $metaGuide = trim($this->findFirstMetaStringValue($metadata, [
+            'guia',
+            'nro_guia',
+            'guide_number',
+            'guideNumber',
+            'gre_identifier',
+            'gre_guide_identifier',
+            'gre_number',
+            'guia_remision',
+            'guia_remision_numero',
+        ]));
+
+        if ($metaGuide !== '') {
+            return $metaGuide;
+        }
+
+        if ($companyId <= 0 || $documentId <= 0) {
+            return '';
+        }
+
+        try {
+            $row = DB::table('sales.gre_guides')
+                ->where('company_id', $companyId)
+                ->where('related_document_id', $documentId)
+                ->whereNotIn('status', ['CANCELLED'])
+                ->orderByRaw("CASE
+                    WHEN status = 'ACCEPTED' THEN 0
+                    WHEN status = 'SENT' THEN 1
+                    WHEN status = 'DRAFT' THEN 2
+                    ELSE 3
+                END")
+                ->orderByDesc('id')
+                ->first(['identifier']);
+
+            return trim((string) ($row->identifier ?? ''));
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
     private function resolveFrontendAssetUrl(string $assetPath): string
     {
         $normalizedPath = '/' . ltrim($assetPath, '/');
@@ -2688,7 +2757,13 @@ HTML;
             }
         }
 
-        return $this->resolveFrontendAssetUrl($relativePath);
+        $assetUrl = $this->resolveFrontendAssetUrl($relativePath);
+        if (preg_match('#^https?://#i', $assetUrl) === 1) {
+            return $assetUrl;
+        }
+
+        // Evita placeholders rotos de imagen en DOMPDF cuando no hay URL absoluta accesible.
+        return '';
     }
 
     private function filePathToImageDataUri(string $path): ?string
@@ -2794,7 +2869,12 @@ HTML;
         }
 
         try {
-            return Carbon::parse($value)->setTimezone('America/Lima')->format('d/m/Y H:i:s');
+            if (preg_match('/Z$|[+-]\d{2}:\d{2}$/', $value) === 1) {
+                return Carbon::parse($value)->setTimezone('America/Lima')->format('d/m/Y H:i:s');
+            }
+
+            // Si no viene offset, tratar el valor como hora local de Lima para evitar desfase por timezone global (UTC).
+            return Carbon::parse($value, 'America/Lima')->format('d/m/Y H:i:s');
         } catch (\Throwable $e) {
             return $value;
         }

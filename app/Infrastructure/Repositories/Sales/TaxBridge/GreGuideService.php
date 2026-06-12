@@ -1587,7 +1587,7 @@ class GreGuideService
             if ($sunatLink !== '') {
                 $sunatInfo .= "<div style=\"font-size:7px;color:#555;word-break:break-all;margin:0.3mm 0\">SUNAT: {$sunatLink}</div>";
                 if ($sunatQr !== '') {
-                    $sunatInfo .= "<div style=\"text-align:center;margin-top:1mm\"><img src=\"{$sunatQr}\" alt=\"QR SUNAT\" style=\"width:26mm;height:26mm;border:1px solid #111;background:#fff\" /></div>";
+                    $sunatInfo .= "<div style=\"text-align:center;margin-top:1mm\"><a href=\"{$sunatLink}\" target=\"_blank\" rel=\"noopener\"><img src=\"{$sunatQr}\" alt=\"QR SUNAT\" style=\"width:26mm;height:26mm;border:1px solid #111;background:#fff\" /></a></div>";
                 }
             }
 
@@ -1710,7 +1710,7 @@ HTML;
         if ($sunatLink !== '') {
             $sunatRowsA4 .= "<tr><td class=\"label\">Consulta SUNAT:</td><td class=\"value\" style=\"word-break:break-all\">{$sunatLink}</td></tr>";
             if ($sunatQr !== '') {
-                $sunatRowsA4 .= "<tr><td class=\"label\">QR SUNAT:</td><td class=\"value\"><img src=\"{$sunatQr}\" alt=\"QR SUNAT\" style=\"width:120px;height:120px;border:1px solid #d1d5db;border-radius:6px;background:#fff\" /></td></tr>";
+                $sunatRowsA4 .= "<tr><td class=\"label\">QR SUNAT:</td><td class=\"value\"><a href=\"{$sunatLink}\" target=\"_blank\" rel=\"noopener\"><img src=\"{$sunatQr}\" alt=\"QR SUNAT\" style=\"width:120px;height:120px;border:1px solid #111;background:#fff\" /></a></td></tr>";
             }
         }
 
@@ -1720,44 +1720,44 @@ HTML;
 <meta charset="utf-8">
 <title>GRE {$identifier}</title>
 <style>
-  @page { size: A4 portrait; margin: 9mm; }
+    @page { size: A4 portrait; margin: 10mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; color: #1f2937; }
-  .print-bar { background: linear-gradient(120deg, #0f172a 0%, #1e3a8a 100%); color: #fff; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
-  .print-bar button { background: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; padding: 7px 12px; font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer; margin-left: 8px; }
-  .sheet { width: 100%; border: 1.5px solid #1f2937; min-height: 277mm; padding: 8mm; }
-  .head { display: grid; grid-template-columns: 1.1fr 1fr; gap: 10px; align-items: stretch; }
-  .brand { border: 1px solid #9ca3af; border-radius: 8px; padding: 10px; }
-    .brand-logo { width: 82px; height: 82px; object-fit: contain; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; margin-bottom: 8px; }
-  .brand h1 { margin: 0; font-size: 22px; letter-spacing: 0.6px; }
-  .brand p { margin: 2px 0; font-size: 11px; color: #4b5563; }
-  .voucher { border: 1px solid #9ca3af; border-radius: 8px; padding: 10px; text-align: center; }
-  .voucher .ruc { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
-  .voucher .v-title { font-size: 13px; margin-top: 6px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 700; }
-  .voucher .docno { margin-top: 8px; font-size: 20px; font-weight: 700; }
-  .voucher .sub { font-size: 11px; color: #6b7280; margin-top: 4px; }
-  .party { margin-top: 10px; border: 1px solid #9ca3af; border-radius: 8px; padding: 8px 10px; font-size: 12px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; }
+    body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111; }
+    .print-bar { background: #111; color: #fff; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+    .print-bar button { background: #fff; color: #111; border: 1px solid #111; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer; margin-left: 8px; }
+    .sheet { width: 100%; max-width: 188mm; border: 1px solid #111; padding: 5mm; margin: 0 auto; }
+    .head { width: 100%; display: table; table-layout: fixed; border-collapse: separate; border-spacing: 8px 0; }
+    .head > article { display: table-cell; vertical-align: top; }
+    .brand { border: 1px solid #111; padding: 8px; }
+    .brand-logo { width: 74px; height: 74px; object-fit: contain; border: 1px solid #111; background: #fff; margin-bottom: 6px; }
+    .brand h1 { margin: 0; font-size: 20px; letter-spacing: 0.2px; text-transform: uppercase; }
+    .brand p { margin: 2px 0; font-size: 11px; color: #111; }
+    .voucher { border: 1px solid #111; padding: 8px; text-align: center; }
+    .voucher .ruc { font-size: 24px; font-weight: 700; letter-spacing: 0.6px; }
+    .voucher .v-title { font-size: 13px; margin-top: 6px; letter-spacing: 0.8px; text-transform: uppercase; font-weight: 700; }
+    .voucher .docno { margin-top: 8px; font-size: 20px; font-weight: 700; letter-spacing: 0.6px; }
+    .voucher .sub { font-size: 10px; color: #111; margin-top: 4px; }
+    .party { margin-top: 8px; border: 1px solid #111; padding: 6px 8px; font-size: 12px; display: table; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 8px 0; }
+    .party > article { display: table-cell; vertical-align: top; }
   .kv { margin: 2px 0; }
-  .kv b { display: inline-block; min-width: 118px; }
-  .section-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; border-bottom: 1px solid #e5e7eb; padding-bottom: 3px; margin: 10px 0 6px; }
-  .table-wrap { margin-top: 10px; }
-  table.meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-  table.meta td { padding: 4px 8px; font-size: 11px; vertical-align: top; }
-  table.meta .label { width: 170px; font-weight: 600; color: #374151; text-align: right; }
-  table.items { width: 100%; border-collapse: collapse; }
-  table.items th { background: #60a5fa; color: #0f172a; font-size: 11px; text-transform: uppercase; letter-spacing: 0.2px; padding: 5px 6px; border-bottom: 1px solid #1f2937; }
-  table.items td { border-bottom: 1px solid #d1d5db; font-size: 11px; padding: 5px 6px; vertical-align: top; }
+    .kv b { display: inline-block; min-width: 116px; }
+    .section-label { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #111; border: 1px solid #111; border-bottom: none; padding: 4px 6px; margin: 8px 0 0; }
+    .table-wrap { margin-top: 0; border: 1px solid #111; border-top: none; }
+    table.meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; }
+    table.meta td { padding: 4px 8px; font-size: 11px; vertical-align: top; border-bottom: 1px solid #111; }
+    table.meta tr:last-child td { border-bottom: none; }
+    table.meta .label { width: 160px; font-weight: 700; color: #111; text-align: right; border-right: 1px solid #111; }
+    table.meta .value { word-break: break-word; overflow-wrap: anywhere; }
+    table.items { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.items th { background: #f1f5f9; color: #111; font-size: 11px; text-transform: uppercase; letter-spacing: 0.2px; padding: 5px 6px; border: 1px solid #111; }
+    table.items td { border: 1px solid #111; font-size: 11px; padding: 5px 6px; vertical-align: top; }
   .ta-r { text-align: right; }
   .ta-c { text-align: center; }
-  .obs { margin-top: 12px; border-top: 1px solid #9ca3af; padding-top: 6px; font-size: 11px; color: #4b5563; }
+    .obs { margin-top: 10px; border-top: 1px solid #111; padding-top: 6px; font-size: 11px; color: #111; }
   @media print { .no-print { display: none !important; } }
 </style>
 </head>
 <body>
-<div class="print-bar no-print">
-  <span>Vista Previa &mdash; Guia de Remision A4</span>
-  <button onclick="window.print()">Imprimir</button>
-</div>
 <section class="sheet">
   <section class="head">
     <article class="brand">
@@ -1769,7 +1769,7 @@ HTML;
             <p>Fecha emision: {$issueDateText}</p>
     </article>
     <article class="voucher">
-      <div class="ruc">R.U.C.: {$companyRuc}</div>
+            <div class="ruc">RUC {$companyRuc}</div>
       <div class="v-title">Guia de Remision Electronica</div>
       <div class="docno">{$identifier}</div>
       <div class="sub">Tipo: {$guideType} | Modo: {$modoLabel}</div>

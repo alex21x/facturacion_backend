@@ -18,6 +18,7 @@ use App\Http\Requests\GreGuide\UpdateGreGuideRequest;
 use App\Infrastructure\Repositories\Sales\TaxBridge\TaxBridgeException;
 use App\Services\Sales\TaxBridge\GreGuideService;
 use App\Services\Sales\TaxBridge\TaxBridgeAuditService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 
 class GreGuideController extends Controller
@@ -331,6 +332,57 @@ class GreGuideController extends Controller
         }
     }
 
+    public function printablePdf(PrintableGreGuideRequest $request, int $id)
+    {
+        $request->validated();
+
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->query('company_id', $authUser->company_id);
+
+        if ((int) $authUser->company_id !== $companyId) {
+            return response('Invalid company scope', 403);
+        }
+
+        $format = in_array($request->query('format'), ['ticket', 'a4'], true)
+            ? (string) $request->query('format')
+            : 'a4';
+
+        try {
+            $html = $this->service->printableHtml($companyId, $id, $format);
+            if ($format === 'a4') {
+                $html = $this->applyA4PdfLayoutCompatibility($html);
+            }
+
+            $dompdf = Pdf::setOptions([
+                'isHtml5ParserEnabled' => true,
+                'isRemoteEnabled' => true,
+                'dpi' => 96,
+                'defaultFont' => 'DejaVu Sans',
+            ]);
+            $dompdf->loadHTML($html, 'UTF-8');
+
+            if ($format === 'ticket') {
+                $dompdf->setPaper([0, 0, 226.77, 1800], 'portrait');
+            } else {
+                $dompdf->setPaper('A4', 'portrait');
+            }
+
+            $dompdf->render();
+            $pdfBinary = $dompdf->output();
+            $fileName = 'gre-' . $id . '-' . $format . '.pdf';
+
+            return response($pdfBinary, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        } catch (TaxBridgeException $e) {
+            return response($e->getMessage(), $e->httpStatus());
+        }
+    }
+
     private function ensureTraceabilityFeatureEnabled(int $companyId, ?int $branchId)
     {
         $featureCode = 'SALES_TAX_BRIDGE_DEBUG_VIEW';
@@ -343,5 +395,42 @@ class GreGuideController extends Controller
         }
 
         return null;
+    }
+
+    private function applyA4PdfLayoutCompatibility(string $html): string
+    {
+        $html = preg_replace(
+            '/<section class="head">\s*<article class="brand">(.*?)<\/article>\s*<article class="voucher">(.*?)<\/article>\s*<\/section>/s',
+            '<table class="head" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-bottom:8px"><tr><td class="head-brand" style="width:29%;padding-right:0;vertical-align:top"><article class="brand">$1</article></td><td class="head-gap" style="width:3%;padding:0;border:none"></td><td class="head-voucher" style="width:68%;padding-left:0;vertical-align:top"><article class="voucher">$2</article></td></tr></table>',
+            $html,
+            1
+        ) ?? $html;
+
+        $html = preg_replace(
+            '/<section class="party">\s*<article>(.*?)<\/article>\s*<article>(.*?)<\/article>\s*<\/section>/s',
+            '<table class="party" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:8px"><tr><td class="party-left" style="width:50%;padding:6px 8px;vertical-align:top"><article>$1</article></td><td class="party-right" style="width:50%;padding:6px 8px;vertical-align:top"><article>$2</article></td></tr></table>',
+            $html,
+            1
+        ) ?? $html;
+
+        return str_replace(
+            [
+                '.head { width: 100%; display: table; table-layout: fixed; border-collapse: separate; border-spacing: 8px 0; }',
+                '.head > article { display: table-cell; vertical-align: top; }',
+                '.brand { border: 1px solid #111; padding: 8px; }',
+                '.voucher { border: 1px solid #111; padding: 8px; text-align: center; }',
+                '.party { margin-top: 8px; border: 1px solid #111; padding: 6px 8px; font-size: 12px; display: table; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 8px 0; }',
+                '.party > article { display: table-cell; vertical-align: top; }',
+            ],
+            [
+                '.head { width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 8px; }',
+                '.head td { vertical-align: top; }',
+                '.brand { width: auto; border: 1px solid #111; padding: 8px; }',
+                '.voucher { width: auto; border: 1px solid #111; padding: 8px; text-align: center; } .voucher .ruc { font-size: 20px; word-break: break-word; }',
+                '.party { margin-top: 8px; border: 1px solid #111; width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }',
+                '.party td { vertical-align: top; padding: 6px 8px; }',
+            ],
+            $html
+        );
     }
 }

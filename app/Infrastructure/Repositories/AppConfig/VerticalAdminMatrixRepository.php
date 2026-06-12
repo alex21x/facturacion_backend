@@ -55,7 +55,11 @@ class VerticalAdminMatrixRepository
 
         if ($this->tableExists('sales', 'commercial_documents')) {
             $issuedDocumentsSubQuery = DB::table('sales.commercial_documents as d')
-                ->select('d.company_id', DB::raw('COUNT(*) as issued_documents_count'))
+                ->select(
+                    'd.company_id',
+                    DB::raw('COUNT(*) as issued_documents_count'),
+                    DB::raw('MAX(d.issue_at) as issued_last_at')
+                )
                 ->where('d.status', 'ISSUED')
                 ->whereIn('d.document_kind', ['INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
                 ->groupBy('d.company_id');
@@ -71,6 +75,7 @@ class VerticalAdminMatrixRepository
                 'c.trade_name',
                 'c.status',
                 DB::raw('COALESCE(docs.issued_documents_count, 0) as issued_documents_count'),
+                'docs.issued_last_at',
             ]);
         }
 
@@ -81,6 +86,7 @@ class VerticalAdminMatrixRepository
             'c.trade_name',
             'c.status',
             DB::raw('0 as issued_documents_count'),
+            DB::raw('NULL as issued_last_at'),
         ]);
     }
 

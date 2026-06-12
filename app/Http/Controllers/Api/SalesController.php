@@ -1621,9 +1621,9 @@ class SalesController extends Controller
                 '.sheet { width: 100%; max-width: 194mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }',
             ],
             [
-                '@page { size: A4 portrait; margin: 6mm; }',
+                '@page { size: A4 portrait; margin: 10mm; }',
                 'body { margin: 0; padding: 0; color: #111; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }',
-                '.sheet { width: 100%; max-width: 197mm; margin: 0 auto; border: 1px solid #111; padding: 4mm; }',
+                '.sheet { width: 100%; max-width: 188mm; margin: 0 auto; border: 1px solid #111; padding: 5mm; }',
             ],
             $html
         );

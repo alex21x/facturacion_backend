@@ -1205,6 +1205,7 @@ class SalesController extends Controller
                 'format' => $format,
             ]
         );
+        $url = $this->normalizePublicShareUrlScheme((string) $url, $request);
 
         return response()->json([
             'data' => [
@@ -1250,6 +1251,7 @@ class SalesController extends Controller
                 'format' => $format,
             ]
         );
+        $pdfUrl = $this->normalizePublicShareUrlScheme((string) $pdfUrl, $request);
 
         $detailsResponse = $this->showCommercialDocument($request, $id);
         if ($detailsResponse->getStatusCode() >= 400) {
@@ -1365,6 +1367,30 @@ class SalesController extends Controller
                 'expiresAt' => $expiresAt->toIso8601String(),
             ],
         ]);
+    }
+
+    private function normalizePublicShareUrlScheme(string $url, Request $request): string
+    {
+        $trimmed = trim($url);
+        if ($trimmed === '' || stripos($trimmed, 'http://') !== 0) {
+            return $trimmed;
+        }
+
+        if (app()->environment('local', 'development', 'testing')) {
+            return $trimmed;
+        }
+
+        $forwardedProto = strtolower(trim((string) $request->header('x-forwarded-proto', '')));
+        $host = strtolower(trim((string) parse_url($trimmed, PHP_URL_HOST)));
+        $appUrlHost = strtolower(trim((string) parse_url((string) env('APP_URL', ''), PHP_URL_HOST)));
+        $isRailwayHost = str_contains($host, '.up.railway.app') || str_contains($appUrlHost, '.up.railway.app');
+        $isCloudHost = str_contains($host, 'fycticonsulting.com') || str_contains($appUrlHost, 'fycticonsulting.com');
+
+        if ($request->isSecure() || $forwardedProto === 'https' || $isRailwayHost || $isCloudHost) {
+            return 'https://' . ltrim(substr($trimmed, strlen('http://')), '/');
+        }
+
+        return $trimmed;
     }
 
     private function resolveCompanySmtpProfile(int $companyId): array

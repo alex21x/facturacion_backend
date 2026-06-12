@@ -1823,6 +1823,11 @@ class TaxBridgeService
         return $this->resolveConfig($companyId, $branchId);
     }
 
+    public function resolvePublicRequestHeaders(string $endpointUrl = ''): array
+    {
+        return $this->bridgeRequestHeaders($endpointUrl);
+    }
+
     private function resolveConfig(int $companyId, ?int $branchId): array
     {
         $featureCode = 'SALES_TAX_BRIDGE';

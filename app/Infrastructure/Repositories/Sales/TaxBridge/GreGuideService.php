@@ -606,7 +606,9 @@ class GreGuideService
 
         $requestStartedAt = microtime(true);
         try {
-            $httpReq = Http::timeout((int) ($config['timeout_seconds'] ?? 30))->acceptJson();
+            $httpReq = Http::timeout((int) ($config['timeout_seconds'] ?? 30))
+                ->withHeaders($this->taxBridgeService->resolvePublicRequestHeaders($endpoint))
+                ->acceptJson();
             if (($config['auth_scheme'] ?? '') === 'bearer' && !empty($config['token'])) {
                 $httpReq = $httpReq->withToken((string) $config['token']);
             }
@@ -645,10 +647,10 @@ class GreGuideService
                     $label = 'Guia rechazada';
                 }
             } elseif ($response->successful() && $nullLikeBridgeResponse) {
-                $status = self::STATUS_ERROR;
-                $label = 'Respuesta vacia del puente';
+                $status = self::STATUS_SENT;
+                $label = 'Pendiente confirmacion SUNAT';
                 if ($cdrDesc === null) {
-                    $cdrDesc = 'El puente no devolvio respuesta valida; requiere reenvio manual.';
+                    $cdrDesc = 'El puente no devolvio respuesta valida; pendiente de confirmacion/reintento manual.';
                 }
             } elseif ($response->successful() && $bridgeRes === 0 && $ticket === null) {
                 $status = self::STATUS_ERROR;
@@ -657,10 +659,10 @@ class GreGuideService
                 $status = self::STATUS_SENT;
                 $label = 'Ticket generado';
             } elseif ($response->successful() && $ticket === null) {
-                $status = self::STATUS_ERROR;
-                $label = 'Envio sin ticket';
+                $status = self::STATUS_SENT;
+                $label = 'Pendiente confirmacion SUNAT';
                 if ($cdrDesc === null) {
-                    $cdrDesc = 'El puente no devolvio ticket SUNAT para consultar estado';
+                    $cdrDesc = 'El puente no devolvio ticket SUNAT; pendiente de confirmacion/reintento manual.';
                 }
             }
 
@@ -828,7 +830,9 @@ class GreGuideService
             $payloadJson = '{}';
         }
 
-        $httpReq = Http::timeout((int) ($config['timeout_seconds'] ?? 30))->acceptJson();
+        $httpReq = Http::timeout((int) ($config['timeout_seconds'] ?? 30))
+            ->withHeaders($this->taxBridgeService->resolvePublicRequestHeaders($endpoint))
+            ->acceptJson();
         if (($config['auth_scheme'] ?? '') === 'bearer' && !empty($config['token'])) {
             $httpReq = $httpReq->withToken((string) $config['token']);
         }

@@ -2569,6 +2569,7 @@ class AppConfigController extends Controller
                 ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
                 : true,
             'logo_url'        => $logoUrl,
+            'logo_data_uri'   => $logoDataUri,
             'has_cert'        => $settings && !empty($settings->cert_path),
             'bank_accounts'   => $settings
                 ? json_decode((string) $settings->bank_accounts, true) ?? []

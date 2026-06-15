@@ -1077,17 +1077,29 @@ class SalesLookupRepository
             return;
         }
 
-        $label = [
+        $alreadyPosted = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('cash_session_id', (int) $session->id)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->exists();
+
+        if ($alreadyPosted) {
+            return;
+        }
+
+        $labelMap = [
             'INVOICE' => 'Factura',
             'RECEIPT' => 'Boleta',
             'CREDIT_NOTE' => 'Nota Credito',
             'DEBIT_NOTE' => 'Nota Debito',
             'QUOTATION' => 'Cotizacion',
             'SALES_ORDER' => 'Pedido',
-        ][$documentKind] ?? $documentKind;
+        ];
+        $description = 'Cobro doc ' . ($labelMap[$documentKind] ?? $documentKind) . ' ' . $series . '-' . $number;
 
-        $description = 'Cobro doc ' . $label . ' ' . $series . '-' . $number;
-
+        $movementAt = now();
         DB::table('sales.cash_movements')->insert([
             'company_id' => $companyId,
             'branch_id' => $branchId,
@@ -1102,8 +1114,8 @@ class SalesLookupRepository
             'ref_id' => $documentId,
             'created_by' => $userId,
             'user_id' => $userId,
-            'movement_at' => now(),
-            'created_at' => now(),
+            'movement_at' => $movementAt,
+            'created_at' => $movementAt,
         ]);
 
         $totalIn = (float) DB::table('sales.cash_movements')

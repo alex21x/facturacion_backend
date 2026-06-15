@@ -197,6 +197,11 @@ class SalesLookupService
         return $this->repository->listCommercialDocumentProductsForExport($companyId, $filters, $max);
     }
 
+    public function listTopProducts(int $companyId, int $limit, int $days): array
+    {
+        return $this->repository->listTopProducts($companyId, $limit, $days);
+    }
+
     public function registerCashIncomeFromDocument(
         int $companyId,
         ?int $branchId,

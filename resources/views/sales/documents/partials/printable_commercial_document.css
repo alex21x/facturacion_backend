@@ -1,0 +1,76 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #000; font-size: 10pt; line-height: 1.22; font-weight: 700; }
+body.format-ticket { font-size: 11px; }
+.sheet { width: 100%; max-width: 194mm; margin: 0 auto; padding: 5mm; border: 1px solid #111; }
+body.format-ticket .sheet { width: 80mm; max-width: 80mm; padding: 3mm 2.5mm; border: 0; }
+
+.header--a4 { display: grid; grid-template-columns: 26mm minmax(0, 1fr) 52mm; gap: 4mm; align-items: start; margin-bottom: 4mm; }
+.logo-col { display: flex; align-items: center; justify-content: center; min-height: 80px; }
+.header-logo { display: block; max-width: 100%; max-height: 70px; object-fit: contain; }
+body.format-ticket .header-logo { max-height: 52px; }
+.brand-col { min-width: 0; }
+.brand-name { font-size: 17px; font-weight: 900; text-transform: uppercase; color: #222; margin-bottom: 2px; }
+.brand-meta { font-size: 11px; font-weight: 700; color: #222; margin: 1px 0; }
+body.format-ticket .brand-name { font-size: 14px; }
+body.format-ticket .brand-meta { font-size: 10px; }
+
+.voucher-box { border: 1px solid #111; text-align: center; padding: 10px 8px; min-height: 110px; }
+.voucher-ruc { font-size: 12px; font-weight: 800; margin-bottom: 10px; }
+.voucher-type { font-size: 12px; font-weight: 800; margin-bottom: 10px; text-transform: uppercase; }
+.voucher-number { font-size: 15px; font-weight: 900; }
+
+.legend { text-align: center; font-size: 10px; margin: 4px 0 7px; }
+.info-box { border: 1px solid #111; margin-bottom: 4px; }
+.info-grid { width: 100%; border-collapse: collapse; }
+.info-grid td { width: 50%; vertical-align: top; padding: 4px 8px; border: 0; }
+.line { margin: 2px 0; font-size: 11px; }
+.k { display: inline-block; width: 126px; font-weight: 900; }
+body.format-ticket .line { font-size: 10.5px; }
+body.format-ticket .k { width: 78px; }
+.v { display: inline-block; }
+
+.ticket-header { text-align: center; margin-bottom: 2mm; }
+.ticket-logo-wrap { display: flex; justify-content: center; align-items: center; width: 100%; }
+.ticket-company-name { font-size: 13px; font-weight: 900; text-transform: uppercase; margin: 3px 0 1px; }
+.ticket-company-meta { font-size: 10px; font-weight: 800; margin: 1px 0; }
+.ticket-doc-title { font-size: 14px; font-weight: 900; text-transform: uppercase; margin-top: 6px; }
+.ticket-docno { font-size: 18px; font-weight: 900; margin-top: 2px; }
+.ticket-date { font-size: 12px; font-weight: 800; margin-top: 1px; }
+.ticket-divider { border-top: 1px dashed #000; margin: 5px 0; }
+.ticket-row { display: flex; justify-content: space-between; gap: 6px; margin: 1px 0; font-size: 11px; }
+.ticket-label { font-weight: 900; min-width: 60px; }
+.ticket-value { flex: 1; text-align: right; }
+
+.items { width: 100%; border-collapse: collapse; }
+.items th, .items td { border: 1px solid #111; padding: 4px 5px; }
+.items th { text-align: center; font-size: 11px; font-weight: 700; }
+.items td { font-size: 10.5px; }
+.l { text-align: left; }
+.c { text-align: center; }
+.r { text-align: right; }
+
+.ticket-items td { border: 0; padding: 0; }
+.ticket-item-desc { padding-top: 3px; font-size: 11px; line-height: 1.15; font-weight: 900; }
+.ticket-item-code { font-size: 9px; font-weight: 800; margin-bottom: 1px; }
+.ticket-item-price { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; font-weight: 900; padding-bottom: 4px; }
+
+.totals-wrap { margin-top: 5px; display: table; width: 100%; }
+.words { display: table-cell; width: 64%; vertical-align: top; padding-right: 8px; font-size: 11px; }
+.totals { display: table-cell; width: 36%; vertical-align: top; }
+.totals table { width: 100%; border-collapse: collapse; }
+.totals td { border: 1px solid #111; padding: 3px 5px; font-size: 10.8px; }
+.totals .k2 { font-weight: 700; text-align: right; }
+.totals .v2 { text-align: right; }
+.totals .grand td { font-size: 12px; font-weight: 700; }
+
+.ticket-summary { border-top: 2px solid #1e3a8a; margin-top: 4px; padding-top: 4px; }
+.ticket-summary-row { display: flex; justify-content: space-between; margin: 2px 0; font-size: 11px; }
+.ticket-total { display: flex; justify-content: space-between; border-top: 2px solid #1e3a8a; margin-top: 4px; padding-top: 4px; font-size: 14px; font-weight: 900; }
+.ticket-words { margin-top: 4px; font-size: 11px; line-height: 1.2; }
+
+.footer { margin-top: 5px; border-top: 1px solid #111; padding-top: 4px; font-size: 10px; }
+.bank-title { font-weight: 900; margin-bottom: 2px; }
+.bank-item { margin-bottom: 2px; }
+.pay-logos { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.pay-logos img { height: 22px; width: auto; display: block; }

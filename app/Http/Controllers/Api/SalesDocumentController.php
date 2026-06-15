@@ -2,21 +2,26 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\Sales\SalesDocumentApplicationServiceInterface;
 use App\Application\UseCases\Sales\PrepareUpdateCommercialDocumentUseCase;
 use App\Application\UseCases\Sales\UpdateCommercialDocumentDraftUseCase;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Sales\ConvertCommercialDocumentRequest;
 use App\Http\Requests\Sales\CreateCommercialDocumentRequest;
+use App\Http\Requests\Sales\PrintableCommercialDocumentRequest;
 use App\Http\Requests\Sales\SunatVoidCommunicationRequest;
 use App\Http\Requests\Sales\UpdateCommercialDocumentRequest;
 use App\Http\Requests\Sales\VoidCommercialDocumentRequest;
+use App\Http\Responses\Sales\PrintableCommercialDocumentResponse;
 use App\Services\Sales\Documents\SalesDocumentException;
 use Illuminate\Http\Request;
+use Throwable;
 
 class SalesDocumentController extends Controller
 {
     public function __construct(
         private SalesController $salesController,
+        private SalesDocumentApplicationServiceInterface $salesDocumentApplicationService,
         private PrepareUpdateCommercialDocumentUseCase $prepareUpdateCommercialDocumentUseCase,
         private UpdateCommercialDocumentDraftUseCase $updateCommercialDocumentDraftUseCase
     )
@@ -38,9 +43,20 @@ class SalesDocumentController extends Controller
         return $this->salesController->showCommercialDocument($request, $id);
     }
 
-    public function printableCommercialDocument(Request $request, int $id)
+    public function printableCommercialDocument(PrintableCommercialDocumentRequest $request, int $id)
     {
-        return $this->salesController->printableCommercialDocument($request, $id);
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $format = (string) $request->validated('format');
+
+        try {
+            $html = $this->salesDocumentApplicationService->buildPrintableCommercialDocumentHtml($companyId, (int) $id, $format);
+        } catch (SalesDocumentException $e) {
+            return PrintableCommercialDocumentResponse::error($e->getMessage(), $e->httpStatus());
+        } catch (Throwable $e) {
+            return PrintableCommercialDocumentResponse::error('No se pudo generar la impresion del documento', 500);
+        }
+
+        return PrintableCommercialDocumentResponse::html($html);
     }
 
     public function printableCommercialDocumentPdf(Request $request, int $id)

@@ -331,4 +331,5 @@ class ResolveCompanyPrintProfileUseCase
             return null;
         }
     }
+
 }

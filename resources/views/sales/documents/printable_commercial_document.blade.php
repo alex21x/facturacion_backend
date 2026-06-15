@@ -19,6 +19,16 @@
 
         $showPaymentBrandIcons = filter_var($showPaymentBrandIcons ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         $showPaymentBrandIcons = $showPaymentBrandIcons ?? false;
+
+        $paymentBrandIcons = is_array($paymentBrandIcons ?? null) ? $paymentBrandIcons : [];
+        $paymentBrandIcons = array_values(array_filter($paymentBrandIcons, static function ($icon) {
+            if (!is_array($icon)) {
+                return false;
+            }
+
+            $src = trim((string) ($icon['src'] ?? ''));
+            return $src !== '';
+        }));
     @endphp
     @if ($format === 'a4')
         <div class="header--a4">
@@ -200,11 +210,13 @@
                 </div>
             @endforeach
         @endif
-        @if ($showPaymentBrandIcons)
+        @if ($showPaymentBrandIcons && !empty($paymentBrandIcons))
             <div class="pay-logos">
-                <img src="/assets/payment-logos/yape-official.png" alt="Yape" />
-                <img src="/assets/payment-logos/plin-official.png" alt="Plin" />
-                <img src="/assets/payment-logos/culqi-official.png" alt="Culqi" />
+                @foreach ($paymentBrandIcons as $icon)
+                    <span class="pay-logo-item">
+                        <img src="{{ $icon['src'] }}" alt="{{ $icon['alt'] ?? 'Pago' }}" />
+                    </span>
+                @endforeach
             </div>
         @endif
     </div>

@@ -1053,6 +1053,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         if ($showPaymentBrandIcons === null) {
             $showPaymentBrandIcons = (bool) $showPaymentBrandsRaw;
         }
+        $paymentBrandIcons = $showPaymentBrandIcons ? $this->resolvePaymentBrandLogoSources() : [];
         $customerPhone = trim((string) ($doc->customer_phone ?? ''));
         $vehicleInfo = trim(implode(' ', array_filter([
             trim((string) ($doc->vehicle_plate_snapshot ?? '')),
@@ -1109,8 +1110,125 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'totalWords' => $totalWords,
             'showProductCodes' => $showProductCodes,
             'showPaymentBrandIcons' => $showPaymentBrandIcons,
+            'paymentBrandIcons' => $paymentBrandIcons,
             'rows' => $rows,
         ])->render();
+    }
+
+    private function resolvePaymentBrandLogoSources(): array
+    {
+        $definitions = [
+            ['file' => 'yape-official.png', 'alt' => 'Yape'],
+            ['file' => 'plin-official.png', 'alt' => 'Plin'],
+            ['file' => 'culqi-official.png', 'alt' => 'Culqi'],
+        ];
+
+        $sources = [];
+        foreach ($definitions as $definition) {
+            $src = $this->resolvePaymentBrandImageSource((string) $definition['file']);
+            if ($src === '') {
+                continue;
+            }
+
+            $sources[] = [
+                'alt' => (string) $definition['alt'],
+                'src' => $src,
+            ];
+        }
+
+        return $sources;
+    }
+
+    private function resolvePaymentBrandImageSource(string $fileName): string
+    {
+        $safeName = basename(trim($fileName));
+        if ($safeName === '') {
+            return '';
+        }
+
+        $relativePath = '/assets/payment-logos/' . $safeName;
+        $candidates = [
+            public_path('assets/payment-logos/' . $safeName),
+            dirname(base_path()) . DIRECTORY_SEPARATOR . 'facturacion_frontend' . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'payment-logos' . DIRECTORY_SEPARATOR . $safeName,
+        ];
+
+        foreach ($candidates as $path) {
+            if (!is_string($path) || $path === '' || !is_file($path) || !is_readable($path)) {
+                continue;
+            }
+
+            $dataUri = $this->filePathToImageDataUri($path);
+            if ($dataUri !== null) {
+                return $dataUri;
+            }
+        }
+
+        $assetUrl = $this->resolveAssetUrl($relativePath);
+        return preg_match('#^https?://#i', $assetUrl) === 1 ? $assetUrl : '';
+    }
+
+    private function resolveAssetUrl(string $relativePath): string
+    {
+        $normalizedPath = '/' . ltrim(trim($relativePath), '/');
+        $candidates = [
+            (string) config('app.url', ''),
+            (string) env('FRONTEND_URL', ''),
+            (string) env('APP_URL', ''),
+        ];
+
+        foreach ($candidates as $baseUrl) {
+            $base = trim($baseUrl);
+            if ($base === '' || preg_match('#^https?://#i', $base) !== 1) {
+                continue;
+            }
+
+            return rtrim($base, '/') . $normalizedPath;
+        }
+
+        return '';
+    }
+
+    private function filePathToImageDataUri(string $path): ?string
+    {
+        try {
+            $contents = @file_get_contents($path);
+            if (!is_string($contents) || $contents === '') {
+                return null;
+            }
+
+            $mime = $this->guessImageMimeType($path, $contents);
+            if ($mime === null) {
+                return null;
+            }
+
+            return 'data:' . $mime . ';base64,' . base64_encode($contents);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function guessImageMimeType(string $path, string $contents): ?string
+    {
+        if (function_exists('finfo_open')) {
+            $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $detected = @finfo_buffer($finfo, $contents);
+                @finfo_close($finfo);
+                if (is_string($detected) && str_starts_with($detected, 'image/')) {
+                    return $detected;
+                }
+            }
+        }
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return match ($ext) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            default => null,
+        };
     }
 
     private function findFirstMetaStringValue(array $source, array $keys): string

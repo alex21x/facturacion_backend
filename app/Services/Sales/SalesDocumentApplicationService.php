@@ -1171,9 +1171,10 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     {
         $normalizedPath = '/' . ltrim(trim($relativePath), '/');
         $candidates = [
-            (string) config('app.url', ''),
+            (string) env('FRONTEND_ACCESS_URL', ''),
             (string) env('FRONTEND_URL', ''),
-            (string) env('APP_URL', ''),
+            (string) env('FRONTEND_APP_URL', ''),
+            'https://www.fycticonsulting.com',
         ];
 
         foreach ($candidates as $baseUrl) {
@@ -1185,7 +1186,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             return rtrim($base, '/') . $normalizedPath;
         }
 
-        return $normalizedPath;
+        return '';
     }
 
     private function filePathToImageDataUri(string $path): ?string

@@ -1185,7 +1185,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             return rtrim($base, '/') . $normalizedPath;
         }
 
-        return '';
+        return $normalizedPath;
     }
 
     private function filePathToImageDataUri(string $path): ?string

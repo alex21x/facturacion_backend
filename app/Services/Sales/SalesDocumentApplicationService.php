@@ -16,6 +16,7 @@ use App\Contracts\TaxBridgeGateway;
 use App\Infrastructure\Repositories\Sales\Documents\SalesDocumentSupportService;
 use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\CustomerVehicleService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -419,6 +420,25 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     }
 
     public function buildCommercialDocumentPdfBinary(
+        int $companyId,
+        int $documentId,
+        string $format,
+        bool $isPublicPdfLink
+    ): array {
+        $normalizedFormat = in_array($format, ['ticket', 'a4'], true) ? $format : 'a4';
+
+        if (!$this->shouldUseSalesPrintCache()) {
+            return $this->buildCommercialDocumentPdfBinaryFresh($companyId, $documentId, $normalizedFormat, $isPublicPdfLink);
+        }
+
+        $cacheKey = $this->buildSalesPrintPdfCacheKey($companyId, $documentId, $normalizedFormat, $isPublicPdfLink);
+
+        return Cache::remember($cacheKey, $this->salesPrintCacheTtlSeconds(), function () use ($companyId, $documentId, $normalizedFormat, $isPublicPdfLink) {
+            return $this->buildCommercialDocumentPdfBinaryFresh($companyId, $documentId, $normalizedFormat, $isPublicPdfLink);
+        });
+    }
+
+    private function buildCommercialDocumentPdfBinaryFresh(
         int $companyId,
         int $documentId,
         string $format,
@@ -870,12 +890,16 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     {
         $preparedPayload = $this->prepareUpdateCommercialDocumentUseCase->execute($payload);
 
-        return $this->updateCommercialDocumentDraftUseCase->execute(
+        $result = $this->updateCommercialDocumentDraftUseCase->execute(
             $authUser,
             $companyId,
             $documentId,
             $preparedPayload
         );
+
+        $this->invalidateSalesPrintCache($companyId, $documentId);
+
+        return $result;
     }
 
     public function voidCommercialDocument(object $authUser, int $companyId, int $documentId, array $payload): array
@@ -890,7 +914,11 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
 
         $preparedPayload = $this->prepareVoidCommercialDocumentUseCase->execute($authUser, $payload, $requireVoidPassword);
 
-        return $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $preparedPayload);
+        $result = $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, $preparedPayload);
+
+        $this->invalidateSalesPrintCache($companyId, $documentId);
+
+        return $result;
     }
 
     public function applyAcceptedSunatVoid(
@@ -906,9 +934,26 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'void_at' => now()->toDateTimeString(),
             'sunat_void_status' => 'ACCEPTED',
         ]);
+
+        $this->invalidateSalesPrintCache($companyId, $documentId);
     }
 
     public function buildPrintableCommercialDocumentHtml(int $companyId, int $documentId, string $format = 'ticket'): string
+    {
+        $normalizedFormat = in_array($format, ['ticket', 'a4'], true) ? $format : 'ticket';
+
+        if (!$this->shouldUseSalesPrintCache()) {
+            return $this->buildPrintableCommercialDocumentHtmlFresh($companyId, $documentId, $normalizedFormat);
+        }
+
+        $cacheKey = $this->buildSalesPrintHtmlCacheKey($companyId, $documentId, $normalizedFormat);
+
+        return Cache::remember($cacheKey, $this->salesPrintCacheTtlSeconds(), function () use ($companyId, $documentId, $normalizedFormat) {
+            return $this->buildPrintableCommercialDocumentHtmlFresh($companyId, $documentId, $normalizedFormat);
+        });
+    }
+
+    private function buildPrintableCommercialDocumentHtmlFresh(int $companyId, int $documentId, string $format = 'ticket'): string
     {
         $doc = $this->salesDocumentReadService->findDocumentForShow($companyId, $documentId);
 
@@ -1165,6 +1210,46 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
 
         $assetUrl = $this->resolveAssetUrl($relativePath);
         return preg_match('#^https?://#i', $assetUrl) === 1 ? $assetUrl : '';
+    }
+
+    private function shouldUseSalesPrintCache(): bool
+    {
+        return filter_var(env('SALES_PRINT_CACHE_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    private function salesPrintCacheTtlSeconds(): int
+    {
+        return max(30, (int) env('SALES_PRINT_CACHE_TTL_SECONDS', 300));
+    }
+
+    private function salesPrintCacheVersionKey(int $companyId, int $documentId): string
+    {
+        return "sales:print:version:{$companyId}:{$documentId}";
+    }
+
+    private function resolveSalesPrintCacheVersion(int $companyId, int $documentId): int
+    {
+        return max(1, (int) Cache::get($this->salesPrintCacheVersionKey($companyId, $documentId), 1));
+    }
+
+    private function buildSalesPrintHtmlCacheKey(int $companyId, int $documentId, string $format): string
+    {
+        $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
+        return "sales:print:html:{$companyId}:{$documentId}:{$format}:v{$version}";
+    }
+
+    private function buildSalesPrintPdfCacheKey(int $companyId, int $documentId, string $format, bool $isPublicPdfLink): string
+    {
+        $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
+        $visibility = $isPublicPdfLink ? 'public' : 'private';
+        return "sales:print:pdf:{$companyId}:{$documentId}:{$format}:{$visibility}:v{$version}";
+    }
+
+    private function invalidateSalesPrintCache(int $companyId, int $documentId): void
+    {
+        $key = $this->salesPrintCacheVersionKey($companyId, $documentId);
+        $next = $this->resolveSalesPrintCacheVersion($companyId, $documentId) + 1;
+        Cache::forever($key, $next);
     }
 
     private function resolveAssetUrl(string $relativePath): string

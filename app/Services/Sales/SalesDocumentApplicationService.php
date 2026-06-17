@@ -1024,6 +1024,21 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'digestValue',
         ]));
 
+        $documentNotes = trim((string) ($doc->notes ?? ''));
+        if ($documentNotes === '') {
+            $documentNotes = $this->findFirstMetaStringValue($metadata, [
+                'observations',
+                'observation',
+                'observacion',
+                'observaciones',
+                'notes',
+                'note',
+                'glosa',
+                'comment',
+                'comments',
+            ]);
+        }
+
         $branchId = isset($doc->branch_id) && $doc->branch_id !== null ? (int) $doc->branch_id : null;
         $salesOrderMultiPaymentEnabled = $this->supportService->isCommerceFeatureEnabledForContextWithDefault(
             $companyId,
@@ -1152,7 +1167,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'customerPhone' => $customerPhone,
             'showVehicleInfo' => $showVehicleInfo,
             'vehicleInfo' => $vehicleInfo,
-            'documentNotes' => trim((string) ($doc->notes ?? '')),
+            'documentNotes' => $documentNotes,
             'paymentMethod' => (string) ($doc->payment_method_name ?? '-'),
             'paymentBreakdown' => $paymentBreakdown,
             'guideNo' => $guideNo,

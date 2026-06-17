@@ -196,6 +196,7 @@
     @endif
 
     <div class="footer">
+        <div style="margin-bottom:6px;"><strong>Observaciones:</strong> {{ !empty($documentNotes) ? $documentNotes : 'Sin observaciones registradas.' }}</div>
         @if (!empty($electronicSignature))
             <div style="margin-bottom:4px; word-break:break-all;"><strong>Firma electronica:</strong> {{ $electronicSignature }}</div>
         @endif

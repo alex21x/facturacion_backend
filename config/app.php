@@ -177,6 +177,7 @@ return [
         App\Providers\OpsRepositoryServiceProvider::class,
         App\Providers\CashRepositoryServiceProvider::class,
         App\Providers\CashMovementRepositoryServiceProvider::class,
+        App\Providers\FinanceRepositoryServiceProvider::class,
         App\Providers\AuthServiceProvider::class,
         // App\Providers\BroadcastServiceProvider::class,
         App\Providers\EventServiceProvider::class,

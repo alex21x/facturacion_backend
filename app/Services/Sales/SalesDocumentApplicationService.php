@@ -928,6 +928,17 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         ?string $reason = null,
         ?string $notes = null
     ): void {
+        $document = $this->salesDocumentReadService->findDocumentForShow($companyId, $documentId);
+        if (!$document) {
+            throw new SalesDocumentException('Documento no encontrado', 404);
+        }
+
+        $currentStatus = strtoupper(trim((string) ($document->status ?? '')));
+        if (in_array($currentStatus, ['VOID', 'VOIDED', 'CANCELED'], true)) {
+            $this->invalidateSalesPrintCache($companyId, $documentId);
+            return;
+        }
+
         $this->voidCommercialDocumentUseCase->execute($authUser, $companyId, $documentId, [
             'reason' => $reason ?? 'Comunicacion de baja SUNAT',
             'notes' => $notes ?? 'Anulado por comunicacion de baja SUNAT',

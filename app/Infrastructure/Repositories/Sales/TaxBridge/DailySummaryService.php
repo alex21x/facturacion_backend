@@ -238,7 +238,7 @@ class DailySummaryService
                 $q->whereIn('cd.status', ['VOID', 'VOIDED'])
                   ->orWhere(function ($q2) {
                       $q2->where('cd.status', 'ISSUED')
-                         ->whereRaw("UPPER(COALESCE(cd.metadata->>'sunat_status', '')) IN ('ACCEPTED', 'SENT_BY_SUMMARY')");
+                         ->whereRaw("UPPER(COALESCE(cd.metadata->>'sunat_status', '')) IN ('ACCEPTED', 'SENT_BY_SUMMARY', 'PENDING_CONFIRMATION', 'PENDING_SUMMARY', 'SENDING')");
                   });
             });
         }
@@ -401,10 +401,10 @@ class DailySummaryService
 
         if ($summaryType === self::TYPE_CANCELLATION) {
             $isLegacyVoided = in_array($documentStatus, ['VOID', 'VOIDED'], true);
-            $isAcceptedIssued = $documentStatus === 'ISSUED' && in_array($sunatStatus, ['ACCEPTED', 'SENT_BY_SUMMARY'], true);
+            $isAcceptedIssued = $documentStatus === 'ISSUED' && in_array($sunatStatus, ['ACCEPTED', 'SENT_BY_SUMMARY', 'PENDING_CONFIRMATION', 'PENDING_SUMMARY', 'SENDING'], true);
 
             if (!$isLegacyVoided && !$isAcceptedIssued) {
-                throw new TaxBridgeException('Cancellation summary only accepts RECEIPT accepted by SUNAT (or legacy VOID status)', 422);
+                throw new TaxBridgeException('Cancellation summary only accepts RECEIPT in SUNAT final/pending-ticket flow (or legacy VOID status)', 422);
             }
         }
 

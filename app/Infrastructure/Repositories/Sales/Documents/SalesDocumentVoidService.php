@@ -110,42 +110,45 @@ class SalesDocumentVoidService
                     $documentStatus = strtoupper((string) ($document->status ?? ''));
                     $sunatStatus = strtoupper(trim((string) ($metadata['sunat_status'] ?? '')));
                     $shouldRouteReceiptToCancellationSummary = in_array($documentStatus, ['VOID', 'VOIDED'], true)
-                        || ($documentStatus === 'ISSUED' && in_array($sunatStatus, ['ACCEPTED', 'SENT_BY_SUMMARY'], true));
+                        || (
+                            $documentStatus === 'ISSUED'
+                            && in_array($sunatStatus, ['ACCEPTED', 'SENT_BY_SUMMARY', 'PENDING_CONFIRMATION', 'PENDING_SUMMARY', 'SENDING'], true)
+                        );
 
                     if ($shouldRouteReceiptToCancellationSummary) {
-                    $voidDate = isset($payload['void_at']) && trim((string) $payload['void_at']) !== ''
-                        ? date('Y-m-d', strtotime((string) $payload['void_at']))
-                        : now()->toDateString();
+                        $voidDate = isset($payload['void_at']) && trim((string) $payload['void_at']) !== ''
+                            ? date('Y-m-d', strtotime((string) $payload['void_at']))
+                            : now()->toDateString();
 
-                    $summary = $this->dailySummaryService->appendDocumentToOpenSummary(
-                        $companyId,
-                        DailySummaryService::TYPE_CANCELLATION,
-                        $documentId,
-                        (int) $authUser->id,
-                        $document->branch_id !== null ? (int) $document->branch_id : null,
-                        $voidDate
-                    );
+                        $summary = $this->dailySummaryService->appendDocumentToOpenSummary(
+                            $companyId,
+                            DailySummaryService::TYPE_CANCELLATION,
+                            $documentId,
+                            (int) $authUser->id,
+                            $document->branch_id !== null ? (int) $document->branch_id : null,
+                            $voidDate
+                        );
 
-                    $dailySummaryId = (int) ($summary['id'] ?? 0) ?: null;
-                    $isReceiptGoingToRa = true;
+                        $dailySummaryId = (int) ($summary['id'] ?? 0) ?: null;
+                        $isReceiptGoingToRa = true;
 
-                    // Merge the freshest metadata written by the summary service
-                    // and then re-apply void metadata fields from this operation.
-                    $currentRow = DB::table('sales.commercial_documents')
-                        ->where('id', $documentId)
-                        ->where('company_id', $companyId)
-                        ->select('metadata')
-                        ->first();
+                        // Merge the freshest metadata written by the summary service
+                        // and then re-apply void metadata fields from this operation.
+                        $currentRow = DB::table('sales.commercial_documents')
+                            ->where('id', $documentId)
+                            ->where('company_id', $companyId)
+                            ->select('metadata')
+                            ->first();
 
-                    $currentMeta = json_decode((string) ($currentRow->metadata ?? '{}'), true);
-                    $currentMeta = is_array($currentMeta) ? $currentMeta : [];
+                        $currentMeta = json_decode((string) ($currentRow->metadata ?? '{}'), true);
+                        $currentMeta = is_array($currentMeta) ? $currentMeta : [];
 
-                    $metadata = array_merge($currentMeta, $metadata);
-                    $metadata['sunat_void_status'] = 'PENDING_SUMMARY';
-                    $metadata['sunat_void_label'] = 'Pendiente por resumen RA';
-                    if ($dailySummaryId !== null) {
-                        $metadata['sunat_void_summary_id'] = $dailySummaryId;
-                    }
+                        $metadata = array_merge($currentMeta, $metadata);
+                        $metadata['sunat_void_status'] = 'PENDING_SUMMARY';
+                        $metadata['sunat_void_label'] = 'Pendiente por resumen RA';
+                        if ($dailySummaryId !== null) {
+                            $metadata['sunat_void_summary_id'] = $dailySummaryId;
+                        }
                     } else {
                         // Pre-SUNAT-final receipts are voided internally and should not be forced into RA.
                         unset($metadata['sunat_void_status'], $metadata['sunat_void_label'], $metadata['sunat_void_summary_id']);

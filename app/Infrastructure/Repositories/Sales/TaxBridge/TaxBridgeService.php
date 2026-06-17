@@ -340,8 +340,9 @@ class TaxBridgeService
             throw new TaxBridgeException('Solo facturas y notas (credito/debito) usan comunicacion de baja SUNAT directa', 422);
         }
 
-        if (strtoupper((string) ($document->status ?? '')) !== 'ISSUED') {
-            throw new TaxBridgeException('Document must be in ISSUED status to request SUNAT void communication', 422);
+        $documentStatus = strtoupper(trim((string) ($document->status ?? '')));
+        if (!in_array($documentStatus, ['ISSUED', 'VOID', 'VOIDED', 'CANCELED'], true)) {
+            throw new TaxBridgeException('Document must be in ISSUED/VOID status to request SUNAT void communication', 422);
         }
 
         $metadata = json_decode((string) ($document->metadata ?? '{}'), true);

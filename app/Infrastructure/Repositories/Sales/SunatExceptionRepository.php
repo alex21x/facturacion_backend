@@ -19,6 +19,10 @@ class SunatExceptionRepository
         int $companyId,
         ?int $branchId,
         ?string $status,
+        ?string $documentKind,
+        ?string $document,
+        ?string $series,
+        ?string $number,
         int $minAgeHours,
         int $minAttempts,
         bool $onlyManualNeeded,
@@ -59,6 +63,19 @@ class SunatExceptionRepository
             $query->where('d.branch_id', $branchId);
         }
 
+        if ($documentKind !== null && trim($documentKind) !== '') {
+            $normalizedDocumentKind = strtoupper(trim($documentKind));
+
+            if ($normalizedDocumentKind === 'CREDIT_NOTE' || $normalizedDocumentKind === 'DEBIT_NOTE') {
+                $query->where(function ($nested) use ($normalizedDocumentKind) {
+                    $nested->whereRaw("UPPER(COALESCE(d.document_kind, '')) = ?", [$normalizedDocumentKind])
+                        ->orWhereRaw("UPPER(COALESCE(d.document_kind, '')) LIKE ?", [$normalizedDocumentKind . '_%']);
+                });
+            } else {
+                $query->whereRaw("UPPER(COALESCE(d.document_kind, '')) = ?", [$normalizedDocumentKind]);
+            }
+        }
+
         if ($status !== null && $status !== '') {
             $normalizedStatus = strtoupper(trim($status));
 
@@ -73,6 +90,51 @@ class SunatExceptionRepository
                 ]);
             } else {
                 $query->where(DB::raw("UPPER(COALESCE(d.metadata->>'sunat_status',''))"), $normalizedStatus);
+            }
+        }
+
+        if ($document !== null && trim($document) !== '') {
+            $documentFilter = strtoupper(trim($document));
+            $compactDocumentFilter = preg_replace('/\s+/', '', $documentFilter);
+            $documentDigits = preg_replace('/\D+/', '', $documentFilter);
+            $normalizedDigits = is_string($documentDigits) ? ltrim($documentDigits, '0') : '';
+            if ($normalizedDigits === '' && is_string($documentDigits) && $documentDigits !== '') {
+                $normalizedDigits = '0';
+            }
+
+            $query->where(function ($nested) use ($documentFilter, $compactDocumentFilter, $normalizedDigits) {
+                $nested->whereRaw("UPPER(COALESCE(d.series, '')) LIKE ?", ['%' . $documentFilter . '%'])
+                    ->orWhereRaw(
+                        "UPPER(COALESCE(d.series, '')) || '-' || regexp_replace(COALESCE(d.number::text, ''), '[^0-9]', '', 'g') LIKE ?",
+                        ['%' . $compactDocumentFilter . '%']
+                    );
+
+                if ($normalizedDigits !== '') {
+                    $nested->orWhereRaw(
+                        "COALESCE(NULLIF(ltrim(regexp_replace(COALESCE(d.number::text, ''), '[^0-9]', '', 'g'), '0'), ''), '0') LIKE ?",
+                        ['%' . $normalizedDigits . '%']
+                    );
+                }
+            });
+        }
+
+        if ($series !== null && trim($series) !== '') {
+            $seriesFilter = strtoupper(trim($series));
+            $query->whereRaw("UPPER(COALESCE(d.series, '')) LIKE ?", ['%' . $seriesFilter . '%']);
+        }
+
+        if ($number !== null && trim($number) !== '') {
+            $numberFilter = preg_replace('/\D+/', '', trim($number));
+            if (is_string($numberFilter) && $numberFilter !== '') {
+                $normalizedNumberFilter = ltrim($numberFilter, '0');
+                if ($normalizedNumberFilter === '') {
+                    $normalizedNumberFilter = '0';
+                }
+
+                $query->whereRaw(
+                    "COALESCE(NULLIF(ltrim(regexp_replace(COALESCE(d.number::text, ''), '[^0-9]', '', 'g'), '0'), ''), '0') LIKE ?",
+                    ['%' . $normalizedNumberFilter . '%']
+                );
             }
         }
 
@@ -91,7 +153,7 @@ class SunatExceptionRepository
         $total = (clone $query)->count();
 
         $rows = $query
-            ->orderByDesc('pending_hours')
+            ->orderByDesc('d.issue_at')
             ->orderByDesc('d.updated_at')
             ->forPage($page, $perPage)
             ->get();

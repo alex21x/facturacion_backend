@@ -173,7 +173,7 @@ class TaxBridgeService
             $sunatStatus = 'PENDING_CONFIRMATION';
         }
 
-        if ($sunatStatus === 'PENDING_CONFIRMATION' && $isAutomatedRetry) {
+        if ($sunatStatus === 'PENDING_CONFIRMATION') {
             $nextAtRaw = (string) ($metadata['sunat_reconcile_next_at'] ?? '');
             if ($nextAtRaw !== '') {
                 $isCoolingDown = false;
@@ -1883,7 +1883,7 @@ class TaxBridgeService
                 'bridge_mode' => 'PRODUCTION',
                 'production_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNAT',
                 'beta_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA',
-                'timeout_seconds' => 45,
+                'timeout_seconds' => 90,
                 'auth_scheme' => 'none',
                 'token' => '',
                 'auto_send_on_issue' => true,
@@ -1928,7 +1928,7 @@ class TaxBridgeService
             'raw_base_url' => $rawBaseUrl,
             'endpoint_url' => $this->resolveBridgeEndpoint($rawBaseUrl, 'send_xml'),
             // Keep a safer floor to reduce false negatives under bridge/SUNAT queue congestion.
-            'timeout_seconds' => max(30, min(180, (int) ($cfg['timeout_seconds'] ?? 45))),
+            'timeout_seconds' => max(45, min(300, (int) ($cfg['timeout_seconds'] ?? 90))),
             'auth_scheme' => strtolower(trim((string) ($cfg['auth_scheme'] ?? 'none'))),
             'token' => (string) ($cfg['token'] ?? ''),
             'force_async_on_issue' => isset($cfg['force_async_on_issue']) ? (bool) $cfg['force_async_on_issue'] : true,

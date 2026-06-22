@@ -173,7 +173,7 @@ class TaxBridgeService
             $sunatStatus = 'PENDING_CONFIRMATION';
         }
 
-        if ($sunatStatus === 'PENDING_CONFIRMATION') {
+        if ($sunatStatus === 'PENDING_CONFIRMATION' && $isAutomatedRetry) {
             $nextAtRaw = (string) ($metadata['sunat_reconcile_next_at'] ?? '');
             if ($nextAtRaw !== '') {
                 $isCoolingDown = false;
@@ -1164,7 +1164,9 @@ class TaxBridgeService
                 'error' => $e->getMessage(),
             ]);
 
-            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, true, $isRetry, 'NETWORK_ERROR');
+            $isTimeout = $this->isTimeoutTransportError($e);
+            $errorKind = $isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR';
+            $attemptMeta = $this->buildReconcileAttemptMetadata($companyId, $documentId, true, $isRetry, $errorKind);
 
             $this->updateDocumentTaxStatus($companyId, $documentId, [
                 'sunat_status' => 'PENDING_CONFIRMATION',
@@ -1175,7 +1177,9 @@ class TaxBridgeService
                 'sunat_reconcile_last_error_kind' => $attemptMeta['last_error_kind'],
                 'sunat_reconcile_last_error_at' => $attemptMeta['last_error_at'],
                 'sunat_needs_manual_confirmation' => $attemptMeta['needs_manual_confirmation'],
-                'sunat_bridge_note' => $attemptMeta['note'] . ' | ' . substr($e->getMessage(), 0, 350),
+                'sunat_bridge_note' => ($isTimeout
+                    ? 'Timeout esperando respuesta del puente. Se mantiene en pendiente de confirmacion para reintento automatico.'
+                    : $attemptMeta['note']) . ' | ' . substr($e->getMessage(), 0, 350),
             ]);
 
             $this->auditService->logDispatch(
@@ -1199,7 +1203,7 @@ class TaxBridgeService
                 ],
                 [
                     'sunat_status' => 'PENDING_CONFIRMATION',
-                    'error_kind' => 'NETWORK_ERROR',
+                    'error_kind' => $errorKind,
                     'error_message' => $e->getMessage(),
                     'attempt_number' => (int) ($attemptMeta['attempts'] ?? 1),
                     'is_retry' => $isRetry,
@@ -1207,7 +1211,7 @@ class TaxBridgeService
                 ]
             );
 
-            if ($isRetry) {
+            if ($isRetry && !$isTimeout) {
                 throw new TaxBridgeException('Tax bridge retry failed: ' . $e->getMessage(), 500);
             }
 
@@ -1879,7 +1883,7 @@ class TaxBridgeService
                 'bridge_mode' => 'PRODUCTION',
                 'production_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNAT',
                 'beta_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA',
-                'timeout_seconds' => 15,
+                'timeout_seconds' => 45,
                 'auth_scheme' => 'none',
                 'token' => '',
                 'auto_send_on_issue' => true,
@@ -1923,7 +1927,8 @@ class TaxBridgeService
             'bridge_mode' => $mode,
             'raw_base_url' => $rawBaseUrl,
             'endpoint_url' => $this->resolveBridgeEndpoint($rawBaseUrl, 'send_xml'),
-            'timeout_seconds' => max(5, min(60, (int) ($cfg['timeout_seconds'] ?? 15))),
+            // Keep a safer floor to reduce false negatives under bridge/SUNAT queue congestion.
+            'timeout_seconds' => max(30, min(180, (int) ($cfg['timeout_seconds'] ?? 45))),
             'auth_scheme' => strtolower(trim((string) ($cfg['auth_scheme'] ?? 'none'))),
             'token' => (string) ($cfg['token'] ?? ''),
             'force_async_on_issue' => isset($cfg['force_async_on_issue']) ? (bool) $cfg['force_async_on_issue'] : true,
@@ -2008,6 +2013,28 @@ class TaxBridgeService
         }
 
         return $normalized . '/index.php/sunat/' . $methodName;
+    }
+
+    private function isTimeoutTransportError(\Throwable $e): bool
+    {
+        $current = $e;
+
+        while ($current !== null) {
+            $message = strtolower(trim((string) $current->getMessage()));
+
+            if ($message !== '') {
+                if (str_contains($message, 'curl error 28')
+                    || str_contains($message, 'operation timed out')
+                    || str_contains($message, 'connection timed out')
+                    || str_contains($message, 'request timed out')) {
+                    return true;
+                }
+            }
+
+            $current = $current->getPrevious();
+        }
+
+        return false;
     }
 
     private function resolveRegisterCertEndpoint(string $bridgeEndpoint): string

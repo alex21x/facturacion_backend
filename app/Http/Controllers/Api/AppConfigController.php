@@ -1903,7 +1903,7 @@ class AppConfigController extends Controller
             'bridge_mode' => 'BETA',
             'production_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNAT',
             'beta_url' => 'https://mundosoftperu.com/MUNDOSOFTPERUSUNATBETA',
-            'timeout_seconds' => 15,
+            'timeout_seconds' => 45,
             'auth_scheme' => 'none',
             'token' => '',
             'force_async_on_issue' => true,

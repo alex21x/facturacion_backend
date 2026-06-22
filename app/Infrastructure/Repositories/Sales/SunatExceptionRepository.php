@@ -31,6 +31,8 @@ class SunatExceptionRepository
     ): array {
         $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
+            ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
+            ->leftJoin('core.companies as co', 'co.id', '=', 'd.company_id')
             ->where('d.company_id', $companyId)
             ->where('d.status', 'ISSUED')
             ->whereNotIn(DB::raw("UPPER(COALESCE(d.metadata->>'sunat_status',''))"), self::FINAL_SUNAT_STATUSES)
@@ -42,8 +44,12 @@ class SunatExceptionRepository
                 'd.number',
                 'd.issue_at',
                 'd.status as document_status',
+                'd.total',
                 'd.updated_at',
                 'd.metadata',
+                DB::raw("COALESCE(co.tax_id, '') as issuer_ruc"),
+                DB::raw("COALESCE(c.doc_number, '') as customer_doc_number"),
+                DB::raw("COALESCE(NULLIF(TRIM(CAST(ct.sunat_code as text)), ''), '') as customer_doc_type_code"),
                 DB::raw("COALESCE(NULLIF(c.legal_name, ''), NULLIF(c.trade_name, ''), NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), 'Sin cliente') as customer_name"),
                 DB::raw("UPPER(COALESCE(d.metadata->>'sunat_status','')) as sunat_status"),
                 DB::raw("COALESCE(NULLIF(d.metadata->>'sunat_status_label',''), NULLIF(d.metadata->>'sunat_bridge_note',''), 'Pendiente SUNAT') as sunat_label"),

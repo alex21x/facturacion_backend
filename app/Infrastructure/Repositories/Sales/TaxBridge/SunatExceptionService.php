@@ -66,11 +66,17 @@ class SunatExceptionService
                 'id' => (int) $row->id,
                 'branch_id' => $row->branch_id !== null ? (int) $row->branch_id : null,
                 'document_kind' => (string) $row->document_kind,
+                'document_kind_label' => $this->mapDocumentKindLabel((string) $row->document_kind),
                 'series' => (string) $row->series,
                 'number' => (int) $row->number,
                 'issue_at' => (string) $row->issue_at,
                 'document_status' => (string) $row->document_status,
+                'total' => isset($row->total) ? (string) $row->total : null,
+                'issuer_ruc' => isset($row->issuer_ruc) ? trim((string) $row->issuer_ruc) : null,
                 'customer_name' => (string) $row->customer_name,
+                'customer_doc_number' => isset($row->customer_doc_number) ? trim((string) $row->customer_doc_number) : null,
+                'customer_doc_type_code' => isset($row->customer_doc_type_code) ? trim((string) $row->customer_doc_type_code) : null,
+                'customer_type_label' => $this->mapCustomerTypeLabel(isset($row->customer_doc_type_code) ? (string) $row->customer_doc_type_code : null),
                 'sunat_status' => $effectiveSunatStatus,
                 'sunat_label' => $effectiveSunatLabel,
                 'pending_hours' => (int) $row->pending_hours,
@@ -265,5 +271,32 @@ class SunatExceptionService
             // Fallback: if parsing fails, prefer bridge only when metadata status is empty.
             return trim($documentUpdatedAt) === '';
         }
+    }
+
+    private function mapCustomerTypeLabel(?string $customerDocTypeCode): string
+    {
+        $code = trim((string) ($customerDocTypeCode ?? ''));
+        if ($code === '') {
+            return '-';
+        }
+
+        return match ($code) {
+            '6' => 'JURIDICA',
+            '1', '4', '7', '0', 'A' => 'NATURAL',
+            default => 'NATURAL',
+        };
+    }
+
+    private function mapDocumentKindLabel(string $documentKind): string
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        return match (true) {
+            $normalized === 'INVOICE' => 'FACTURA',
+            $normalized === 'RECEIPT' => 'BOLETA',
+            str_starts_with($normalized, 'CREDIT_NOTE') => 'NOTA DE CREDITO',
+            str_starts_with($normalized, 'DEBIT_NOTE') => 'NOTA DE DEBITO',
+            default => $normalized !== '' ? $normalized : '-',
+        };
     }
 }

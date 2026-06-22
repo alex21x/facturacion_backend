@@ -1484,7 +1484,15 @@ class GreGuideService
             : '';
 
         $items        = $guide['items'] ?? [];
-        $identifier   = htmlspecialchars((string) ($guide['identifier'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $rawIdentifier = trim((string) ($guide['identifier'] ?? ''));
+        if ($rawIdentifier === '') {
+            $seriesForIdentifier = trim((string) ($guide['series'] ?? ''));
+            $numberForIdentifier = (int) ($guide['number'] ?? 0);
+            if ($seriesForIdentifier !== '' && $numberForIdentifier > 0) {
+                $rawIdentifier = sprintf('%s-%08d', $seriesForIdentifier, $numberForIdentifier);
+            }
+        }
+        $identifier   = htmlspecialchars($rawIdentifier, ENT_QUOTES, 'UTF-8');
         $issueDateText = htmlspecialchars($this->formatIssueDateTimeForPrint($guide), ENT_QUOTES, 'UTF-8');
         $transferDate = htmlspecialchars((string) ($guide['transfer_date'] ?? $guide['issue_date'] ?? ''), ENT_QUOTES, 'UTF-8');
         $destName     = htmlspecialchars((string) (($guide['destinatario']['name'] ?? '') ?: '-'), ENT_QUOTES, 'UTF-8');
@@ -2249,6 +2257,15 @@ HTML;
     {
         $decodedItems = json_decode((string) ($row->items ?? '[]'), true);
 
+        $series = trim((string) ($row->series ?? ''));
+        $number = (int) ($row->number ?? 0);
+        $rawIdentifier = trim((string) ($row->identifier ?? ''));
+        $resolvedIdentifier = $rawIdentifier;
+
+        if ($resolvedIdentifier === '' && $series !== '' && $number > 0) {
+            $resolvedIdentifier = sprintf('%s-%08d', $series, $number);
+        }
+
         return [
             'id' => (int) $row->id,
             'company_id' => (int) $row->company_id,
@@ -2257,8 +2274,8 @@ HTML;
             'issue_date' => (string) $row->issue_date,
             'transfer_date' => $row->transfer_date !== null ? (string) $row->transfer_date : null,
             'series' => (string) $row->series,
-            'number' => (int) $row->number,
-            'identifier' => (string) $row->identifier,
+            'number' => $number,
+            'identifier' => $resolvedIdentifier,
             'status' => (string) $row->status,
             'notes' => $row->notes,
             'motivo_traslado' => (string) $row->motivo_traslado,

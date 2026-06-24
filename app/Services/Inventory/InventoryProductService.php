@@ -51,9 +51,9 @@ class InventoryProductService
 		return $this->repository->listProductMasters($companyId);
 	}
 
-	public function createProductMaster(int $companyId, array $validated): array
+	public function createProductMaster(int $companyId, int $userId, string $kind, string $name): array
 	{
-		return $this->repository->createProductMaster($companyId, $validated);
+		return $this->repository->createProductMaster($companyId, $userId, $kind, $name);
 	}
 
 	public function updateProductMaster(int $companyId, int $id, array $validated): array

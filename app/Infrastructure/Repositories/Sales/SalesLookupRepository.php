@@ -2914,12 +2914,18 @@ class SalesLookupRepository
 
         [$schema, $table] = $this->splitQualifiedTable($qualifiedTable);
 
-        $columns = collect(DB::select(
-            'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
-            [$schema, $table]
-        ))->map(function ($row) {
-            return (string) $row->column_name;
-        })->all();
+        $columns = Cache::remember(
+            'sales_lookup:table_columns:' . $cacheKey,
+            self::TABLE_EXISTS_CACHE_TTL_SECONDS,
+            function () use ($schema, $table): array {
+                return collect(DB::select(
+                    'select column_name from information_schema.columns where table_schema = ? and table_name = ?',
+                    [$schema, $table]
+                ))->map(function ($row) {
+                    return (string) $row->column_name;
+                })->all();
+            }
+        );
 
         $this->tableColumnsCache[$cacheKey] = $columns;
 

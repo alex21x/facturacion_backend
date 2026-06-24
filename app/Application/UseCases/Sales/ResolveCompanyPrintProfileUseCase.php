@@ -3,126 +3,133 @@
 namespace App\Application\UseCases\Sales;
 
 use App\Services\Sales\SalesLookupService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class ResolveCompanyPrintProfileUseCase
 {
+    private const CACHE_TTL_SECONDS = 300;
+
     public function __construct(private SalesLookupService $salesLookupService)
     {
     }
 
     public function execute(int $companyId): array
     {
-        $companyColumns = $this->tableColumns('core.companies');
-        $companyEmailColumn = $this->firstExistingColumn($companyColumns, ['email', 'contact_email']);
+        $cacheKey = 'sales:company_print_profile:v1:company:' . $companyId;
 
-        $companySelect = ['tax_id', 'legal_name', 'trade_name'];
-        if ($companyEmailColumn) {
-            $companySelect[] = $companyEmailColumn;
-        }
+        return Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($companyId): array {
+            $companyColumns = $this->tableColumns('core.companies');
+            $companyEmailColumn = $this->firstExistingColumn($companyColumns, ['email', 'contact_email']);
 
-        $company = $this->salesLookupService->findCompanyById($companyId, $companySelect);
-
-        $settings = null;
-        if ($this->tableExists('core.company_settings')) {
-            $settingColumns = $this->tableColumns('core.company_settings');
-            $settingEmailColumn = $this->firstExistingColumn($settingColumns, ['email', 'contact_email']);
-
-            $settingsSelect = ['address', 'phone', 'logo_path', 'bank_accounts', 'extra_data'];
-            if ($settingEmailColumn) {
-                $settingsSelect[] = $settingEmailColumn;
+            $companySelect = ['tax_id', 'legal_name', 'trade_name'];
+            if ($companyEmailColumn) {
+                $companySelect[] = $companyEmailColumn;
             }
 
-            $settings = $this->salesLookupService->findLatestCompanySettings(
-                $companyId,
-                $settingsSelect,
-                in_array('logo_path', $settingColumns, true),
-                in_array('updated_at', $settingColumns, true),
-                in_array('created_at', $settingColumns, true)
-            );
-        }
+            $company = $this->salesLookupService->findCompanyById($companyId, $companySelect);
 
-        $companyEmail = null;
-        if ($settings) {
-            $companyEmail = (string) ($settings->email ?? $settings->contact_email ?? '');
-        }
-        if ($companyEmail === null || trim($companyEmail) === '') {
-            $companyEmail = (string) ($company->email ?? $company->contact_email ?? '');
-        }
-        $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
+            $settings = null;
+            if ($this->tableExists('core.company_settings')) {
+                $settingColumns = $this->tableColumns('core.company_settings');
+                $settingEmailColumn = $this->firstExistingColumn($settingColumns, ['email', 'contact_email']);
 
-        $extraData = [];
-        if ($settings && isset($settings->extra_data)) {
-            $decodedExtra = json_decode((string) $settings->extra_data, true);
-            $extraData = is_array($decodedExtra) ? $decodedExtra : [];
-        }
+                $settingsSelect = ['address', 'phone', 'logo_path', 'bank_accounts', 'extra_data'];
+                if ($settingEmailColumn) {
+                    $settingsSelect[] = $settingEmailColumn;
+                }
 
-        $logoDataUri = null;
-        if (isset($extraData['company_logo_data_uri'])) {
-            $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
-            if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
-                $logoDataUri = $candidateDataUri;
+                $settings = $this->salesLookupService->findLatestCompanySettings(
+                    $companyId,
+                    $settingsSelect,
+                    in_array('logo_path', $settingColumns, true),
+                    in_array('updated_at', $settingColumns, true),
+                    in_array('created_at', $settingColumns, true)
+                );
             }
-        }
 
-        $logoPath = $settings->logo_path ?? null;
-        $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
-        $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
+            $companyEmail = null;
+            if ($settings) {
+                $companyEmail = (string) ($settings->email ?? $settings->contact_email ?? '');
+            }
+            if ($companyEmail === null || trim($companyEmail) === '') {
+                $companyEmail = (string) ($company->email ?? $company->contact_email ?? '');
+            }
+            $companyEmail = trim($companyEmail) !== '' ? trim($companyEmail) : null;
 
-        if ($logoDataUri === null && $logoNormalizedPath && $logoExistsInStorage) {
-            $generatedDataUri = $this->companyLogoDataUriFromPublicStorage($logoNormalizedPath);
-            if ($generatedDataUri !== null) {
-                $logoDataUri = $generatedDataUri;
-                $extraData['company_logo_data_uri'] = $generatedDataUri;
+            $extraData = [];
+            if ($settings && isset($settings->extra_data)) {
+                $decodedExtra = json_decode((string) $settings->extra_data, true);
+                $extraData = is_array($decodedExtra) ? $decodedExtra : [];
+            }
 
-                if ($this->tableExists('core.company_settings')) {
-                    $settingsUpdates = ['extra_data' => json_encode($extraData)];
-                    $companySettingsColumns = $this->tableColumns('core.company_settings');
-                    if (in_array('updated_at', $companySettingsColumns, true)) {
-                        $settingsUpdates['updated_at'] = now();
-                    }
-
-                    $this->salesLookupService->updateCompanySettings($companyId, $settingsUpdates);
+            $logoDataUri = null;
+            if (isset($extraData['company_logo_data_uri'])) {
+                $candidateDataUri = trim((string) $extraData['company_logo_data_uri']);
+                if (preg_match('/^data:image\//i', $candidateDataUri) === 1) {
+                    $logoDataUri = $candidateDataUri;
                 }
             }
-        }
 
-        $logoUrl = $logoExistsInStorage
-            ? $this->resolveCompanyLogoUrl($logoPath)
-            : null;
+            $logoPath = $settings->logo_path ?? null;
+            $logoNormalizedPath = $this->normalizeCompanyLogoStoragePath($logoPath);
+            $logoExistsInStorage = $logoNormalizedPath ? $this->publicStorageLogoExists($logoNormalizedPath) : false;
 
-        if (($logoUrl === null || $logoUrl === '') && $logoDataUri !== null) {
-            $logoUrl = $logoDataUri;
-        }
+            if ($logoDataUri === null && $logoNormalizedPath && $logoExistsInStorage) {
+                $generatedDataUri = $this->companyLogoDataUriFromPublicStorage($logoNormalizedPath);
+                if ($generatedDataUri !== null) {
+                    $logoDataUri = $generatedDataUri;
+                    $extraData['company_logo_data_uri'] = $generatedDataUri;
 
-        if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
-            $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
-        }
+                    if ($this->tableExists('core.company_settings')) {
+                        $settingsUpdates = ['extra_data' => json_encode($extraData)];
+                        $companySettingsColumns = $this->tableColumns('core.company_settings');
+                        if (in_array('updated_at', $companySettingsColumns, true)) {
+                            $settingsUpdates['updated_at'] = now();
+                        }
 
-        $bankAccounts = [];
-        if ($settings && isset($settings->bank_accounts)) {
-            $decodedBanks = json_decode((string) $settings->bank_accounts, true);
-            if (is_array($decodedBanks)) {
-                $bankAccounts = array_values(array_filter($decodedBanks, static fn ($item) => is_array($item)));
+                        $this->salesLookupService->updateCompanySettings($companyId, $settingsUpdates);
+                    }
+                }
             }
-        }
 
-        return [
-            'company_id' => $companyId,
-            'tax_id'     => $company->tax_id ?? null,
-            'legal_name' => $company->legal_name ?? '',
-            'trade_name' => $company->trade_name ?? null,
-            'company_description' => isset($extraData['company_description']) ? trim((string) $extraData['company_description']) : null,
-            'address'    => $settings->address ?? null,
-            'phone'      => $settings->phone ?? null,
-            'email'      => $companyEmail,
-            'logo_url'   => $logoUrl,
-            'logo_data_uri' => $logoDataUri,
-            'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
-                ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
-                : true,
-            'bank_accounts' => $bankAccounts,
-        ];
+            $logoUrl = $logoExistsInStorage
+                ? $this->resolveCompanyLogoUrl($logoPath)
+                : null;
+
+            if (($logoUrl === null || $logoUrl === '') && $logoDataUri !== null) {
+                $logoUrl = $logoDataUri;
+            }
+
+            if (($logoUrl === null || $logoUrl === '') && $logoPath !== null) {
+                $logoUrl = $this->resolveCompanyLogoUrl($logoPath);
+            }
+
+            $bankAccounts = [];
+            if ($settings && isset($settings->bank_accounts)) {
+                $decodedBanks = json_decode((string) $settings->bank_accounts, true);
+                if (is_array($decodedBanks)) {
+                    $bankAccounts = array_values(array_filter($decodedBanks, static fn ($item) => is_array($item)));
+                }
+            }
+
+            return [
+                'company_id' => $companyId,
+                'tax_id'     => $company->tax_id ?? null,
+                'legal_name' => $company->legal_name ?? '',
+                'trade_name' => $company->trade_name ?? null,
+                'company_description' => isset($extraData['company_description']) ? trim((string) $extraData['company_description']) : null,
+                'address'    => $settings->address ?? null,
+                'phone'      => $settings->phone ?? null,
+                'email'      => $companyEmail,
+                'logo_url'   => $logoUrl,
+                'logo_data_uri' => $logoDataUri,
+                'show_payment_brand_icons' => array_key_exists('show_payment_brand_icons', $extraData)
+                    ? filter_var($extraData['show_payment_brand_icons'], FILTER_VALIDATE_BOOLEAN)
+                    : true,
+                'bank_accounts' => $bankAccounts,
+            ];
+        });
     }
 
     private function tableExists(string $qualifiedTable): bool

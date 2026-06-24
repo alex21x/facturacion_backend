@@ -11,10 +11,13 @@ use App\Application\DTOs\Auth\AuthRoleContextDTO;
 use App\Domain\Auth\Repositories\AuthSessionRepositoryInterface;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class AuthSessionRepository implements AuthSessionRepositoryInterface
 {
+    private const SCHEMA_CACHE_TTL_SECONDS = 900;
+    private const ACTIVE_MODULES_CACHE_TTL_SECONDS = 300;
     private static array $tableExistsCache = [];
     private static array $columnExistsCache = [];
 
@@ -25,10 +28,16 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
             return self::$tableExistsCache[$cacheKey];
         }
 
-        $exists = DB::table('information_schema.tables')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->exists();
+        $exists = (bool) Cache::remember(
+            'auth:table_exists:' . $cacheKey,
+            self::SCHEMA_CACHE_TTL_SECONDS,
+            function () use ($schema, $table): bool {
+                return DB::table('information_schema.tables')
+                    ->where('table_schema', $schema)
+                    ->where('table_name', $table)
+                    ->exists();
+            }
+        );
 
         self::$tableExistsCache[$cacheKey] = (bool) $exists;
 
@@ -42,11 +51,17 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
             return self::$columnExistsCache[$cacheKey];
         }
 
-        $exists = DB::table('information_schema.columns')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->where('column_name', $column)
-            ->exists();
+        $exists = (bool) Cache::remember(
+            'auth:column_exists:' . $cacheKey,
+            self::SCHEMA_CACHE_TTL_SECONDS,
+            function () use ($schema, $table, $column): bool {
+                return DB::table('information_schema.columns')
+                    ->where('table_schema', $schema)
+                    ->where('table_name', $table)
+                    ->where('column_name', $column)
+                    ->exists();
+            }
+        );
 
         self::$columnExistsCache[$cacheKey] = (bool) $exists;
 
@@ -253,9 +268,15 @@ class AuthSessionRepository implements AuthSessionRepositoryInterface
 
     public function listActiveModulesByCode(): Collection
     {
-        return DB::table('appcfg.modules')
-            ->where('status', 1)
-            ->pluck('id', 'code');
+        return Cache::remember(
+            'auth:active_modules_by_code:v1',
+            self::ACTIVE_MODULES_CACHE_TTL_SECONDS,
+            function (): Collection {
+                return DB::table('appcfg.modules')
+                    ->where('status', 1)
+                    ->pluck('id', 'code');
+            }
+        );
     }
 
     public function listRoleAccessByUserAndModuleIds(int $userId, array $moduleIds): Collection

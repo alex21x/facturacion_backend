@@ -953,6 +953,20 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     {
         $normalizedFormat = in_array($format, ['ticket', 'a4'], true) ? $format : 'ticket';
 
+        // First attempt: retrieve from document-level cache
+        if (class_exists(\App\Infrastructure\Repositories\Sales\Documents\CommercialDocumentPrintCacheService::class)) {
+            try {
+                $printCacheService = app(\App\Infrastructure\Repositories\Sales\Documents\CommercialDocumentPrintCacheService::class);
+                $cachedHtml = $printCacheService->getCachedHtml($documentId, $normalizedFormat);
+                if ($cachedHtml !== null) {
+                    return $cachedHtml;
+                }
+            } catch (\Throwable $e) {
+                \Log::debug('Document print cache lookup failed', ['error' => $e->getMessage()]);
+                // Fallthrough to application cache / fresh build
+            }
+        }
+
         if (!$this->shouldUseSalesPrintCache()) {
             return $this->buildPrintableCommercialDocumentHtmlFresh($companyId, $documentId, $normalizedFormat);
         }

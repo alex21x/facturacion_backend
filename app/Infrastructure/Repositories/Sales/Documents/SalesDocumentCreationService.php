@@ -31,6 +31,7 @@ class SalesDocumentCreationService
         private SalesDocumentLinePersistenceService $linePersistenceService,
         private SalesDocumentCashPostingService $cashPostingService,
         private CommercialDocumentRepositoryInterface $documentRepository,
+        private CommercialDocumentPrintCacheService $printCacheService,
     )
     {
     }
@@ -348,6 +349,14 @@ class SalesDocumentCreationService
             $receiptSendMode = 'DIRECT';
         }
         $deferSunatSend = filter_var($payload['metadata']['defer_sunat_send'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        // Cache print templates for the newly created document (async, non-blocking)
+        try {
+            $this->cacheDocumentPrintTemplatesAsync($companyId, (int) $result['id']);
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to queue print template caching', ['error' => $e->getMessage()]);
+            // Don't fail document creation if caching queue fails
+        }
 
         if ($this->taxBridgeService->supportsDocumentKind(
             (string) ($result['document_kind'] ?? ''),
@@ -698,6 +707,26 @@ class SalesDocumentCreationService
                 ? (int) $existing->cash_register_id
                 : null,
         ];
+    }
+
+    /**
+     * Queue print template caching for a newly created document (async, non-blocking).
+     * Resolves SalesDocumentApplicationService from the container to avoid circular dependencies.
+     *
+     * @param int $companyId
+     * @param int $documentId
+     * @return void
+     */
+    private function cacheDocumentPrintTemplatesAsync(int $companyId, int $documentId): void
+    {
+        // Resolve SalesDocumentApplicationService from container to avoid circular injection
+        $salesDocumentApplicationService = app(\App\Services\Sales\SalesDocumentApplicationService::class);
+
+        $this->printCacheService->generateAndStorePrintTemplates(
+            $companyId,
+            $documentId,
+            fn(string $format) => $salesDocumentApplicationService->buildPrintableCommercialDocumentHtml($companyId, $documentId, $format)
+        );
     }
 
 }

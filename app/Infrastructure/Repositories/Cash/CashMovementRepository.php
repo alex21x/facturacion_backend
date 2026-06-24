@@ -20,8 +20,21 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->whereIn('cm.ref_type', $documentRefTypes);
             })
+            ->leftJoin('sales.commercial_documents as dsrc', function ($join): void {
+                $join->on('dsrc.company_id', '=', 'cd.company_id')
+                    ->whereRaw("dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)");
+            })
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
+            ->leftJoin('auth.users as u_src', 'u_src.id', '=', 'dsrc.created_by')
+            ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_cd_code', function ($join): void {
+                $join->whereRaw('UPPER(dk_cd_code.code) = UPPER(cd.document_kind)');
+            })
+            ->leftJoin('sales.document_kinds as dk_src', 'dk_src.id', '=', 'dsrc.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_src_code', function ($join): void {
+                $join->whereRaw('UPPER(dk_src_code.code) = UPPER(dsrc.document_kind)');
+            })
             ->select([
                 'cm.id',
                 'cm.cash_register_id',
@@ -31,40 +44,17 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 DB::raw('COALESCE(cm.description, cm.notes) as description'),
                 'cm.ref_type',
                 'cm.ref_id',
-                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = cd.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(cd.document_kind) LIMIT 1), cd.document_kind) as document_kind_label"),
+                DB::raw("COALESCE(dk_cd.label, dk_cd_code.label, cd.document_kind) as document_kind_label"),
                 DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
                 DB::raw("NULLIF(COALESCE((cd.metadata->>'source_document_id'), ''), '') as source_document_id"),
-                DB::raw("(
-                    SELECT CONCAT(dsrc.series, '-', dsrc.number)
-                    FROM sales.commercial_documents dsrc
-                    WHERE dsrc.company_id = cd.company_id
-                        AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
-                    LIMIT 1
-                ) as source_document_number"),
-                DB::raw("(
-                    SELECT COALESCE(
-                            (SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = dsrc.document_kind_id LIMIT 1),
-                            (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(dsrc.document_kind) LIMIT 1),
-                            dsrc.document_kind
-                    )
-                    FROM sales.commercial_documents dsrc
-                    WHERE dsrc.company_id = cd.company_id
-                        AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
-                    LIMIT 1
-                ) as source_document_kind_label"),
+                DB::raw("CASE WHEN dsrc.id IS NOT NULL THEN CONCAT(dsrc.series, '-', dsrc.number) ELSE NULL END as source_document_number"),
+                DB::raw("COALESCE(dk_src.label, dk_src_code.label, dsrc.document_kind) as source_document_kind_label"),
                 DB::raw('COALESCE(cm.user_id, cm.created_by) as user_id'),
                 DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
                 DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
                 DB::raw("COALESCE(
                     NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
-                    (
-                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
-                        FROM sales.commercial_documents dsrc
-                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
-                        WHERE dsrc.company_id = cd.company_id
-                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
-                        LIMIT 1
-                    )
+                    NULLIF(TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), '')), '')
                 ) as origin_seller_user_name"),
                 'cm.movement_at',
                 DB::raw("pm.name as payment_method_name"),
@@ -143,10 +133,23 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ->leftJoin('sales.customers as cust', 'cust.id', '=', 'cd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
+            ->leftJoin('sales.commercial_documents as dsrc', function ($join): void {
+                $join->on('dsrc.company_id', '=', 'cd.company_id')
+                    ->whereRaw("dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)");
+            })
+            ->leftJoin('auth.users as u_src', 'u_src.id', '=', 'dsrc.created_by')
+            ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_cd_code', function ($join): void {
+                $join->whereRaw('UPPER(dk_cd_code.code) = UPPER(cd.document_kind)');
+            })
+            ->leftJoin('sales.document_kinds as dk_src', 'dk_src.id', '=', 'dsrc.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_src_code', function ($join): void {
+                $join->whereRaw('UPPER(dk_src_code.code) = UPPER(dsrc.document_kind)');
+            })
             ->select([
                 'cd.id',
                 'cd.document_kind',
-                DB::raw("COALESCE((SELECT dk.label FROM sales.document_kinds dk WHERE dk.id = cd.document_kind_id LIMIT 1), (SELECT dk2.label FROM sales.document_kinds dk2 WHERE UPPER(dk2.code) = UPPER(cd.document_kind) LIMIT 1), cd.document_kind) as document_kind_label"),
+                DB::raw("COALESCE(dk_cd.label, dk_cd_code.label, cd.document_kind) as document_kind_label"),
                 'cd.series',
                 'cd.number',
                 DB::raw("CONCAT(cd.series, '-', cd.number) as document_number"),
@@ -164,15 +167,10 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
                 DB::raw("COALESCE(
                     NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
-                    (
-                        SELECT TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
-                        FROM sales.commercial_documents dsrc
-                        LEFT JOIN auth.users u_src ON u_src.id = dsrc.created_by
-                        WHERE dsrc.company_id = cd.company_id
-                          AND dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)
-                        LIMIT 1
-                    )
+                    NULLIF(TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), '')), '')
                 ) as origin_seller_user_name"),
+                DB::raw("CASE WHEN dsrc.id IS NOT NULL THEN CONCAT(dsrc.series, '-', dsrc.number) ELSE NULL END as source_document_number"),
+                DB::raw("COALESCE(dk_src.label, dk_src_code.label, dsrc.document_kind) as source_document_kind_label"),
             ])
             ->where('cd.company_id', $companyId)
             ->whereNotIn('cd.status', $excludedDocumentStatuses)

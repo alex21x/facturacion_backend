@@ -6,10 +6,16 @@ use App\Application\DTOs\AppConfig\CompanyFeatureToggleDTO;
 use App\Application\DTOs\Inventory\InventoryProductReferenceDTO;
 use App\Application\DTOs\Inventory\InventoryWarehouseReferenceDTO;
 use App\Domain\Inventory\Repositories\InventoryControllerSupportRepositoryInterface;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class InventoryControllerSupportRepository implements InventoryControllerSupportRepositoryInterface
 {
+    private const SCHEMA_CACHE_TTL_SECONDS = 900;
+
+    private static ?bool $restaurantRecipesTableExists = null;
+    private static ?bool $restaurantRecipesDeletedAtColumnExists = null;
+
     public function listCompanyUnits(int $companyId): array
     {
         return DB::table('core.units as u')
@@ -112,19 +118,43 @@ class InventoryControllerSupportRepository implements InventoryControllerSupport
 
     public function restaurantRecipesTableExists(): bool
     {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', 'restaurant')
-            ->where('table_name', 'product_recipes')
-            ->exists();
+        if (self::$restaurantRecipesTableExists !== null) {
+            return self::$restaurantRecipesTableExists;
+        }
+
+        $exists = (bool) Cache::remember(
+            'inventory:restaurant:product_recipes:table_exists:v1',
+            self::SCHEMA_CACHE_TTL_SECONDS,
+            static fn (): bool => DB::table('information_schema.tables')
+                ->where('table_schema', 'restaurant')
+                ->where('table_name', 'product_recipes')
+                ->exists()
+        );
+
+        self::$restaurantRecipesTableExists = $exists;
+
+        return $exists;
     }
 
     public function restaurantRecipesDeletedAtColumnExists(): bool
     {
-        return DB::table('information_schema.columns')
-            ->where('table_schema', 'restaurant')
-            ->where('table_name', 'product_recipes')
-            ->where('column_name', 'deleted_at')
-            ->exists();
+        if (self::$restaurantRecipesDeletedAtColumnExists !== null) {
+            return self::$restaurantRecipesDeletedAtColumnExists;
+        }
+
+        $exists = (bool) Cache::remember(
+            'inventory:restaurant:product_recipes:deleted_at_exists:v1',
+            self::SCHEMA_CACHE_TTL_SECONDS,
+            static fn (): bool => DB::table('information_schema.columns')
+                ->where('table_schema', 'restaurant')
+                ->where('table_name', 'product_recipes')
+                ->where('column_name', 'deleted_at')
+                ->exists()
+        );
+
+        self::$restaurantRecipesDeletedAtColumnExists = $exists;
+
+        return $exists;
     }
 
     public function findDefaultUnitId(): ?int

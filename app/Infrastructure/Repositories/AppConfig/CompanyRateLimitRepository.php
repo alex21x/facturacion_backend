@@ -3,16 +3,34 @@
 namespace App\Infrastructure\Repositories\AppConfig;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class CompanyRateLimitRepository
 {
+    private const SCHEMA_CACHE_TTL_SECONDS = 900;
+
+    private static array $tableExistsCache = [];
+    private static array $columnsCache = [];
+
     public function tableExists(string $schema, string $table): bool
     {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->exists();
+        $cacheKey = strtolower($schema . '.' . $table);
+        if (array_key_exists($cacheKey, self::$tableExistsCache)) {
+            return self::$tableExistsCache[$cacheKey];
+        }
+
+        $cacheStoreKey = 'appcfg:company_rate_limit:table_exists:' . $cacheKey;
+        $exists = (bool) Cache::remember($cacheStoreKey, self::SCHEMA_CACHE_TTL_SECONDS, function () use ($schema, $table): bool {
+            return DB::table('information_schema.tables')
+                ->where('table_schema', $schema)
+                ->where('table_name', $table)
+                ->exists();
+        });
+
+        self::$tableExistsCache[$cacheKey] = $exists;
+
+        return $exists;
     }
 
     public function hasColumns(string $schema, string $table, array $columns): bool
@@ -21,21 +39,36 @@ class CompanyRateLimitRepository
             return true;
         }
 
-        $found = DB::table('information_schema.columns')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->whereIn('column_name', $columns)
-            ->pluck('column_name')
-            ->map(static fn ($value) => (string) $value)
-            ->all();
+        $normalizedColumns = array_values(array_unique(array_map(static fn ($value) => strtolower((string) $value), $columns)));
+        sort($normalizedColumns);
 
-        foreach ($columns as $column) {
-            if (!in_array($column, $found, true)) {
-                return false;
-            }
+        $cacheKey = strtolower($schema . '.' . $table . ':' . implode(',', $normalizedColumns));
+        if (array_key_exists($cacheKey, self::$columnsCache)) {
+            return self::$columnsCache[$cacheKey];
         }
 
-        return true;
+        $cacheStoreKey = 'appcfg:company_rate_limit:has_columns:' . $cacheKey;
+        $hasAllColumns = (bool) Cache::remember($cacheStoreKey, self::SCHEMA_CACHE_TTL_SECONDS, function () use ($schema, $table, $normalizedColumns): bool {
+            $found = DB::table('information_schema.columns')
+                ->where('table_schema', $schema)
+                ->where('table_name', $table)
+                ->whereIn('column_name', $normalizedColumns)
+                ->pluck('column_name')
+                ->map(static fn ($value) => strtolower((string) $value))
+                ->all();
+
+            foreach ($normalizedColumns as $column) {
+                if (!in_array($column, $found, true)) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        self::$columnsCache[$cacheKey] = $hasAllColumns;
+
+        return $hasAllColumns;
     }
 
     public function listNonSystemCompanies(int $systemCompanyId): Collection

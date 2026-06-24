@@ -486,6 +486,7 @@ class TaxBridgeService
 
             if ($status === 'ACCEPTED') {
                 $this->reverseInventoryForVoidedDocumentIfNeeded($companyId, $documentId);
+                $this->removeCashIncomeMovementsForVoidedDocument($companyId, $documentId);
             }
 
             $this->auditService->logDispatch(
@@ -2624,6 +2625,70 @@ class TaxBridgeService
             'inventory_sunat_settled' => false,
             'inventory_pending_sunat' => false,
         ]);
+    }
+
+    private function removeCashIncomeMovementsForVoidedDocument(int $companyId, int $documentId): void
+    {
+        if (!$this->tableExists('sales', 'cash_movements') || !$this->tableExists('sales', 'cash_sessions')) {
+            return;
+        }
+
+        $rows = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->get(['cash_session_id']);
+
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $sessionIds = $rows
+            ->pluck('cash_session_id')
+            ->filter(fn ($value) => (int) $value > 0)
+            ->map(fn ($value) => (int) $value)
+            ->unique()
+            ->values()
+            ->all();
+
+        DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->delete();
+
+        foreach ($sessionIds as $sessionId) {
+            $this->recalculateCashSessionExpectedBalance((int) $sessionId);
+        }
+    }
+
+    private function recalculateCashSessionExpectedBalance(int $sessionId): void
+    {
+        $session = DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->first(['opening_balance']);
+
+        if (!$session) {
+            return;
+        }
+
+        $totalIn = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->sum('amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
+            ->sum('amount');
+
+        DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->update([
+                'expected_balance' => round((float) $session->opening_balance + $totalIn - $totalOut, 4),
+            ]);
     }
 
 }

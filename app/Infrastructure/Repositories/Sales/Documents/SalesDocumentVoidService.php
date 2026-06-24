@@ -176,6 +176,8 @@ class SalesDocumentVoidService
                     );
                 }
 
+                $this->removeCashIncomeMovementsForVoidedDocument($companyId, $documentId);
+
                 return [
                     'id' => $documentId,
                     'status' => $isReceiptGoingToRa ? 'ISSUED' : 'VOID',
@@ -309,5 +311,77 @@ class SalesDocumentVoidService
         }
 
         return false;
+    }
+
+    private function removeCashIncomeMovementsForVoidedDocument(int $companyId, int $documentId): void
+    {
+        if (!$this->tableExists('sales.cash_movements') || !$this->tableExists('sales.cash_sessions')) {
+            return;
+        }
+
+        $rows = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->get(['id', 'cash_session_id']);
+
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $sessionIds = $rows
+            ->pluck('cash_session_id')
+            ->filter(fn ($value) => (int) $value > 0)
+            ->map(fn ($value) => (int) $value)
+            ->unique()
+            ->values()
+            ->all();
+
+        DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $documentId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->delete();
+
+        foreach ($sessionIds as $sessionId) {
+            $this->recalculateCashSessionExpectedBalance((int) $sessionId);
+        }
+    }
+
+    private function recalculateCashSessionExpectedBalance(int $sessionId): void
+    {
+        $session = DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->first(['id', 'opening_balance']);
+
+        if (!$session) {
+            return;
+        }
+
+        $totalIn = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->sum('amount');
+
+        $totalOut = (float) DB::table('sales.cash_movements')
+            ->where('cash_session_id', $sessionId)
+            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
+            ->sum('amount');
+
+        DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->update([
+                'expected_balance' => round((float) $session->opening_balance + $totalIn - $totalOut, 4),
+            ]);
+    }
+
+    private function tableExists(string $qualifiedTable): bool
+    {
+        [$schema, $table] = strpos($qualifiedTable, '.') === false ? ['public', $qualifiedTable] : explode('.', $qualifiedTable, 2);
+        $row = DB::selectOne('select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present', [$schema, $table]);
+
+        return isset($row->present) && (bool) $row->present;
     }
 }

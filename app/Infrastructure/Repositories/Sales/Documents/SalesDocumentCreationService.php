@@ -78,6 +78,17 @@ class SalesDocumentCreationService
                 $isSellerToCashierMode = $this->isCommerceFeatureEnabledForContext($companyId, $branchId, 'SALES_SELLER_TO_CASHIER');
                 $isPreDocument = in_array($payload['document_kind'], ['SALES_ORDER', 'QUOTATION'], true);
                 $metadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+                $clientRequestId = $this->extractClientRequestId($metadata);
+                if ($clientRequestId !== null) {
+                    $existing = $this->findCommercialDocumentByClientRequestId($companyId, (int) $authUser->id, $clientRequestId);
+                    if ($existing !== null) {
+                        return $this->mapExistingDocumentToCreateResult($existing);
+                    }
+
+                    $metadata['client_request_id'] = $clientRequestId;
+                    $payload['metadata'] = $metadata;
+                }
+
                 $isConversionFlow = array_key_exists('source_document_id', $metadata)
                     || strtoupper((string) ($metadata['conversion_origin'] ?? '')) === 'SALES_MODULE';
                 $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
@@ -629,6 +640,64 @@ class SalesDocumentCreationService
         }
 
         return $preferredCashRegisterId > 0 ? $preferredCashRegisterId : null;
+    }
+
+    private function extractClientRequestId(array $metadata): ?string
+    {
+        $rawValue = trim((string) ($metadata['client_request_id'] ?? ''));
+        if ($rawValue === '') {
+            return null;
+        }
+
+        $normalized = substr($rawValue, 0, 120);
+        if (preg_match('/^[A-Za-z0-9._:-]+$/', $normalized) !== 1) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    private function findCommercialDocumentByClientRequestId(int $companyId, int $sellerUserId, string $clientRequestId): ?object
+    {
+        return DB::table('sales.commercial_documents')
+            ->where('company_id', $companyId)
+            ->where('seller_user_id', $sellerUserId)
+            ->whereRaw("COALESCE(metadata->>'client_request_id', '') = ?", [$clientRequestId])
+            ->orderByDesc('id')
+            ->first([
+                'id',
+                'document_kind',
+                'series',
+                'number',
+                'issue_at',
+                'total',
+                'paid_total',
+                'balance_due',
+                'status',
+                'branch_id',
+                'warehouse_id',
+                DB::raw("metadata->>'cash_register_id' as cash_register_id"),
+            ]);
+    }
+
+    private function mapExistingDocumentToCreateResult(object $existing): array
+    {
+        return [
+            'id' => (int) ($existing->id ?? 0),
+            'document_kind' => (string) ($existing->document_kind ?? ''),
+            'series' => (string) ($existing->series ?? ''),
+            'number' => (int) ($existing->number ?? 0),
+            'issue_at' => (string) ($existing->issue_at ?? ''),
+            'total' => round((float) ($existing->total ?? 0), 2),
+            'paid_total' => round((float) ($existing->paid_total ?? 0), 2),
+            'balance_due' => round((float) ($existing->balance_due ?? 0), 2),
+            'status' => (string) ($existing->status ?? 'DRAFT'),
+            'branch_id' => isset($existing->branch_id) ? (int) $existing->branch_id : null,
+            'warehouse_id' => isset($existing->warehouse_id) ? (int) $existing->warehouse_id : null,
+            'cash_register_id' => isset($existing->cash_register_id) && $existing->cash_register_id !== ''
+                ? (int) $existing->cash_register_id
+                : null,
+        ];
     }
 
 }

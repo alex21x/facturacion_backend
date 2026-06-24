@@ -151,6 +151,8 @@ class CompanyRateLimitRepository
                 'created_at' => now(),
             ]
         );
+
+        $this->forgetCompanyRateLimitCache($companyId);
     }
 
     public function upsertCompanyRateLimitsBatch(array $companyIds, array $payload, ?int $updatedBy): void
@@ -192,5 +194,16 @@ class CompanyRateLimitRepository
                 'updated_at',
             ]
         );
+
+        foreach ($normalizedCompanyIds as $companyId) {
+            $this->forgetCompanyRateLimitCache((int) $companyId);
+        }
+    }
+
+    private function forgetCompanyRateLimitCache(int $companyId): void
+    {
+        foreach (['read', 'write', 'reports'] as $profile) {
+            Cache::forget(sprintf('tenant_rate_limit_cfg:%d:%s', $companyId, $profile));
+        }
     }
 }

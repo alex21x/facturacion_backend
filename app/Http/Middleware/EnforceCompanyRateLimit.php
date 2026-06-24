@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Cache;
 
 class EnforceCompanyRateLimit
 {
-    private const CACHE_TTL_SECONDS = 60;
+    private const CACHE_TTL_SECONDS = 3600;
 
     public function __construct(
         private CompanyRateLimitService $companyRateLimitService

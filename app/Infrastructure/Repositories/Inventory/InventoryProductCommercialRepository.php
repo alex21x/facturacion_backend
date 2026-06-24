@@ -12,6 +12,7 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
     private const FEATURE_UOM_CONVERSIONS = 'PRODUCT_UOM_CONVERSIONS';
     private const FEATURE_WHOLESALE_PRICING = 'PRODUCT_WHOLESALE_PRICING';
     private const COMPANY_CONFIG_CACHE_MINUTES = 5;
+    private const SCHEMA_CACHE_MINUTES = 30;
 
     public function getProductCommercialConfig(int $companyId, int $productId): ?array
     {
@@ -32,7 +33,11 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
             $this->companyCacheKey($companyId, 'enabled_units'),
             now()->addMinutes(self::COMPANY_CONFIG_CACHE_MINUTES),
             function () use ($companyId) {
-                $hasCompanyUnitsTable = DB::getSchemaBuilder()->hasTable('appcfg.company_units');
+                $hasCompanyUnitsTable = Cache::remember(
+                    'inventory:company_units:table_exists:v1',
+                    now()->addMinutes(self::SCHEMA_CACHE_MINUTES),
+                    static fn (): bool => DB::getSchemaBuilder()->hasTable('appcfg.company_units')
+                );
 
                 if ($hasCompanyUnitsTable) {
                     $rows = DB::table('core.units as u')
@@ -440,7 +445,11 @@ class InventoryProductCommercialRepository implements InventoryProductCommercial
         ];
 
         foreach ($requiredTables as $table) {
-            if (!DB::getSchemaBuilder()->hasTable($table)) {
+            if (!Cache::remember(
+                'inventory:commercial_table_exists:v1:' . $table,
+                now()->addMinutes(self::SCHEMA_CACHE_MINUTES),
+                static fn () => DB::getSchemaBuilder()->hasTable($table)
+            )) {
                 throw new \RuntimeException('Falta la tabla ' . $table . '. Ejecuta migraciones antes de configurar multiples unidades.');
             }
         }

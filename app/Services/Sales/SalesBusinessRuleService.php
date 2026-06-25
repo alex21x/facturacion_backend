@@ -65,6 +65,18 @@ class SalesBusinessRuleService
             return 'El documento afectado no corresponde al cliente seleccionado';
         }
 
+        $sunatStatus = '';
+        if (isset($sourceDocument->metadata) && $sourceDocument->metadata !== null) {
+            $decodedMetadata = json_decode((string) $sourceDocument->metadata, true);
+            if (is_array($decodedMetadata)) {
+                $sunatStatus = strtoupper(trim((string) ($decodedMetadata['sunat_status'] ?? '')));
+            }
+        }
+
+        if ($sunatStatus !== 'ACCEPTED') {
+            return 'Solo se puede afectar comprobantes aceptados por SUNAT';
+        }
+
         return null;
     }
 

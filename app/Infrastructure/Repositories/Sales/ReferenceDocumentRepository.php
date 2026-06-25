@@ -35,6 +35,7 @@ class ReferenceDocumentRepository
             ->where('d.company_id', $companyId)
             ->where('d.customer_id', $customerId)
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->whereRaw("UPPER(COALESCE(d.metadata->>'sunat_status', '')) = 'ACCEPTED'")
             ->leftJoinSub(
                 DB::table('sales.commercial_documents as nd')
                     ->selectRaw("

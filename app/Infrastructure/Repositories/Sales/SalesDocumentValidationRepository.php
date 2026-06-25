@@ -73,7 +73,7 @@ class SalesDocumentValidationRepository
     public function findSourceDocument(int $companyId, int $sourceDocumentId): ?\App\Application\DTOs\Sales\SalesSourceDocumentDTO
     {
         $document = DB::table('sales.commercial_documents')
-            ->select('id', 'customer_id', 'document_kind', 'series', 'number', 'status')
+            ->select('id', 'company_id', 'customer_id', 'document_kind', 'series', 'number', 'status', 'metadata')
             ->where('id', $sourceDocumentId)
             ->where('company_id', $companyId)
             ->first();

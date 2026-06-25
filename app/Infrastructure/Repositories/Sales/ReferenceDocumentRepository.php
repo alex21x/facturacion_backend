@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 
 class ReferenceDocumentRepository
 {
+    private ?bool $taxBridgeAuditTableExists = null;
+
     public function listReferenceDocuments(
         int $companyId,
         int $customerId,
@@ -16,6 +18,8 @@ class ReferenceDocumentRepository
         int $limit,
         ?int $sellerUserId = null
     ): Collection {
+        $hasTaxBridgeAuditTable = $this->hasTaxBridgeAuditTable();
+
         $query = DB::table('sales.commercial_documents as d')
             ->select([
                 'd.id',
@@ -35,10 +39,19 @@ class ReferenceDocumentRepository
             ->where('d.company_id', $companyId)
             ->where('d.customer_id', $customerId)
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
-            ->where(function ($query) {
+            ->where(function ($query) use ($hasTaxBridgeAuditTable) {
                 $query->whereRaw("UPPER(COALESCE(d.metadata->>'sunat_status', '')) = 'ACCEPTED'")
-                    ->orWhereRaw("UPPER(COALESCE(d.external_status, '')) = 'ACCEPTED'")
                     ->orWhereRaw("UPPER(COALESCE(d.metadata->>'sunat_status_label', '')) LIKE '%ACEPTAD%'");
+
+                if ($hasTaxBridgeAuditTable) {
+                    $query->orWhereExists(function ($audit) {
+                        $audit->select(DB::raw('1'))
+                            ->from('sales.tax_bridge_audit_logs as l')
+                            ->whereColumn('l.company_id', 'd.company_id')
+                            ->whereColumn('l.document_id', 'd.id')
+                            ->whereRaw("UPPER(COALESCE(l.sunat_status, '')) = 'ACCEPTED'");
+                    });
+                }
             })
             ->leftJoinSub(
                 DB::table('sales.commercial_documents as nd')
@@ -97,6 +110,20 @@ class ReferenceDocumentRepository
             ->orderBy('priority')
             ->orderBy('min_qty')
             ->get();
+    }
+
+    private function hasTaxBridgeAuditTable(): bool
+    {
+        if ($this->taxBridgeAuditTableExists !== null) {
+            return $this->taxBridgeAuditTableExists;
+        }
+
+        $this->taxBridgeAuditTableExists = DB::table('information_schema.tables')
+            ->where('table_schema', 'sales')
+            ->where('table_name', 'tax_bridge_audit_logs')
+            ->exists();
+
+        return $this->taxBridgeAuditTableExists;
     }
 
     public function createPriceTier(int $companyId, array $payload): int

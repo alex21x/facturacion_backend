@@ -7,6 +7,7 @@ use App\Services\AppConfig\CompanyIgvRateService;
 use App\Infrastructure\Repositories\Sales\Documents\SalesDocumentSupportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Throwable;
 
 class SalesLookupApplicationService
 {
@@ -203,17 +204,30 @@ class SalesLookupApplicationService
             ? (string) $catalogRow['note_target_kind']
             : null;
 
-        $rows = $this->listReferenceDocuments(
-            $companyId,
-            $customerId,
-            ($branchId !== null && $branchId !== '') ? (int) $branchId : null,
-            $noteTargetKind,
-            $noteKind,
-            max(1, min(10000, max(1, $limit))),
-            $isSellerUser ? (int) $authUser->id : ($isAdminUser ? null : (int) $authUser->id)
-        );
+        try {
+            $rows = $this->listReferenceDocuments(
+                $companyId,
+                $customerId,
+                ($branchId !== null && $branchId !== '') ? (int) $branchId : null,
+                $noteTargetKind,
+                $noteKind,
+                max(1, min(10000, max(1, $limit))),
+                $isSellerUser ? (int) $authUser->id : ($isAdminUser ? null : (int) $authUser->id)
+            );
 
-        return ['status' => 200, 'body' => ['data' => $rows]];
+            return ['status' => 200, 'body' => ['data' => $rows]];
+        } catch (Throwable $e) {
+            $fallbackRows = $this->resolveReferenceDocumentsFallback(
+                $request,
+                $companyId,
+                $customerId,
+                $noteTargetKind,
+                $noteKind,
+                max(1, min(10000, max(1, $limit)))
+            );
+
+            return ['status' => 200, 'body' => ['data' => $fallbackRows]];
+        }
     }
 
     public function resolveSeriesNumbers(Request $request): array
@@ -304,6 +318,72 @@ class SalesLookupApplicationService
     public function listTopProducts(int $companyId, int $limit, int $days): array
     {
         return $this->salesLookupService->listTopProducts($companyId, $limit, $days);
+    }
+
+    private function resolveReferenceDocumentsFallback(
+        Request $request,
+        int $companyId,
+        int $customerId,
+        ?string $noteTargetKind,
+        string $noteKind,
+        int $limit
+    ): array {
+        $filters = $this->buildCommercialDocumentFilters($request, $request->attributes->get('auth_user'));
+        $filters['customer_id'] = $customerId;
+        $filters['branch_id'] = $request->query('branch_id', $request->attributes->get('auth_user')->branch_id ?? null);
+
+        $rows = $this->salesLookupService->listCommercialDocumentsForExport($companyId, $filters, max($limit * 4, $limit));
+
+        return $rows
+            ->filter(function ($row) use ($noteTargetKind): bool {
+                $status = strtoupper(trim((string) ($row->status ?? '')));
+                $sunatStatus = strtoupper(trim((string) ($row->sunat_status ?? '')));
+                $documentKind = strtoupper(trim((string) ($row->document_kind ?? '')));
+
+                if (in_array($status, ['VOID', 'CANCELED'], true)) {
+                    return false;
+                }
+
+                if ($sunatStatus !== 'ACCEPTED') {
+                    return false;
+                }
+
+                if ($noteTargetKind !== null) {
+                    return $documentKind === strtoupper($noteTargetKind);
+                }
+
+                return in_array($documentKind, ['INVOICE', 'RECEIPT'], true);
+            })
+            ->map(function ($row) use ($customerId): array {
+                return [
+                    'id' => (int) ($row->id ?? 0),
+                    'customer_id' => $customerId,
+                    'document_kind' => strtoupper(trim((string) ($row->document_kind ?? ''))) === 'RECEIPT' ? 'RECEIPT' : 'INVOICE',
+                    'series' => (string) ($row->series ?? ''),
+                    'number' => (int) ($row->number ?? 0),
+                    'issue_at' => (string) ($row->issue_at ?? ''),
+                    'total' => (string) ($row->total ?? '0'),
+                    'balance_due' => (string) ($row->balance_due ?? '0'),
+                    'status' => (string) ($row->status ?? ''),
+                    'applied_credit_total' => 0,
+                    'applied_debit_total' => 0,
+                    'has_credit_note' => false,
+                    'has_debit_note' => false,
+                ];
+            })
+            ->sort(function (array $left, array $right): int {
+                $leftDate = strtotime($left['issue_at']) ?: 0;
+                $rightDate = strtotime($right['issue_at']) ?: 0;
+
+                if ($leftDate !== $rightDate) {
+                    return $rightDate <=> $leftDate;
+                }
+
+                return $right['id'] <=> $left['id'];
+            })
+            ->take($limit)
+            ->values()
+            ->all();
     }
 
     private function resolveFeatureFromCollections(Collection $companyToggles, Collection $branchToggles, string $featureCode, bool $defaultEnabled): array

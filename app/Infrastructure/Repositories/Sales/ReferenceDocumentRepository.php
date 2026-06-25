@@ -41,8 +41,8 @@ class ReferenceDocumentRepository
             ->where('d.customer_id', $customerId)
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
             ->where(function ($query) use ($hasTaxBridgeAuditTable) {
-                $query->whereRaw("UPPER(COALESCE(d.metadata->>'sunat_status', '')) = 'ACCEPTED'")
-                    ->orWhereRaw("UPPER(COALESCE(d.metadata->>'sunat_status_label', '')) LIKE '%ACEPTAD%'");
+                $query->whereRaw("UPPER(COALESCE(d.metadata::text, '')) LIKE '%\"SUNAT_STATUS\":\"ACCEPTED\"%'")
+                    ->orWhereRaw("UPPER(COALESCE(d.metadata::text, '')) LIKE '%\"SUNAT_STATUS_LABEL\":\"ACEPTAD%'");
 
                 if ($hasTaxBridgeAuditTable) {
                     $query->orWhereExists(function ($audit) {
@@ -57,11 +57,13 @@ class ReferenceDocumentRepository
             ->leftJoinSub(
                 DB::table('sales.commercial_documents as nd')
                     ->selectRaw("
-                        CASE
-                            WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$'
-                                THEN (nd.metadata->>'source_document_id')::BIGINT
-                            ELSE 0
-                        END AS src_id,
+                        COALESCE(
+                            NULLIF(
+                                substring(COALESCE(nd.metadata::text, '') from '\"source_document_id\"\\s*:\\s*\"?([0-9]+)\"?'),
+                                ''
+                            )::BIGINT,
+                            0
+                        ) AS src_id,
                         SUM(CASE WHEN nd.document_kind = 'CREDIT_NOTE' THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_credit_total,
                         SUM(CASE WHEN nd.document_kind = 'DEBIT_NOTE'  THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_debit_total,
                         BOOL_OR(nd.document_kind = 'CREDIT_NOTE') AS has_credit_note,
@@ -70,8 +72,8 @@ class ReferenceDocumentRepository
                     ->where('nd.company_id', $companyId)
                     ->whereIn('nd.document_kind', ['CREDIT_NOTE', 'DEBIT_NOTE'])
                     ->whereNotIn('nd.status', ['VOID', 'CANCELED'])
-                    ->whereRaw("CASE WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$' THEN (nd.metadata->>'source_document_id')::BIGINT ELSE 0 END > 0")
-                    ->groupByRaw("CASE WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$' THEN (nd.metadata->>'source_document_id')::BIGINT ELSE 0 END"),
+                    ->whereRaw("COALESCE(NULLIF(substring(COALESCE(nd.metadata::text, '') from '\"source_document_id\"\\s*:\\s*\"?([0-9]+)\"?'), '')::BIGINT, 0) > 0")
+                    ->groupByRaw("COALESCE(NULLIF(substring(COALESCE(nd.metadata::text, '') from '\"source_document_id\"\\s*:\\s*\"?([0-9]+)\"?'), '')::BIGINT, 0)"),
                 'notes_agg',
                 'notes_agg.src_id',
                 '=',

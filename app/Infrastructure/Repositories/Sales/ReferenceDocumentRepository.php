@@ -4,6 +4,7 @@ namespace App\Infrastructure\Repositories\Sales;
 
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class ReferenceDocumentRepository
 {
@@ -122,10 +123,15 @@ class ReferenceDocumentRepository
             return $this->taxBridgeAuditTableExists;
         }
 
-        $this->taxBridgeAuditTableExists = DB::table('information_schema.tables')
-            ->where('table_schema', 'sales')
-            ->where('table_name', 'tax_bridge_audit_logs')
-            ->exists();
+        try {
+            $this->taxBridgeAuditTableExists = DB::table('information_schema.tables')
+                ->where('table_schema', 'sales')
+                ->where('table_name', 'tax_bridge_audit_logs')
+                ->exists();
+        } catch (Throwable $e) {
+            // Fallback seguro para tenants con permisos restringidos en information_schema.
+            $this->taxBridgeAuditTableExists = false;
+        }
 
         return $this->taxBridgeAuditTableExists;
     }

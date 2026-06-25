@@ -56,7 +56,11 @@ class ReferenceDocumentRepository
             ->leftJoinSub(
                 DB::table('sales.commercial_documents as nd')
                     ->selectRaw("
-                        COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) AS src_id,
+                        CASE
+                            WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$'
+                                THEN (nd.metadata->>'source_document_id')::BIGINT
+                            ELSE 0
+                        END AS src_id,
                         SUM(CASE WHEN nd.document_kind = 'CREDIT_NOTE' THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_credit_total,
                         SUM(CASE WHEN nd.document_kind = 'DEBIT_NOTE'  THEN COALESCE(nd.total, 0) ELSE 0 END) AS applied_debit_total,
                         BOOL_OR(nd.document_kind = 'CREDIT_NOTE') AS has_credit_note,
@@ -65,8 +69,8 @@ class ReferenceDocumentRepository
                     ->where('nd.company_id', $companyId)
                     ->whereIn('nd.document_kind', ['CREDIT_NOTE', 'DEBIT_NOTE'])
                     ->whereNotIn('nd.status', ['VOID', 'CANCELED'])
-                    ->whereRaw("COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0) > 0")
-                    ->groupByRaw("COALESCE((nd.metadata->>'source_document_id')::BIGINT, 0)"),
+                    ->whereRaw("CASE WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$' THEN (nd.metadata->>'source_document_id')::BIGINT ELSE 0 END > 0")
+                    ->groupByRaw("CASE WHEN COALESCE((nd.metadata->>'source_document_id'), '') ~ '^[0-9]+$' THEN (nd.metadata->>'source_document_id')::BIGINT ELSE 0 END"),
                 'notes_agg',
                 'notes_agg.src_id',
                 '=',

@@ -66,14 +66,19 @@ class SalesBusinessRuleService
         }
 
         $sunatStatus = '';
+        $sunatStatusLabel = '';
         if (isset($sourceDocument->metadata) && $sourceDocument->metadata !== null) {
             $decodedMetadata = json_decode((string) $sourceDocument->metadata, true);
             if (is_array($decodedMetadata)) {
                 $sunatStatus = strtoupper(trim((string) ($decodedMetadata['sunat_status'] ?? '')));
+                $sunatStatusLabel = strtoupper(trim((string) ($decodedMetadata['sunat_status_label'] ?? '')));
             }
         }
 
-        if ($sunatStatus !== 'ACCEPTED') {
+        $isAccepted = $sunatStatus === 'ACCEPTED'
+            || str_contains($sunatStatusLabel, 'ACEPTAD');
+
+        if (!$isAccepted) {
             return 'Solo se puede afectar comprobantes aceptados por SUNAT';
         }
 

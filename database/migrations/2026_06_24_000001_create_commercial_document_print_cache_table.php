@@ -18,7 +18,7 @@ return new class extends Migration
             $table->unsignedBigInteger('document_id')->index();
             $table->enum('format', ['ticket', 'a4'])->default('a4');
             $table->longText('html_content')->nullable();
-            $table->longBlob('pdf_binary')->nullable();
+            $table->binary('pdf_binary')->nullable();
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('expires_at')->nullable()->index();
 

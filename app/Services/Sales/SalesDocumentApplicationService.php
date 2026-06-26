@@ -1574,6 +1574,21 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         $key = $this->salesPrintCacheVersionKey($companyId, $documentId);
         $next = $this->resolveSalesPrintCacheVersion($companyId, $documentId) + 1;
         Cache::forever($key, $next);
+
+        if (!class_exists(\App\Infrastructure\Repositories\Sales\Documents\CommercialDocumentPrintCacheService::class)) {
+            return;
+        }
+
+        try {
+            $printCacheService = app(\App\Infrastructure\Repositories\Sales\Documents\CommercialDocumentPrintCacheService::class);
+            $printCacheService->invalidateDocumentCache($documentId);
+        } catch (\Throwable $e) {
+            \Log::warning('Could not invalidate persisted commercial document print cache', [
+                'company_id' => $companyId,
+                'document_id' => $documentId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function resolveAssetUrl(string $relativePath): string

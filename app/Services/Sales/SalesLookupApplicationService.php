@@ -108,6 +108,7 @@ class SalesLookupApplicationService
             'SALES_ALLOW_VOID_FOR_ADMIN' => true,
             'SALES_VOID_REQUIRE_PASSWORD' => false,
             'SALES_VOID_REVERSE_STOCK' => true,
+            'SALES_BULK_VOID_REPORT_ENABLED' => false,
         ];
 
         $commerceFeatures = collect(array_keys($featureDefaults))->map(function ($featureCode) use ($companyFeatureToggles, $branchFeatureToggles, $featureDefaults) {

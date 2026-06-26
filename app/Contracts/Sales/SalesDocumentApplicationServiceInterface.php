@@ -66,4 +66,10 @@ interface SalesDocumentApplicationServiceInterface
         array $emailParams,
         bool $isHttpsContext
     ): array;
+
+    public function bulkSunatAnnulmentFromReport(
+        object $authUser,
+        int $companyId,
+        array $payload
+    ): array;
 }

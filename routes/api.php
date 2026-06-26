@@ -202,6 +202,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     Route::middleware('rbac.module:SALES,create')->group(function () {
         Route::middleware('company.scope')->group(function () {
             Route::post('/sales/commercial-documents', 'Api\\SalesDocumentController@createCommercialDocument');
+            Route::post('/sales/commercial-documents/bulk-sunat-annulment', 'Api\\SalesDocumentController@bulkSunatAnnulment');
             Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesDocumentController@convertCommercialDocument');
             Route::put('/sales/commercial-documents/{id}', 'Api\\SalesDocumentController@updateCommercialDocument');
             Route::post('/sales/commercial-documents/{id}/void', 'Api\\SalesDocumentController@voidCommercialDocument');

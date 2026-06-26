@@ -7,6 +7,7 @@ use App\Contracts\TaxBridgeGateway;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Sales\ConvertCommercialDocumentRequest;
 use App\Http\Requests\Sales\CreateCommercialDocumentRequest;
+use App\Http\Requests\Sales\BulkSunatAnnulmentRequest;
 use App\Http\Requests\Sales\PrintableCommercialDocumentRequest;
 use App\Http\Requests\Sales\SunatVoidCommunicationRequest;
 use App\Http\Requests\Sales\UpdateCommercialDocumentRequest;
@@ -360,6 +361,29 @@ class SalesDocumentController extends Controller
 
         return response()->json([
             'message' => 'Documento comercial anulado',
+            'data' => $result,
+        ]);
+    }
+
+    public function bulkSunatAnnulment(BulkSunatAnnulmentRequest $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+
+        try {
+            $result = $this->salesDocumentApplicationService->bulkSunatAnnulmentFromReport(
+                $authUser,
+                $companyId,
+                $request->validated()
+            );
+        } catch (SalesDocumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], $e->httpStatus());
+        }
+
+        return response()->json([
+            'message' => 'Proceso masivo de anulacion ejecutado',
             'data' => $result,
         ]);
     }

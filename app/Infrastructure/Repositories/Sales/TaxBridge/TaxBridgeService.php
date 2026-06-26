@@ -2443,10 +2443,10 @@ class TaxBridgeService
     {
         $today = now()->toDateString();
 
-        return DB::transaction(function () use ($companyId, $today): int {
-            $this->acquireCompanyDateSequenceLock($companyId, $today, 'VOID_COMM');
+        try {
+            return DB::transaction(function () use ($companyId, $today): int {
+                $this->acquireCompanyDateSequenceLock($companyId, $today, 'VOID_COMM');
 
-            try {
                 $row = DB::table('sales.void_communication_sequences')
                     ->where('company_id', $companyId)
                     ->where('sequence_date', $today)
@@ -2478,14 +2478,15 @@ class TaxBridgeService
                 ]);
 
                 return $seed;
-            } catch (\Illuminate\Database\QueryException $e) {
-                if ($this->isMissingTableError($e)) {
-                    return $this->resolveVoidCommunicationSeed($companyId, $today);
-                }
-
-                throw $e;
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ($this->isMissingTableError($e)) {
+                // Fallback outside transaction to avoid postgres aborted-tx state (25P02).
+                return $this->resolveVoidCommunicationSeed($companyId, $today);
             }
-        });
+
+            throw $e;
+        }
     }
 
     private function isMissingTableError(\Illuminate\Database\QueryException $exception): bool

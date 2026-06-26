@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\URL;
 use App\Services\Sales\Documents\SalesDocumentConversionService;
 use App\Services\Sales\Documents\SalesDocumentException;
 use App\Services\Sales\Documents\SalesDocumentReadService;
+use Illuminate\Support\Collection;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Illuminate\Support\Carbon;
@@ -947,6 +948,246 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         ]);
 
         $this->invalidateSalesPrintCache($companyId, $documentId);
+    }
+
+    public function bulkSunatAnnulmentFromReport(object $authUser, int $companyId, array $payload): array
+    {
+        $roleCode = strtoupper(trim((string) ($authUser->role_code ?? '')));
+        $roleProfile = strtoupper(trim((string) ($authUser->role_profile ?? '')));
+
+        if ($roleCode === '' && $roleProfile === '') {
+            $roleContext = $this->supportService->resolveAuthRoleContext((int) $authUser->id, $companyId);
+            $roleCode = strtoupper(trim((string) ($roleContext['role_code'] ?? '')));
+            $roleProfile = strtoupper(trim((string) ($roleContext['role_profile'] ?? '')));
+        }
+
+        if (!$this->supportService->isAdminActor($roleCode)) {
+            throw new SalesDocumentException('Solo un administrador puede ejecutar anulaciones masivas.', 403);
+        }
+
+        $featureBranchId = null;
+        if (isset($payload['branch_id']) && (int) $payload['branch_id'] > 0) {
+            $featureBranchId = (int) $payload['branch_id'];
+        } elseif (isset($authUser->branch_id) && (int) $authUser->branch_id > 0) {
+            $featureBranchId = (int) $authUser->branch_id;
+        }
+
+        $bulkEnabled = $this->supportService->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $featureBranchId,
+            'SALES_BULK_VOID_REPORT_ENABLED',
+            false
+        );
+
+        if (!$bulkEnabled) {
+            throw new SalesDocumentException('La anulacion masiva en reporte no esta habilitada para este contexto.', 403);
+        }
+
+        $configuredMax = max(1, min(500, (int) env('SALES_BULK_VOID_MAX_DOCS', 200)));
+        $maxDocuments = max(1, min(500, (int) ($payload['max_documents'] ?? $configuredMax)));
+        $configuredPauseMs = max(0, min(10000, (int) env('SALES_BULK_VOID_PAUSE_MS', 700)));
+        $pauseMs = max(0, min(10000, (int) ($payload['pause_ms'] ?? $configuredPauseMs)));
+        $perPage = 100;
+
+        $queryParams = [
+            'branch_id' => $payload['branch_id'] ?? null,
+            'warehouse_id' => $payload['warehouse_id'] ?? null,
+            'cash_register_id' => $payload['cash_register_id'] ?? null,
+            'source_origin' => $payload['source_origin'] ?? null,
+            'document_kind' => $payload['document_kind'] ?? null,
+            'document_kind_id' => $payload['document_kind_id'] ?? null,
+            'conversion_state' => $payload['conversion_state'] ?? null,
+            'customer' => $payload['customer'] ?? null,
+            'customer_id' => $payload['customer_id'] ?? null,
+            'customer_vehicle_id' => $payload['customer_vehicle_id'] ?? null,
+            'issue_date_from' => $payload['issue_date_from'] ?? null,
+            'issue_date_to' => $payload['issue_date_to'] ?? null,
+            'series' => $payload['series'] ?? null,
+            'number' => $payload['number'] ?? null,
+            'status' => 'ISSUED',
+        ];
+
+        $page = 1;
+        $scannedCount = 0;
+        $candidates = [];
+
+        do {
+            $pageResult = $this->paginateCommercialDocuments($authUser, $companyId, $queryParams, $page, $perPage);
+            $pageRows = $pageResult['data'] ?? [];
+            if ($pageRows instanceof Collection) {
+                $rows = $pageRows->all();
+            } elseif (is_array($pageRows)) {
+                $rows = $pageRows;
+            } else {
+                $rows = [];
+            }
+            $lastPage = (int) (($pageResult['meta']['last_page'] ?? $page) ?: $page);
+
+            if (empty($rows)) {
+                break;
+            }
+
+            foreach ($rows as $row) {
+                $scannedCount++;
+                $candidate = $this->classifyBulkSunatAnnulmentCandidate($row);
+                if ($candidate !== null) {
+                    $candidates[] = $candidate;
+                    if (count($candidates) >= $maxDocuments) {
+                        break 2;
+                    }
+                }
+            }
+
+            $page++;
+        } while ($page <= $lastPage);
+
+        $reason = trim((string) ($payload['reason'] ?? 'Anulacion masiva desde reporte de ventas'));
+        $notes = trim((string) ($payload['notes'] ?? 'Proceso masivo de anulacion'));
+        $voidPassword = isset($payload['void_password']) ? (string) $payload['void_password'] : null;
+
+        $processed = [];
+        $summary = [
+            'invoices_attempted' => 0,
+            'invoices_accepted' => 0,
+            'invoices_pending' => 0,
+            'receipts_attempted' => 0,
+            'receipts_queued_to_ra' => 0,
+            'errors' => 0,
+        ];
+
+        $totalCandidates = count($candidates);
+        foreach ($candidates as $index => $candidate) {
+            $documentId = (int) $candidate['document_id'];
+            $operation = (string) $candidate['operation'];
+            $documentKind = (string) $candidate['document_kind'];
+
+            try {
+                if ($operation === 'RA_SUMMARY') {
+                    $summary['receipts_attempted']++;
+
+                    $voidPayload = [
+                        'reason' => $reason,
+                        'notes' => $notes,
+                        'void_at' => now()->toDateTimeString(),
+                    ];
+                    if ($voidPassword !== null && trim($voidPassword) !== '') {
+                        $voidPayload['void_password'] = $voidPassword;
+                    }
+
+                    $voidResult = $this->voidCommercialDocument($authUser, $companyId, $documentId, $voidPayload);
+                    $summaryId = isset($voidResult['daily_summary_id']) ? (int) $voidResult['daily_summary_id'] : null;
+
+                    $summary['receipts_queued_to_ra']++;
+                    $processed[] = [
+                        'document_id' => $documentId,
+                        'document_kind' => $documentKind,
+                        'operation' => 'RA_SUMMARY',
+                        'status' => 'PENDING_SUMMARY',
+                        'daily_summary_id' => $summaryId,
+                    ];
+                } else {
+                    $summary['invoices_attempted']++;
+
+                    $bridgeResult = $this->taxBridgeService->sendVoidCommunication($companyId, $documentId, $reason !== '' ? $reason : null);
+                    $bridgeStatus = strtoupper(trim((string) ($bridgeResult['status'] ?? '')));
+
+                    if ($bridgeStatus === 'ACCEPTED') {
+                        $this->applyAcceptedSunatVoid($authUser, $companyId, $documentId, $reason !== '' ? $reason : null, $notes !== '' ? $notes : null);
+                        $summary['invoices_accepted']++;
+                    } else {
+                        $summary['invoices_pending']++;
+                    }
+
+                    $processed[] = [
+                        'document_id' => $documentId,
+                        'document_kind' => $documentKind,
+                        'operation' => 'SUNAT_VOID',
+                        'status' => $bridgeStatus !== '' ? $bridgeStatus : 'SENT',
+                        'void_number' => isset($bridgeResult['void_number']) ? (int) $bridgeResult['void_number'] : null,
+                        'http_code' => isset($bridgeResult['http_code']) ? (int) $bridgeResult['http_code'] : null,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $summary['errors']++;
+                $processed[] = [
+                    'document_id' => $documentId,
+                    'document_kind' => $documentKind,
+                    'operation' => $operation,
+                    'status' => 'ERROR',
+                    'message' => $e->getMessage(),
+                ];
+            }
+
+            if ($pauseMs > 0 && ($index + 1) < $totalCandidates) {
+                usleep($pauseMs * 1000);
+            }
+        }
+
+        return [
+            'scanned_count' => $scannedCount,
+            'eligible_count' => $totalCandidates,
+            'processed_count' => count($processed),
+            'max_documents' => $maxDocuments,
+            'pause_ms' => $pauseMs,
+            'summary' => $summary,
+            'items' => $processed,
+        ];
+    }
+
+    private function classifyBulkSunatAnnulmentCandidate($row): ?array
+    {
+        $documentId = (int) ($this->readDocumentRowValue($row, 'id') ?? 0);
+        if ($documentId <= 0) {
+            return null;
+        }
+
+        $documentKind = strtoupper(trim((string) ($this->readDocumentRowValue($row, 'document_kind') ?? '')));
+        $status = strtoupper(trim((string) ($this->readDocumentRowValue($row, 'status') ?? '')));
+        $sunatStatus = strtoupper(trim((string) ($this->readDocumentRowValue($row, 'sunat_status') ?? '')));
+        $sunatVoidStatus = strtoupper(trim((string) ($this->readDocumentRowValue($row, 'sunat_void_status') ?? '')));
+
+        if ($status !== 'ISSUED' || $sunatStatus !== 'ACCEPTED') {
+            return null;
+        }
+
+        if ($documentKind === 'INVOICE') {
+            if (in_array($sunatVoidStatus, ['ACCEPTED', 'SENDING', 'SENT', 'PENDING_SUMMARY'], true)) {
+                return null;
+            }
+
+            return [
+                'document_id' => $documentId,
+                'document_kind' => $documentKind,
+                'operation' => 'SUNAT_VOID',
+            ];
+        }
+
+        if ($documentKind === 'RECEIPT') {
+            if (in_array($sunatVoidStatus, ['ACCEPTED', 'PENDING_SUMMARY'], true)) {
+                return null;
+            }
+
+            return [
+                'document_id' => $documentId,
+                'document_kind' => $documentKind,
+                'operation' => 'RA_SUMMARY',
+            ];
+        }
+
+        return null;
+    }
+
+    private function readDocumentRowValue($row, string $key)
+    {
+        if (is_array($row)) {
+            return $row[$key] ?? null;
+        }
+
+        if (is_object($row) && isset($row->{$key})) {
+            return $row->{$key};
+        }
+
+        return null;
     }
 
     public function buildPrintableCommercialDocumentHtml(int $companyId, int $documentId, string $format = 'ticket'): string

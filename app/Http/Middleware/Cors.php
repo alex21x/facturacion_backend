@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Throwable;
 
 class Cors
 {
@@ -41,7 +43,13 @@ class Cors
             return $response;
         }
 
-        $response = $next($request);
+        try {
+            $response = $next($request);
+        } catch (Throwable $e) {
+            // Keep CORS headers on error responses so the browser surfaces
+            // the actual backend error instead of a generic CORS failure.
+            $response = app(ExceptionHandler::class)->render($request, $e);
+        }
 
         if ($allowOriginHeader !== null) {
             $response->headers->set('Access-Control-Allow-Origin', $allowOriginHeader);
@@ -83,6 +91,7 @@ class Cors
             (string) env('FRONTEND_URL', ''),
             (string) env('FRONTEND_APP_URL', ''),
             (string) env('FRONTEND_ADMIN_URL', ''),
+            'https://fycticonsulting.com',
             'https://www.fycticonsulting.com',
             'https://admin.fycticonsulting.com',
         ];
@@ -130,7 +139,7 @@ class Cors
 
         // Allow canonical production domains even if env variables were not
         // synchronized yet in Railway.
-        if (preg_match('#^https://(www|admin)\.fycticonsulting\.com$#i', $origin)) {
+        if (preg_match('#^https://(fycticonsulting\.com|www\.fycticonsulting\.com|admin\.fycticonsulting\.com)$#i', $origin)) {
             return true;
         }
 

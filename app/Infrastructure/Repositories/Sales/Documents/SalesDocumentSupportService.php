@@ -32,25 +32,31 @@ class SalesDocumentSupportService
 
     public function isCommerceFeatureEnabledForContextWithDefault(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
     {
-        if ($branchId !== null) {
-            $branchRow = DB::table('appcfg.branch_feature_toggles')
+        $rows = $branchId !== null
+            ? DB::table('appcfg.branch_feature_toggles')
                 ->where('company_id', $companyId)
                 ->where('branch_id', $branchId)
                 ->where('feature_code', $featureCode)
-                ->select('is_enabled')
-                ->first();
+                ->selectRaw("'BRANCH' as scope, is_enabled")
+                ->unionAll(
+                    DB::table('appcfg.company_feature_toggles')
+                        ->where('company_id', $companyId)
+                        ->where('feature_code', $featureCode)
+                        ->selectRaw("'COMPANY' as scope, is_enabled")
+                )
+                ->get()
+            : DB::table('appcfg.company_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('feature_code', $featureCode)
+                ->selectRaw("'COMPANY' as scope, is_enabled")
+                ->get();
 
-            if ($branchRow && $branchRow->is_enabled !== null) {
-                return (bool) $branchRow->is_enabled;
-            }
+        $branchRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'BRANCH');
+        if ($branchRow && $branchRow->is_enabled !== null) {
+            return (bool) $branchRow->is_enabled;
         }
 
-        $companyRow = DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->where('feature_code', $featureCode)
-            ->select('is_enabled')
-            ->first();
-
+        $companyRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'COMPANY');
         if ($companyRow && $companyRow->is_enabled !== null) {
             return (bool) $companyRow->is_enabled;
         }

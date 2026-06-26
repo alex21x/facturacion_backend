@@ -1383,6 +1383,43 @@ class SalesLookupRepository
             ->get(['feature_code', 'is_enabled', 'config']);
     }
 
+    public function loadFeatureTogglesForContext(int $companyId, ?int $branchId): array
+    {
+        $companyQuery = DB::table('appcfg.company_feature_toggles')
+            ->where('company_id', $companyId)
+            ->selectRaw("'COMPANY' as scope, feature_code, is_enabled, config");
+
+        if ($branchId !== null) {
+            $rows = DB::table('appcfg.branch_feature_toggles')
+                ->where('company_id', $companyId)
+                ->where('branch_id', $branchId)
+                ->selectRaw("'BRANCH' as scope, feature_code, is_enabled, config")
+                ->unionAll($companyQuery)
+                ->get();
+        } else {
+            $rows = $companyQuery->get();
+        }
+
+        return [
+            'company' => $rows
+                ->filter(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'COMPANY')
+                ->map(fn ($row) => (object) [
+                    'feature_code' => $row->feature_code,
+                    'is_enabled' => $row->is_enabled,
+                    'config' => $row->config,
+                ])
+                ->values(),
+            'branch' => $rows
+                ->filter(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'BRANCH')
+                ->map(fn ($row) => (object) [
+                    'feature_code' => $row->feature_code,
+                    'is_enabled' => $row->is_enabled,
+                    'config' => $row->config,
+                ])
+                ->values(),
+        ];
+    }
+
     public function enabledUnits(int $companyId): Collection
     {
         return DB::table('core.units as u')

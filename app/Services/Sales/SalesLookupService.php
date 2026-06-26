@@ -312,6 +312,11 @@ class SalesLookupService
         return $this->repository->loadBranchFeatureToggles($companyId, $branchId);
     }
 
+    public function loadFeatureTogglesForContext(int $companyId, ?int $branchId): array
+    {
+        return $this->repository->loadFeatureTogglesForContext($companyId, $branchId);
+    }
+
     public function enabledUnits(int $companyId): Collection
     {
         return $this->repository->enabledUnits($companyId);

@@ -58,14 +58,17 @@ class SalesLookupApplicationService
             $branchId = null;
         }
 
-        if ($branchId !== null && !$this->salesLookupService->branchExists($companyId, $branchId)) {
+        $authBranchId = isset($authUser->branch_id) && $authUser->branch_id !== null
+            ? (int) $authUser->branch_id
+            : null;
+
+        if ($branchId !== null && $branchId !== $authBranchId && !$this->salesLookupService->branchExists($companyId, $branchId)) {
             return ['error' => response()->json(['message' => 'Invalid branch scope'], 422)];
         }
 
-        $companyFeatureToggles = $this->salesLookupService->loadCompanyFeatureToggles($companyId);
-        $branchFeatureToggles = $branchId !== null
-            ? $this->salesLookupService->loadBranchFeatureToggles($companyId, $branchId)
-            : collect();
+        $featureToggles = $this->salesLookupService->loadFeatureTogglesForContext($companyId, $branchId);
+        $companyFeatureToggles = $featureToggles['company'] ?? collect();
+        $branchFeatureToggles = $featureToggles['branch'] ?? collect();
 
         $currencies = $this->salesLookupService->listActiveCurrencies();
         $paymentMethods = $this->salesLookupService->listActivePaymentTypes();

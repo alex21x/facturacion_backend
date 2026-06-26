@@ -92,6 +92,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'document_kind'                   => $queryParams['document_kind'] ?? null,
             'document_kind_id'                => $queryParams['document_kind_id'] ?? null,
             'status'                          => $queryParams['status'] ?? null,
+            'sunat_status'                    => $queryParams['sunat_status'] ?? null,
             'conversion_state'                => $queryParams['conversion_state'] ?? null,
             'customer'                        => trim((string) ($queryParams['customer'] ?? '')),
             'customer_id'                     => $queryParams['customer_id'] ?? null,
@@ -529,6 +530,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'document_kind'                   => $queryParams['document_kind'] ?? null,
             'document_kind_id'                => $queryParams['document_kind_id'] ?? null,
             'status'                          => $queryParams['status'] ?? null,
+            'sunat_status'                    => $queryParams['sunat_status'] ?? null,
             'conversion_state'                => $queryParams['conversion_state'] ?? null,
             'customer'                        => trim((string) ($queryParams['customer'] ?? '')),
             'customer_id'                     => $queryParams['customer_id'] ?? null,
@@ -1256,6 +1258,42 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'SALES_ORDER' => 'PEDIDO DE VENTA',
             'QUOTATION' => 'COTIZACION',
         ][$documentKindRaw] ?? ($documentKindRaw !== '' ? $documentKindRaw : 'DOCUMENTO');
+        $isNoteDocument = in_array($documentKindRaw, ['CREDIT_NOTE', 'DEBIT_NOTE'], true);
+
+        $sourceDocumentKind = trim((string) ($metadata['source_document_kind'] ?? ''));
+        $sourceDocumentNumber = trim((string) ($metadata['source_document_number'] ?? ''));
+        $sourceDocumentId = (int) ($metadata['source_document_id'] ?? 0);
+
+        if (($sourceDocumentKind === '' || $sourceDocumentNumber === '') && $sourceDocumentId > 0) {
+            $sourceDocument = DB::table('sales.commercial_documents')
+                ->select(['document_kind', 'series', 'number'])
+                ->where('company_id', $companyId)
+                ->where('id', $sourceDocumentId)
+                ->first();
+
+            if ($sourceDocument) {
+                if ($sourceDocumentKind === '') {
+                    $sourceDocumentKind = strtoupper(trim((string) ($sourceDocument->document_kind ?? '')));
+                }
+                if ($sourceDocumentNumber === '') {
+                    $sourceSeries = trim((string) ($sourceDocument->series ?? ''));
+                    $sourceNumber = trim((string) ($sourceDocument->number ?? ''));
+                    $sourceDocumentNumber = trim($sourceSeries . ($sourceSeries !== '' && $sourceNumber !== '' ? '-' : '') . $sourceNumber);
+                }
+            }
+        }
+
+        $sourceDocumentLabel = [
+            'INVOICE' => 'Factura',
+            'RECEIPT' => 'Boleta',
+            'SALES_ORDER' => 'Pedido',
+            'QUOTATION' => 'Cotizacion',
+            'CREDIT_NOTE' => 'N. Credito',
+            'DEBIT_NOTE' => 'N. Debito',
+        ][strtoupper($sourceDocumentKind)] ?? ($sourceDocumentKind !== '' ? $sourceDocumentKind : '-');
+
+        $noteReasonCode = trim((string) ($metadata['note_reason_code'] ?? ''));
+        $noteReasonDescription = trim((string) ($metadata['note_reason_description'] ?? ''));
 
         $issueDate = $this->formatDisplayDate((string) ($doc->issue_at ?? ''));
         $dueDate = $this->formatDisplayDate((string) ($doc->due_at ?? ''));
@@ -1427,6 +1465,11 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'paymentBreakdown' => $paymentBreakdown,
             'guideNo' => $guideNo,
             'electronicSignature' => $electronicSignature,
+            'isNoteDocument' => $isNoteDocument,
+            'sourceDocumentLabel' => $sourceDocumentLabel,
+            'sourceDocumentNumber' => $sourceDocumentNumber,
+            'noteReasonCode' => $noteReasonCode,
+            'noteReasonDescription' => $noteReasonDescription,
             'currency' => (string) ($doc->currency_symbol ?? 'S/'),
             'currencyCode' => (string) ($doc->currency_code ?? 'PEN'),
             'subtotal' => number_format($subtotal, 2, '.', ''),
@@ -1516,14 +1559,14 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     private function buildSalesPrintHtmlCacheKey(int $companyId, int $documentId, string $format): string
     {
         $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
-        return "sales:print:html:{$companyId}:{$documentId}:{$format}:v{$version}";
+        return "sales:print:html:tpl2:{$companyId}:{$documentId}:{$format}:v{$version}";
     }
 
     private function buildSalesPrintPdfCacheKey(int $companyId, int $documentId, string $format, bool $isPublicPdfLink): string
     {
         $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
         $visibility = $isPublicPdfLink ? 'public' : 'private';
-        return "sales:print:pdf:{$companyId}:{$documentId}:{$format}:{$visibility}:v{$version}";
+        return "sales:print:pdf:tpl2:{$companyId}:{$documentId}:{$format}:{$visibility}:v{$version}";
     }
 
     private function invalidateSalesPrintCache(int $companyId, int $documentId): void

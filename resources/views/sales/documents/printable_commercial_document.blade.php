@@ -77,6 +77,10 @@
                 <tr>
                     <td>
                         <div class="line"><span class="k">NRO GUIA:</span><span class="v">{{ $guideNo ?: '-' }}</span></div>
+                        @if (!empty($isNoteDocument))
+                            <div class="line"><span class="k">DOC. AFECTADO:</span><span class="v">{{ trim(($sourceDocumentLabel ?? '-') . ' ' . ($sourceDocumentNumber ?? '-')) }}</span></div>
+                            <div class="line"><span class="k">TIPO DE NOTA:</span><span class="v">{{ trim(($noteReasonCode ?? '-') . (!empty($noteReasonDescription) ? (' - ' . $noteReasonDescription) : '')) }}</span></div>
+                        @endif
                         <div class="line"><span class="k">VENDEDOR:</span><span class="v"></span></div>
                         @foreach (($paymentBreakdown ?? []) as $paymentRow)
                             <div class="line"><span class="k">PAGO {{ $paymentRow['method'] }}:</span><span class="v">{{ $currency }} {{ $paymentRow['amount'] }}</span></div>
@@ -159,6 +163,10 @@
         <div class="ticket-row"><div class="ticket-label">CLIENTE:</div><div class="ticket-value">{{ $customer }}</div></div>
         <div class="ticket-row"><div class="ticket-label">DOC.:</div><div class="ticket-value">{{ $customerDoc ?: '-' }}</div></div>
         <div class="ticket-row"><div class="ticket-label">NRO GUIA:</div><div class="ticket-value">{{ $guideNo ?: '-' }}</div></div>
+        @if (!empty($isNoteDocument))
+            <div class="ticket-row"><div class="ticket-label">DOC. AFECTADO:</div><div class="ticket-value">{{ trim(($sourceDocumentLabel ?? '-') . ' ' . ($sourceDocumentNumber ?? '-')) }}</div></div>
+            <div class="ticket-row"><div class="ticket-label">TIPO DE NOTA:</div><div class="ticket-value">{{ trim(($noteReasonCode ?? '-') . (!empty($noteReasonDescription) ? (' - ' . $noteReasonDescription) : '')) }}</div></div>
+        @endif
         <div class="ticket-row"><div class="ticket-label">DIRECCION:</div><div class="ticket-value">{{ $customerAddress ?: '-' }}</div></div>
         @if ($showVehicleInfo)<div class="ticket-row"><div class="ticket-label">TEL.:</div><div class="ticket-value">{{ $customerPhone ?: '-' }}</div></div>@endif
         @if ($showVehicleInfo && !empty($vehicleInfo))<div class="ticket-row"><div class="ticket-label">VEHICULO:</div><div class="ticket-value">{{ $vehicleInfo }}</div></div>@endif

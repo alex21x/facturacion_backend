@@ -17,6 +17,7 @@ use App\Http\Responses\Sales\PrintableCommercialDocumentResponse;
 use App\Services\Sales\Documents\SalesDocumentException;
 use App\Services\Sales\Presenters\TaxBridgeResponsePresenter;
 use App\Services\Sales\TaxBridge\TaxBridgeException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Http\Request;
 use Throwable;
 
@@ -370,6 +371,11 @@ class SalesDocumentController extends Controller
         $authUser = $request->attributes->get('auth_user');
         $companyId = (int) $request->attributes->get('resolved_company_id');
 
+        // Bulk SUNAT operations can exceed default PHP execution limits in cloud runtimes.
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(600);
+        }
+
         try {
             $result = $this->salesDocumentApplicationService->bulkSunatAnnulmentFromReport(
                 $authUser,
@@ -380,6 +386,17 @@ class SalesDocumentController extends Controller
             return response()->json([
                 'message' => $e->getMessage(),
             ], $e->httpStatus());
+        } catch (Throwable $e) {
+            Log::error('bulk.sunat.annulment.unhandled', [
+                'company_id' => $companyId,
+                'user_id' => (int) ($authUser->id ?? 0),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Fallo inesperado en anulacion masiva SUNAT',
+                'error' => $e->getMessage(),
+            ], 500);
         }
 
         return response()->json([

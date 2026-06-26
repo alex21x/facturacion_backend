@@ -172,6 +172,7 @@ class CommercialDocumentRepository implements CommercialDocumentRepositoryInterf
             ->where('d.company_id', $companyId)
             ->where('d.document_kind', $documentKind)
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->whereRaw("UPPER(COALESCE(d.metadata->>'sunat_status', '')) <> 'REJECTED'")
             ->whereRaw("COALESCE((d.metadata->>'source_document_id')::BIGINT, 0) = ?", [$sourceDocumentId])
             ->sum('d.total'));
     }

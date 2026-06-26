@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Mail;
 class TaxBridgeService
 {
     private const RECONCILE_WARN_ATTEMPTS = 8;
+    private array $tableExistsCache = [];
 
     public function __construct(
         private TaxBridgePayloadBuilder $payloadBuilder,
@@ -348,9 +349,14 @@ class TaxBridgeService
         $metadata = json_decode((string) ($document->metadata ?? '{}'), true);
         $metadata = is_array($metadata) ? $metadata : [];
         $sunatStatus = strtoupper(trim((string) ($metadata['sunat_status'] ?? '')));
+        $sunatVoidStatus = strtoupper(trim((string) ($metadata['sunat_void_status'] ?? '')));
 
         if ($sunatStatus !== 'ACCEPTED') {
             throw new TaxBridgeException('SUNAT void communication requires accepted tributary document', 422);
+        }
+
+        if ($sunatVoidStatus === 'ACCEPTED') {
+            throw new TaxBridgeException('SUNAT void communication already accepted for this document', 422);
         }
 
         $config = $this->resolveConfig($companyId, $document->branch_id !== null ? (int) $document->branch_id : null);
@@ -372,7 +378,7 @@ class TaxBridgeService
             throw new TaxBridgeException('Failed to build tax bridge payload for void communication', 500);
         }
 
-        $voidNumber = $this->nextVoidCommunicationNumber($companyId);
+        $voidNumber = $this->resolveReusableVoidCommunicationNumber($metadata) ?? $this->nextVoidCommunicationNumber($companyId);
         $payload['anulado'] = [
             'numero' => $voidNumber,
             'motivo' => trim((string) ($reason ?? '')),
@@ -383,10 +389,16 @@ class TaxBridgeService
             $payloadJson = '{}';
         }
 
+        $voidRequestedAt = trim((string) ($metadata['sunat_void_requested_at'] ?? ''));
+        if ($voidRequestedAt === '') {
+            $voidRequestedAt = now()->toDateTimeString();
+        }
+
         $this->updateDocumentTaxStatus($companyId, $documentId, [
             'sunat_void_status' => 'SENDING',
             'sunat_void_label' => 'Comunicando baja a SUNAT',
-            'sunat_void_requested_at' => now()->toDateTimeString(),
+            'sunat_void_requested_at' => $voidRequestedAt,
+            'sunat_void_retry_at' => now()->toDateTimeString(),
             'sunat_void_number' => $voidNumber,
             'sunat_void_endpoint' => $endpoint,
             'sunat_void_reason' => trim((string) ($reason ?? '')),
@@ -2327,10 +2339,24 @@ class TaxBridgeService
 
     private function tableExists(string $schema, string $table): bool
     {
-        return DB::table('information_schema.tables')
-            ->where('table_schema', $schema)
-            ->where('table_name', $table)
-            ->exists();
+        $cacheKey = strtolower(trim($schema)) . '.' . strtolower(trim($table));
+
+        if (array_key_exists($cacheKey, $this->tableExistsCache)) {
+            return (bool) $this->tableExistsCache[$cacheKey];
+        }
+
+        try {
+            $exists = DB::table('information_schema.tables')
+                ->where('table_schema', $schema)
+                ->where('table_name', $table)
+                ->exists();
+        } catch (\Throwable $e) {
+            $exists = false;
+        }
+
+        $this->tableExistsCache[$cacheKey] = (bool) $exists;
+
+        return (bool) $exists;
     }
 
     private function isBridgeNullLikeResponse($decoded, string $raw): bool
@@ -2416,15 +2442,92 @@ class TaxBridgeService
     private function nextVoidCommunicationNumber(int $companyId): int
     {
         $today = now()->toDateString();
-        $from = $today . ' 00:00:00';
-        $to = $today . ' 23:59:59.999999';
 
-        $todayCount = DB::table('sales.commercial_documents')
+        return DB::transaction(function () use ($companyId, $today): int {
+            $this->acquireCompanyDateSequenceLock($companyId, $today, 'VOID_COMM');
+
+            try {
+                $row = DB::table('sales.void_communication_sequences')
+                    ->where('company_id', $companyId)
+                    ->where('sequence_date', $today)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($row) {
+                    $next = ((int) ($row->last_number ?? 0)) + 1;
+
+                    DB::table('sales.void_communication_sequences')
+                        ->where('company_id', $companyId)
+                        ->where('sequence_date', $today)
+                        ->update([
+                            'last_number' => $next,
+                            'updated_at' => now(),
+                        ]);
+
+                    return $next;
+                }
+
+                $seed = $this->resolveVoidCommunicationSeed($companyId, $today);
+
+                DB::table('sales.void_communication_sequences')->insert([
+                    'company_id' => $companyId,
+                    'sequence_date' => $today,
+                    'last_number' => $seed,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                return $seed;
+            } catch (\Illuminate\Database\QueryException $e) {
+                if ($this->isMissingTableError($e)) {
+                    return $this->resolveVoidCommunicationSeed($companyId, $today);
+                }
+
+                throw $e;
+            }
+        });
+    }
+
+    private function isMissingTableError(\Illuminate\Database\QueryException $exception): bool
+    {
+        $sqlState = strtoupper((string) ($exception->errorInfo[0] ?? $exception->getCode() ?? ''));
+
+        return in_array($sqlState, ['42P01', '42S02'], true);
+    }
+
+    private function resolveVoidCommunicationSeed(int $companyId, string $date): int
+    {
+        $maxFromMetadata = DB::table('sales.commercial_documents')
             ->where('company_id', $companyId)
-            ->whereBetween('updated_at', [$from, $to])
-            ->count();
+            ->whereRaw("LEFT(COALESCE(metadata->>'sunat_void_requested_at', ''), 10) = ?", [$date])
+            ->whereRaw("COALESCE(metadata->>'sunat_void_number', '') ~ '^[0-9]+$'")
+            ->max(DB::raw("(metadata->>'sunat_void_number')::BIGINT"));
 
-        return max(1, (int) $todayCount + 1);
+        $resolved = (int) ($maxFromMetadata ?? 0);
+
+        return $resolved > 0 ? ($resolved + 1) : 1;
+    }
+
+    private function resolveReusableVoidCommunicationNumber(array $metadata): ?int
+    {
+        $rawNumber = trim((string) ($metadata['sunat_void_number'] ?? ''));
+        if ($rawNumber === '' || preg_match('/^[0-9]+$/', $rawNumber) !== 1) {
+            return null;
+        }
+
+        $number = (int) $rawNumber;
+
+        return $number > 0 ? $number : null;
+    }
+
+    private function acquireCompanyDateSequenceLock(int $companyId, string $date, string $scope): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
+        $lockKey = (int) sprintf('%u', crc32($scope . ':' . $companyId . ':' . $date));
+        DB::select('SELECT pg_advisory_xact_lock(?)', [$lockKey]);
     }
 
     public function settleInventoryForAcceptedDocumentIfNeeded(int $companyId, int $documentId): void

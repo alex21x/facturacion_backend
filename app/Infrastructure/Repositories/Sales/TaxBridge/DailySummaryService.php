@@ -293,71 +293,94 @@ class DailySummaryService
 
         $documentIds = array_values(array_unique(array_map('intval', $documentIds)));
 
-        // Validate all supplied IDs are eligible
-        $validCount = DB::table('sales.commercial_documents')
-            ->where('company_id', $companyId)
-            ->whereIn('id', $documentIds)
-            ->where('document_kind', 'RECEIPT')
-            ->count();
+        $summaryId = DB::transaction(function () use (
+            $companyId,
+            $summaryType,
+            $summaryDate,
+            $documentIds,
+            $createdBy,
+            $branchId,
+            $notes
+        ) {
+            $this->acquireSummaryCorrelationLock($companyId, $summaryType, $summaryDate);
 
-        if ($validCount !== count($documentIds)) {
-            throw new TaxBridgeException('One or more selected documents are not valid RECEIPTs for this company', 422);
+            // Validate all supplied IDs are eligible.
+            $validCount = DB::table('sales.commercial_documents')
+                ->where('company_id', $companyId)
+                ->whereIn('id', $documentIds)
+                ->where('document_kind', 'RECEIPT')
+                ->count();
+
+            if ($validCount !== count($documentIds)) {
+                throw new TaxBridgeException('One or more selected documents are not valid RECEIPTs for this company', 422);
+            }
+
+            // Check none are already locked in an active summary.
+            $alreadyLocked = DB::table('sales.daily_summary_items as dsi')
+                ->join('sales.daily_summaries as ds', 'ds.id', '=', 'dsi.summary_id')
+                ->where('ds.company_id', $companyId)
+                ->where('ds.summary_type', $summaryType)
+                ->whereIn('ds.status', [self::STATUS_DRAFT, self::STATUS_SENDING, self::STATUS_SENT, self::STATUS_ACCEPTED])
+                ->whereIn('dsi.document_id', $documentIds)
+                ->count();
+
+            if ($alreadyLocked > 0) {
+                throw new TaxBridgeException('One or more selected documents are already assigned to an active daily summary', 422);
+            }
+
+            $correlationNumber = (int) DB::table('sales.daily_summaries')
+                ->where('company_id', $companyId)
+                ->where('summary_type', $summaryType)
+                ->where('summary_date', $summaryDate)
+                ->max('correlation_number') + 1;
+
+            $prefix = $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA';
+            $datePart = str_replace('-', '', $summaryDate);
+            $identifier = sprintf('%s-%s-%03d', $prefix, $datePart, $correlationNumber);
+
+            $summaryId = DB::table('sales.daily_summaries')->insertGetId([
+                'company_id'         => $companyId,
+                'branch_id'          => $branchId,
+                'summary_type'       => $summaryType,
+                'summary_date'       => $summaryDate,
+                'correlation_number' => $correlationNumber,
+                'identifier'         => $identifier,
+                'status'             => self::STATUS_DRAFT,
+                'notes'              => $notes,
+                'created_by'         => $createdBy,
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ]);
+
+            $itemStatus = $summaryType === self::TYPE_DECLARATION ? 1 : 3;
+            $now = now();
+            $inserts = array_map(fn ($docId) => [
+                'summary_id'  => $summaryId,
+                'document_id' => $docId,
+                'item_status' => $itemStatus,
+                'created_at'  => $now,
+            ], $documentIds);
+
+            DB::table('sales.daily_summary_items')->insert($inserts);
+
+            foreach ($documentIds as $docId) {
+                $this->updateDocumentSummaryMetadata($companyId, (int) $docId, $summaryType, (int) $summaryId);
+            }
+
+            return $summaryId;
+        });
+
+        return $this->show($companyId, (int) $summaryId) ?? [];
+    }
+
+    private function acquireSummaryCorrelationLock(int $companyId, int $summaryType, string $summaryDate): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
         }
 
-        // Check none are already locked in an active summary
-        $alreadyLocked = DB::table('sales.daily_summary_items as dsi')
-            ->join('sales.daily_summaries as ds', 'ds.id', '=', 'dsi.summary_id')
-            ->where('ds.company_id', $companyId)
-            ->where('ds.summary_type', $summaryType)
-            ->whereIn('ds.status', [self::STATUS_DRAFT, self::STATUS_SENDING, self::STATUS_SENT, self::STATUS_ACCEPTED])
-            ->whereIn('dsi.document_id', $documentIds)
-            ->count();
-
-        if ($alreadyLocked > 0) {
-            throw new TaxBridgeException('One or more selected documents are already assigned to an active daily summary', 422);
-        }
-
-        // Determine correlation number (sequential per company+type+date)
-        $correlationNumber = (int) DB::table('sales.daily_summaries')
-            ->where('company_id', $companyId)
-            ->where('summary_type', $summaryType)
-            ->where('summary_date', $summaryDate)
-            ->max('correlation_number') + 1;
-
-        $prefix     = $summaryType === self::TYPE_DECLARATION ? 'RC' : 'RA';
-        $datePart   = str_replace('-', '', $summaryDate);  // YYYYMMDD
-        $identifier = sprintf('%s-%s-%03d', $prefix, $datePart, $correlationNumber);
-
-        $summaryId = DB::table('sales.daily_summaries')->insertGetId([
-            'company_id'         => $companyId,
-            'branch_id'          => $branchId,
-            'summary_type'       => $summaryType,
-            'summary_date'       => $summaryDate,
-            'correlation_number' => $correlationNumber,
-            'identifier'         => $identifier,
-            'status'             => self::STATUS_DRAFT,
-            'notes'              => $notes,
-            'created_by'         => $createdBy,
-            'created_at'         => now(),
-            'updated_at'         => now(),
-        ]);
-
-        $itemStatus = $summaryType === self::TYPE_DECLARATION ? 1 : 3;
-        $now = now();
-        $inserts = array_map(fn($docId) => [
-            'summary_id'  => $summaryId,
-            'document_id' => $docId,
-            'item_status' => $itemStatus,
-            'created_at'  => $now,
-        ], $documentIds);
-
-        DB::table('sales.daily_summary_items')->insert($inserts);
-
-        foreach ($documentIds as $docId) {
-            $this->updateDocumentSummaryMetadata($companyId, (int) $docId, $summaryType, (int) $summaryId);
-        }
-
-        return $this->show($companyId, $summaryId) ?? [];
+        $key = (int) sprintf('%u', crc32('DAILY_SUMMARY:' . $companyId . ':' . $summaryType . ':' . $summaryDate));
+        DB::select('SELECT pg_advisory_xact_lock(?)', [$key]);
     }
 
     /**

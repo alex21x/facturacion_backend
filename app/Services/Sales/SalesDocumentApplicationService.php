@@ -31,6 +31,8 @@ use Illuminate\Support\Carbon;
 
 class SalesDocumentApplicationService implements SalesDocumentApplicationServiceInterface
 {
+    private const SALES_PRINT_TEMPLATE_SIGNATURE = 'tpl3';
+
     public function __construct(
         private SalesDocumentReadService $salesDocumentReadService,
         private SalesLookupService $salesLookupService,
@@ -1202,7 +1204,12 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                 $printCacheService = app(\App\Infrastructure\Repositories\Sales\Documents\CommercialDocumentPrintCacheService::class);
                 $cachedHtml = $printCacheService->getCachedHtml($documentId, $normalizedFormat);
                 if ($cachedHtml !== null) {
-                    return $cachedHtml;
+                    if (str_contains($cachedHtml, '<!--sales-print-template:' . self::SALES_PRINT_TEMPLATE_SIGNATURE . '-->')) {
+                        return $cachedHtml;
+                    }
+
+                    // Evita seguir sirviendo HTML persistido por una plantilla antigua.
+                    $printCacheService->invalidateDocumentCache($documentId);
                 }
             } catch (\Throwable $e) {
                 \Log::debug('Document print cache lookup failed', ['error' => $e->getMessage()]);
@@ -1250,19 +1257,36 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         }
 
         $documentKindRaw = strtoupper(trim((string) ($doc->document_kind ?? 'DOCUMENTO')));
+        $noteBaseKind = null;
+        if ($documentKindRaw === 'CREDIT_NOTE' || str_starts_with($documentKindRaw, 'CREDIT_NOTE_')) {
+            $noteBaseKind = 'CREDIT_NOTE';
+        } elseif ($documentKindRaw === 'DEBIT_NOTE' || str_starts_with($documentKindRaw, 'DEBIT_NOTE_')) {
+            $noteBaseKind = 'DEBIT_NOTE';
+        }
+
         $documentKindLabel = [
             'INVOICE' => 'FACTURA ELECTRONICA',
             'RECEIPT' => 'BOLETA DE VENTA ELECTRONICA',
-            'CREDIT_NOTE' => 'NOTA DE CREDITO',
-            'DEBIT_NOTE' => 'NOTA DE DEBITO',
             'SALES_ORDER' => 'PEDIDO DE VENTA',
             'QUOTATION' => 'COTIZACION',
         ][$documentKindRaw] ?? ($documentKindRaw !== '' ? $documentKindRaw : 'DOCUMENTO');
-        $isNoteDocument = in_array($documentKindRaw, ['CREDIT_NOTE', 'DEBIT_NOTE'], true);
+
+        if ($noteBaseKind === 'CREDIT_NOTE') {
+            $documentKindLabel = 'NOTA DE CREDITO';
+        } elseif ($noteBaseKind === 'DEBIT_NOTE') {
+            $documentKindLabel = 'NOTA DE DEBITO';
+        }
+
+        $isNoteDocument = $noteBaseKind !== null;
 
         $sourceDocumentKind = trim((string) ($metadata['source_document_kind'] ?? ''));
         $sourceDocumentNumber = trim((string) ($metadata['source_document_number'] ?? ''));
-        $sourceDocumentId = (int) ($metadata['source_document_id'] ?? 0);
+        $sourceDocumentId = (int) (
+            $metadata['source_document_id']
+            ?? ($doc->source_document_id ?? null)
+            ?? ($doc->reference_document_id ?? null)
+            ?? 0
+        );
 
         if (($sourceDocumentKind === '' || $sourceDocumentNumber === '') && $sourceDocumentId > 0) {
             $sourceDocument = DB::table('sales.commercial_documents')
@@ -1292,8 +1316,22 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'DEBIT_NOTE' => 'N. Debito',
         ][strtoupper($sourceDocumentKind)] ?? ($sourceDocumentKind !== '' ? $sourceDocumentKind : '-');
 
-        $noteReasonCode = trim((string) ($metadata['note_reason_code'] ?? ''));
+        $noteReasonCode = trim((string) (
+            $metadata['note_reason_code']
+            ?? ($doc->reference_reason_code ?? '')
+        ));
         $noteReasonDescription = trim((string) ($metadata['note_reason_description'] ?? ''));
+
+        if ($isNoteDocument && $noteReasonDescription === '' && $noteReasonCode !== '') {
+            $noteReasons = $this->salesLookupService->resolveDocumentNoteReasonsRows($noteBaseKind);
+            foreach ($noteReasons as $noteReason) {
+                $candidateCode = strtoupper(trim((string) ($noteReason['code'] ?? '')));
+                if ($candidateCode === strtoupper($noteReasonCode)) {
+                    $noteReasonDescription = trim((string) ($noteReason['description'] ?? ''));
+                    break;
+                }
+            }
+        }
 
         $issueDate = $this->formatDisplayDate((string) ($doc->issue_at ?? ''));
         $dueDate = $this->formatDisplayDate((string) ($doc->due_at ?? ''));
@@ -1436,7 +1474,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'format' => $normalizedFormat,
         ]);
 
-        return view('sales.documents.printable_commercial_document', [
+        $html = view('sales.documents.printable_commercial_document', [
             'format' => $normalizedFormat,
             'companyName' => $companyName,
             'companyTaxId' => $companyTaxId,
@@ -1482,6 +1520,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'paymentBrandIcons' => $paymentBrandIcons,
             'rows' => $rows,
         ])->render();
+
+        return '<!--sales-print-template:' . self::SALES_PRINT_TEMPLATE_SIGNATURE . '-->' . $html;
     }
 
     private function resolvePaymentBrandLogoSources(): array
@@ -1559,14 +1599,14 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
     private function buildSalesPrintHtmlCacheKey(int $companyId, int $documentId, string $format): string
     {
         $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
-        return "sales:print:html:tpl2:{$companyId}:{$documentId}:{$format}:v{$version}";
+        return "sales:print:html:" . self::SALES_PRINT_TEMPLATE_SIGNATURE . ":{$companyId}:{$documentId}:{$format}:v{$version}";
     }
 
     private function buildSalesPrintPdfCacheKey(int $companyId, int $documentId, string $format, bool $isPublicPdfLink): string
     {
         $version = $this->resolveSalesPrintCacheVersion($companyId, $documentId);
         $visibility = $isPublicPdfLink ? 'public' : 'private';
-        return "sales:print:pdf:tpl2:{$companyId}:{$documentId}:{$format}:{$visibility}:v{$version}";
+        return "sales:print:pdf:" . self::SALES_PRINT_TEMPLATE_SIGNATURE . ":{$companyId}:{$documentId}:{$format}:{$visibility}:v{$version}";
     }
 
     private function invalidateSalesPrintCache(int $companyId, int $documentId): void

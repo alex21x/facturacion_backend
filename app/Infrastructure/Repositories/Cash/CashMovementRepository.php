@@ -31,10 +31,6 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
             ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
             ->leftJoin('auth.users as u_src', 'u_src.id', '=', 'dsrc.created_by')
-            ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
-            ->leftJoin('sales.document_kinds as dk_cd_code', function ($join): void {
-                $join->whereRaw('UPPER(dk_cd_code.code) = UPPER(cd.document_kind)');
-            })
             ->leftJoin('sales.document_kinds as dk_src', 'dk_src.id', '=', 'dsrc.document_kind_id')
             ->leftJoin('sales.document_kinds as dk_src_code', function ($join): void {
                 $join->whereRaw('UPPER(dk_src_code.code) = UPPER(dsrc.document_kind)');

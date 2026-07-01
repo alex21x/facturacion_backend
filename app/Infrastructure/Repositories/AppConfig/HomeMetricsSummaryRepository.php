@@ -14,10 +14,24 @@ class HomeMetricsSummaryRepository
         ?int $branchId,
         ?int $warehouseId
     ) {
+        $documentKindBaseExpr = "CASE
+            WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
+            WHEN UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind)) LIKE 'DEBIT_NOTE_%' THEN 'DEBIT_NOTE'
+            ELSE UPPER(COALESCE(dk_id.code, dk_legacy.code, d.document_kind))
+        END";
+
         return DB::table('sales.commercial_documents as d')
-            ->selectRaw($bucketExpression . ' as bucket_key, COALESCE(SUM(COALESCE(d.total, 0)), 0) as amount')
+            ->leftJoin('sales.document_kinds as dk_id', 'dk_id.id', '=', 'd.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_legacy', function ($join): void {
+                $join->on(DB::raw('UPPER(dk_legacy.code)'), '=', DB::raw('UPPER(d.document_kind)'));
+            })
+            ->selectRaw($bucketExpression . " as bucket_key, COALESCE(SUM(CASE
+                WHEN ({$documentKindBaseExpr}) = 'CREDIT_NOTE' THEN -ABS(COALESCE(d.total, 0))
+                ELSE ABS(COALESCE(d.total, 0))
+            END), 0) as amount")
             ->where('d.company_id', $companyId)
             ->whereNotIn('d.status', ['VOID', 'CANCELED'])
+            ->whereRaw("({$documentKindBaseExpr}) IN ('INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE')")
             ->whereBetween('d.issue_at', [$from, $to])
             ->when($branchId !== null, function ($query) use ($branchId) {
                 $query->where('d.branch_id', $branchId);

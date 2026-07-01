@@ -20,6 +20,10 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->whereIn('cm.ref_type', $documentRefTypes);
             })
+            ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
+            ->leftJoin('sales.document_kinds as dk_cd_code', function ($join): void {
+                $join->whereRaw('UPPER(dk_cd_code.code) = UPPER(cd.document_kind)');
+            })
             ->leftJoin('sales.commercial_documents as dsrc', function ($join): void {
                 $join->on('dsrc.company_id', '=', 'cd.company_id')
                     ->whereRaw("dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)");
@@ -39,7 +43,13 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 'cm.id',
                 'cm.cash_register_id',
                 'cm.cash_session_id',
-                DB::raw("CASE WHEN cm.movement_type = 'INCOME' THEN 'IN' WHEN cm.movement_type = 'EXPENSE' THEN 'OUT' ELSE cm.movement_type END as movement_type"),
+                DB::raw("CASE
+                    WHEN UPPER(COALESCE(dk_cd.code, dk_cd_code.code, cd.document_kind, '')) LIKE 'CREDIT_NOTE%' THEN 'OUT'
+                    WHEN UPPER(COALESCE(dk_cd.code, dk_cd_code.code, cd.document_kind, '')) LIKE 'DEBIT_NOTE%' THEN 'IN'
+                    WHEN cm.movement_type = 'INCOME' THEN 'IN'
+                    WHEN cm.movement_type = 'EXPENSE' THEN 'OUT'
+                    ELSE cm.movement_type
+                END as movement_type"),
                 'cm.amount',
                 DB::raw('COALESCE(cm.description, cm.notes) as description'),
                 'cm.ref_type',
@@ -331,12 +341,14 @@ class CashMovementRepository implements CashMovementRepositoryInterface
 
         $desc = 'Cobro doc ' . $label . ' ' . $document->series . '-' . $document->number;
 
+        $movementType = $this->resolveMovementTypeForDocumentKind((string) ($document->document_kind ?? ''));
+
         DB::table('sales.cash_movements')->insert([
             'company_id' => $companyId,
             'branch_id' => $document->branch_id ?? $session->branch_id,
             'cash_register_id' => (int) $session->cash_register_id,
             'cash_session_id' => (int) $session->id,
-            'movement_type' => 'INCOME',
+            'movement_type' => $movementType,
             'payment_method_id' => $document->payment_method_id,
             'amount' => round($amount, 4),
             'description' => $desc,
@@ -376,6 +388,17 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             })
             ->whereIn('cm.movement_type', $movementTypes)
             ->sum('cm.amount');
+    }
+
+    private function resolveMovementTypeForDocumentKind(string $documentKind): string
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized === 'CREDIT_NOTE' || str_starts_with($normalized, 'CREDIT_NOTE_')) {
+            return 'EXPENSE';
+        }
+
+        return 'INCOME';
     }
 
     public function recalcExpectedBalance(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): void

@@ -37,12 +37,14 @@ class SalesDocumentCashPostingService
             return;
         }
 
+        $movementType = $this->resolveMovementTypeForDocumentKind($documentKind);
+
         $alreadyPosted = DB::table('sales.cash_movements')
             ->where('company_id', $companyId)
             ->where('cash_session_id', (int) $session->id)
             ->where('ref_type', 'COMMERCIAL_DOCUMENT')
             ->where('ref_id', $documentId)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->whereIn('movement_type', ['IN', 'INCOME', 'OUT', 'EXPENSE'])
             ->exists();
 
         if ($alreadyPosted) {
@@ -93,7 +95,7 @@ class SalesDocumentCashPostingService
                 'branch_id' => $branchId,
                 'cash_register_id' => $cashRegisterId,
                 'cash_session_id' => (int) $session->id,
-                'movement_type' => 'INCOME',
+                'movement_type' => $movementType,
                 'payment_method_id' => $paymentRow['payment_method_id'],
                 'amount' => (float) $paymentRow['amount'],
                 'description' => $description,
@@ -132,5 +134,16 @@ class SalesDocumentCashPostingService
         $row = DB::selectOne('select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present', [$schema, $table]);
 
         return isset($row->present) && (bool) $row->present;
+    }
+
+    private function resolveMovementTypeForDocumentKind(string $documentKind): string
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized === 'CREDIT_NOTE' || str_starts_with($normalized, 'CREDIT_NOTE_')) {
+            return 'EXPENSE';
+        }
+
+        return 'INCOME';
     }
 }

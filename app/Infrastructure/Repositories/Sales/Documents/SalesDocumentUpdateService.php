@@ -1004,11 +1004,13 @@ class SalesDocumentUpdateService
             return;
         }
 
+        $movementType = $this->resolveCashMovementTypeForDocumentKind($documentKind);
+
         $existingRows = DB::table('sales.cash_movements')
             ->where('company_id', $companyId)
             ->where('ref_type', 'COMMERCIAL_DOCUMENT')
             ->where('ref_id', $documentId)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->whereIn('movement_type', ['IN', 'INCOME', 'OUT', 'EXPENSE'])
             ->orderBy('id')
             ->get();
 
@@ -1025,7 +1027,7 @@ class SalesDocumentUpdateService
             ->where('company_id', $companyId)
             ->where('ref_type', 'COMMERCIAL_DOCUMENT')
             ->where('ref_id', $documentId)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
+            ->whereIn('movement_type', ['IN', 'INCOME', 'OUT', 'EXPENSE'])
             ->delete();
 
         if ($paidTotal > 0) {
@@ -1062,13 +1064,13 @@ class SalesDocumentUpdateService
             $description = 'Cobro doc ' . ($labelMap[strtoupper(trim($documentKind))] ?? $documentKind) . ' ' . $series . '-' . $number;
             $movementAt = now();
 
-            $insertRows = $paidBreakdown->map(function (array $row) use ($companyId, $branchId, $cashRegisterId, $sessionId, $description, $documentId, $userId, $movementAt) {
+            $insertRows = $paidBreakdown->map(function (array $row) use ($companyId, $branchId, $cashRegisterId, $sessionId, $description, $documentId, $userId, $movementAt, $movementType) {
                 return [
                     'company_id' => $companyId,
                     'branch_id' => $branchId,
                     'cash_register_id' => $cashRegisterId,
                     'cash_session_id' => $sessionId,
-                    'movement_type' => 'INCOME',
+                    'movement_type' => $movementType,
                     'payment_method_id' => $row['payment_method_id'],
                     'amount' => (float) $row['amount'],
                     'description' => $description,
@@ -1127,6 +1129,17 @@ class SalesDocumentUpdateService
         $row = DB::selectOne('select exists (select 1 from information_schema.tables where table_schema = ? and table_name = ?) as present', [$schema, $table]);
 
         return isset($row->present) && (bool) $row->present;
+    }
+
+    private function resolveCashMovementTypeForDocumentKind(string $documentKind): string
+    {
+        $normalized = strtoupper(trim($documentKind));
+
+        if ($normalized === 'CREDIT_NOTE' || str_starts_with($normalized, 'CREDIT_NOTE_')) {
+            return 'EXPENSE';
+        }
+
+        return 'INCOME';
     }
 
     private function tableExistsBySchemaAndName(string $schema, string $table): bool

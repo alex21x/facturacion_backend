@@ -133,9 +133,9 @@
             <div class="words"><strong>SON:</strong> {{ $totalWords }}</div>
             <div class="totals">
                 <table>
-                    <tr><td class="k2">OP. GRAVADAS</td><td class="v2">{{ $currency }} {{ $subtotal }}</td></tr>
-                    <tr><td class="k2">OP. INAFECTAS</td><td class="v2">{{ $currency }} 0.00</td></tr>
-                    <tr><td class="k2">OP. EXONERADAS</td><td class="v2">{{ $currency }} 0.00</td></tr>
+                    <tr><td class="k2">OP. GRAVADAS</td><td class="v2">{{ $currency }} {{ $gravadaTotal ?? $subtotal }}</td></tr>
+                    <tr><td class="k2">OP. INAFECTAS</td><td class="v2">{{ $currency }} {{ $inafectaTotal ?? '0.00' }}</td></tr>
+                    <tr><td class="k2">OP. EXONERADAS</td><td class="v2">{{ $currency }} {{ $exoneradaTotal ?? '0.00' }}</td></tr>
                     <tr><td class="k2">IGV</td><td class="v2">{{ $currency }} {{ $taxTotal }}</td></tr>
                     <tr class="grand"><td class="k2">TOTAL</td><td class="v2">{{ $currency }} {{ $grandTotal }}</td></tr>
                 </table>
@@ -195,6 +195,10 @@
         </table>
 
         <div class="ticket-summary">
+            <div class="ticket-summary-row"><span>OP. GRAVADAS</span><span>{{ $currency }} {{ $gravadaTotal ?? $subtotal }}</span></div>
+            <div class="ticket-summary-row"><span>OP. INAFECTAS</span><span>{{ $currency }} {{ $inafectaTotal ?? '0.00' }}</span></div>
+            <div class="ticket-summary-row"><span>OP. EXONERADAS</span><span>{{ $currency }} {{ $exoneradaTotal ?? '0.00' }}</span></div>
+            <div class="ticket-summary-row"><span>IGV</span><span>{{ $currency }} {{ $taxTotal }}</span></div>
             <div class="ticket-total"><span>TOTAL</span><span>{{ $currency }} {{ $grandTotal }}</span></div>
             <div class="ticket-words"><strong>SON:</strong> {{ $totalWords }}</div>
             @foreach (($paymentBreakdown ?? []) as $paymentRow)

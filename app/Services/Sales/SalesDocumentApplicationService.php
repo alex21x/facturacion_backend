@@ -1437,6 +1437,65 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
 
         $subtotal = (float) ($doc->subtotal ?? 0);
         $taxTotal = (float) ($doc->tax_total ?? 0);
+        $gravadaTotal = $subtotal;
+        $inafectaTotal = 0.0;
+        $exoneradaTotal = 0.0;
+
+        if (($subtotal <= 0.00001 || $taxTotal <= 0.00001) && $items->count() > 0) {
+            $allTaxCategories = collect($this->companyIgvRateService->applyActiveRateToTaxCategories(
+                $companyId,
+                $this->salesLookupService->resolveTaxCategoriesRows($companyId)
+            ));
+
+            $computedGravada = 0.0;
+            $computedInafecta = 0.0;
+            $computedExonerada = 0.0;
+            $computedTaxTotal = 0.0;
+
+            foreach ($items as $item) {
+                $taxCat = $item->tax_category_id ? $allTaxCategories->firstWhere('id', $item->tax_category_id) : null;
+                $taxLabel = strtoupper(trim((string) (is_array($taxCat) ? ($taxCat['label'] ?? 'Sin IGV') : 'Sin IGV')));
+                $taxCode = strtoupper(trim((string) (is_array($taxCat) ? ($taxCat['code'] ?? '') : '')));
+                $taxRate = (float) (is_array($taxCat) ? ($taxCat['rate_percent'] ?? 0) : 0);
+
+                $itemSubtotal = (float) ($item->subtotal ?? 0);
+                if ($itemSubtotal <= 0.00001) {
+                    $itemSubtotal = max(0.0, (float) ($item->total ?? 0) - (float) ($item->tax_total ?? 0));
+                }
+                $itemTaxTotal = (float) ($item->tax_total ?? 0);
+
+                $isGravada = $itemTaxTotal > 0.00001 || $taxRate > 0.00001
+                    || in_array($taxCode, ['10', '1000', 'IGV', 'VAT', 'GRAVADA'], true)
+                    || str_contains($taxLabel, 'IGV') || str_contains($taxLabel, 'GRAV');
+                $isExonerada = in_array($taxCode, ['20', '9997', 'EXONERADA'], true) || str_contains($taxLabel, 'EXONER');
+                $isInafecta = in_array($taxCode, ['30', '9998', 'INAFECTA'], true) || str_contains($taxLabel, 'INAFECT');
+
+                if ($isGravada) {
+                    $computedGravada += $itemSubtotal;
+                } elseif ($isExonerada) {
+                    $computedExonerada += $itemSubtotal;
+                } elseif ($isInafecta) {
+                    $computedInafecta += $itemSubtotal;
+                }
+
+                $computedTaxTotal += $itemTaxTotal;
+            }
+
+            if ($computedTaxTotal > 0.00001) {
+                $taxTotal = $computedTaxTotal;
+            }
+            if ($computedGravada > 0.00001 || $computedTaxTotal > 0.00001) {
+                $gravadaTotal = $computedGravada;
+                $inafectaTotal = $computedInafecta;
+                $exoneradaTotal = $computedExonerada;
+                $subtotal = max($subtotal, $computedGravada + $computedInafecta + $computedExonerada);
+            }
+        }
+
+        if ($gravadaTotal <= 0.00001 && $subtotal > 0.00001) {
+            $gravadaTotal = max(0.0, $subtotal - $inafectaTotal - $exoneradaTotal);
+        }
+
         $grandTotal = (float) ($doc->total ?? 0);
         $showProductCodes = $this->supportService->isCommerceFeatureEnabledForContextWithDefault(
             $companyId,
@@ -1511,6 +1570,9 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'currency' => (string) ($doc->currency_symbol ?? 'S/'),
             'currencyCode' => (string) ($doc->currency_code ?? 'PEN'),
             'subtotal' => number_format($subtotal, 2, '.', ''),
+            'gravadaTotal' => number_format($gravadaTotal, 2, '.', ''),
+            'inafectaTotal' => number_format($inafectaTotal, 2, '.', ''),
+            'exoneradaTotal' => number_format($exoneradaTotal, 2, '.', ''),
             'taxTotal' => number_format($taxTotal, 2, '.', ''),
             'grandTotal' => number_format($grandTotal, 2, '.', ''),
             'total' => number_format((float) ($doc->total ?? 0), 2, '.', ''),

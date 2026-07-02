@@ -2,10 +2,16 @@
 
 namespace App\Infrastructure\Repositories\Sales\Documents;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class SalesDocumentSupportService
 {
+    /** @var array<string, bool> */
+    private array $featureToggleMemo = [];
+
+    private ?bool $companyRoleProfilesTableExists = null;
+
     public function decodeDocumentMetadata($rawMetadata): array
     {
         if ($rawMetadata === null || $rawMetadata === '') {
@@ -32,36 +38,49 @@ class SalesDocumentSupportService
 
     public function isCommerceFeatureEnabledForContextWithDefault(int $companyId, ?int $branchId, string $featureCode, bool $defaultEnabled): bool
     {
-        $rows = $branchId !== null
-            ? DB::table('appcfg.branch_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('branch_id', $branchId)
-                ->where('feature_code', $featureCode)
-                ->selectRaw("'BRANCH' as scope, is_enabled")
-                ->unionAll(
-                    DB::table('appcfg.company_feature_toggles')
-                        ->where('company_id', $companyId)
-                        ->where('feature_code', $featureCode)
-                        ->selectRaw("'COMPANY' as scope, is_enabled")
-                )
-                ->get()
-            : DB::table('appcfg.company_feature_toggles')
-                ->where('company_id', $companyId)
-                ->where('feature_code', $featureCode)
-                ->selectRaw("'COMPANY' as scope, is_enabled")
-                ->get();
-
-        $branchRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'BRANCH');
-        if ($branchRow && $branchRow->is_enabled !== null) {
-            return (bool) $branchRow->is_enabled;
+        $memoKey = sprintf('%d:%s:%s:%d', $companyId, $branchId ?? 'all', $featureCode, $defaultEnabled ? 1 : 0);
+        if (array_key_exists($memoKey, $this->featureToggleMemo)) {
+            return $this->featureToggleMemo[$memoKey];
         }
 
-        $companyRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'COMPANY');
-        if ($companyRow && $companyRow->is_enabled !== null) {
-            return (bool) $companyRow->is_enabled;
-        }
+        $cacheKey = sprintf('sales:feature_toggle:%d:%s:%s:%d', $companyId, $branchId ?? 'all', $featureCode, $defaultEnabled ? 1 : 0);
 
-        return $defaultEnabled;
+        $resolved = Cache::remember($cacheKey, now()->addSeconds(15), function () use ($companyId, $branchId, $featureCode, $defaultEnabled): bool {
+            $rows = $branchId !== null
+                ? DB::table('appcfg.branch_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('branch_id', $branchId)
+                    ->where('feature_code', $featureCode)
+                    ->selectRaw("'BRANCH' as scope, is_enabled")
+                    ->unionAll(
+                        DB::table('appcfg.company_feature_toggles')
+                            ->where('company_id', $companyId)
+                            ->where('feature_code', $featureCode)
+                            ->selectRaw("'COMPANY' as scope, is_enabled")
+                    )
+                    ->get()
+                : DB::table('appcfg.company_feature_toggles')
+                    ->where('company_id', $companyId)
+                    ->where('feature_code', $featureCode)
+                    ->selectRaw("'COMPANY' as scope, is_enabled")
+                    ->get();
+
+            $branchRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'BRANCH');
+            if ($branchRow && $branchRow->is_enabled !== null) {
+                return (bool) $branchRow->is_enabled;
+            }
+
+            $companyRow = $rows->first(fn ($row) => strtoupper((string) ($row->scope ?? '')) === 'COMPANY');
+            if ($companyRow && $companyRow->is_enabled !== null) {
+                return (bool) $companyRow->is_enabled;
+            }
+
+            return $defaultEnabled;
+        });
+
+        $this->featureToggleMemo[$memoKey] = (bool) $resolved;
+
+        return (bool) $resolved;
     }
 
     public function resolveLineConversion(int $companyId, $product, array $item, ?int $itemUnitId): array
@@ -157,24 +176,29 @@ class SalesDocumentSupportService
 
     public function resolveAuthRoleContext(int $userId, int $companyId): array
     {
-        $this->ensureCompanyRoleProfilesTable();
-
-        $row = DB::table('auth.user_roles as ur')
+        $query = DB::table('auth.user_roles as ur')
             ->join('auth.roles as r', 'r.id', '=', 'ur.role_id')
-            ->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId) {
-                $join->on('crp.role_id', '=', 'r.id')
-                    ->where('crp.company_id', '=', $companyId);
-            })
             ->where('ur.user_id', $userId)
             ->where('r.company_id', $companyId)
             ->where('r.status', 1)
             ->orderBy('r.id')
-            ->select('r.code as role_code', 'crp.functional_profile as role_profile')
-            ->first();
+            ->select('r.code as role_code');
+
+        if ($this->hasCompanyRoleProfilesTable()) {
+            $query->leftJoin('appcfg.company_role_profiles as crp', function ($join) use ($companyId) {
+                $join->on('crp.role_id', '=', 'r.id')
+                    ->where('crp.company_id', '=', $companyId);
+            });
+            $query->addSelect('crp.functional_profile as role_profile');
+        }
+
+        $row = $query->first();
 
         return [
             'role_code' => $row && $row->role_code !== null ? (string) $row->role_code : null,
-            'role_profile' => $row && $row->role_profile !== null ? (string) $row->role_profile : null,
+            'role_profile' => $row && property_exists($row, 'role_profile') && $row->role_profile !== null
+                ? (string) $row->role_profile
+                : null,
         ];
     }
 
@@ -211,17 +235,22 @@ class SalesDocumentSupportService
         throw new SalesDocumentException('Missing conversion from unit ' . $lineUnitId . ' to base unit ' . $baseUnitId . ' for product #' . $productId);
     }
 
-    private function ensureCompanyRoleProfilesTable(): void
+    private function hasCompanyRoleProfilesTable(): bool
     {
-        DB::statement(
-            'CREATE TABLE IF NOT EXISTS appcfg.company_role_profiles (
-                company_id BIGINT NOT NULL,
-                role_id BIGINT NOT NULL,
-                functional_profile VARCHAR(20) NULL,
-                updated_by BIGINT NULL,
-                updated_at TIMESTAMP NULL,
-                PRIMARY KEY (company_id, role_id)
-            )'
-        );
+        if ($this->companyRoleProfilesTableExists !== null) {
+            return $this->companyRoleProfilesTableExists;
+        }
+
+        $cacheKey = 'sales:support:table_exists:appcfg.company_role_profiles';
+        $exists = Cache::remember($cacheKey, now()->addMinutes(5), function (): bool {
+            return DB::table('information_schema.tables')
+                ->where('table_schema', 'appcfg')
+                ->where('table_name', 'company_role_profiles')
+                ->exists();
+        });
+
+        $this->companyRoleProfilesTableExists = (bool) $exists;
+
+        return $this->companyRoleProfilesTableExists;
     }
 }

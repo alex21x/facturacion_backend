@@ -13,6 +13,7 @@ class SalesLookupRepository
     private const DAY_START_SUFFIX = ' 00:00:00';
     private const DAY_END_SUFFIX = ' 23:59:59.999999';
     private const DOCUMENT_KINDS_BOOTSTRAP_CACHE_TTL_SECONDS = 600;
+    private const DOCUMENT_KINDS_CATALOG_CACHE_TTL_SECONDS = 60;
     private const VERTICAL_FEATURE_LOOKUP_CACHE_TTL_SECONDS = 5;
     private const TABLE_EXISTS_CACHE_TTL_SECONDS = 300;
 
@@ -563,20 +564,27 @@ class SalesLookupRepository
     {
         $this->ensureDocumentKindsTable();
 
-        return DB::table('sales.document_kinds')
-            ->select('id', 'code', 'label', 'is_enabled')
-            ->orderBy('sort_order')
-            ->orderBy('code')
-            ->get()
-            ->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'code' => (string) $row->code,
-                    'label' => (string) $row->label,
-                    'is_enabled' => (bool) $row->is_enabled,
-                ];
-            })
-            ->values();
+        $cacheKey = 'sales_lookup:document_kinds_catalog:v1';
+
+        $rows = Cache::remember($cacheKey, now()->addSeconds(self::DOCUMENT_KINDS_CATALOG_CACHE_TTL_SECONDS), function () {
+            return DB::table('sales.document_kinds')
+                ->select('id', 'code', 'label', 'is_enabled')
+                ->orderBy('sort_order')
+                ->orderBy('code')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => (int) $row->id,
+                        'code' => (string) $row->code,
+                        'label' => (string) $row->label,
+                        'is_enabled' => (bool) $row->is_enabled,
+                    ];
+                })
+                ->values()
+                ->all();
+        });
+
+        return collect($rows);
     }
 
     public function createDocumentKind(int $companyId, int $authUserId, array $payload): void
@@ -615,6 +623,8 @@ class SalesLookupRepository
                 'updated_at' => now(),
             ]
         );
+
+        Cache::forget('sales_lookup:document_kinds_catalog:v1');
     }
 
     public function updateDocumentKind(int $companyId, int $authUserId, int $id, array $payload): void
@@ -707,6 +717,8 @@ class SalesLookupRepository
         }
 
         DB::table('sales.document_kinds')->where('id', $id)->update($updates);
+
+        Cache::forget('sales_lookup:document_kinds_catalog:v1');
     }
 
     public function findCommercialDocumentBranchId(int $companyId, int $documentId): ?int

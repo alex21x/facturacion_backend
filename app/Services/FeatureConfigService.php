@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Cache;
 
 class FeatureConfigService
 {
-    private const CACHE_TTL = 3600; // 1 hour
     private const CACHE_PREFIX = 'feature_config:';
     private const CACHE_SCHEMA_VERSION = 'v3';
 
@@ -22,14 +21,6 @@ class FeatureConfigService
     public function getCommerceSettings(int $companyId, ?int $branchId = null): array
     {
         $codes = $this->getCommerceFeatureCodes();
-        // Cache key: feature_config:company:1:branch:1 or feature_config:company:1:branch:null
-        $cacheKey = self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ":company:{$companyId}:branch:" . ($branchId ?? 'null');
-        
-        // Try cache first
-        $cached = Cache::get($cacheKey);
-        if ($cached !== null) {
-            return $cached;
-        }
 
         // BATCH QUERY 1: Get all company features in ONE query
         $companyFeatures = $this->featureConfigRepository->getCompanyFeatures($companyId);
@@ -90,16 +81,11 @@ class FeatureConfigService
             ];
         }
 
-        $result = [
+        return [
             'company_id' => $companyId,
             'branch_id' => $branchId,
             'features' => $features,
         ];
-
-        // Cache for 1 hour
-        Cache::put($cacheKey, $result, self::CACHE_TTL);
-
-        return $result;
     }
 
     /**
@@ -110,16 +96,17 @@ class FeatureConfigService
     {
         $result = [];
 
-        // Check if vertical tables exist
-        if (!$this->allTablesExist(['appcfg.verticals', 'appcfg.company_verticals', 'appcfg.vertical_feature_templates', 'appcfg.company_vertical_feature_overrides'])) {
-            return [];
+        try {
+            // Prefer explicit active marker when available.
+            $activeVertical = $this->featureConfigRepository->getActiveVerticalForCompany($companyId, true);
+        } catch (\Throwable) {
+            // Legacy schemas may not have is_active.
+            try {
+                $activeVertical = $this->featureConfigRepository->getActiveVerticalForCompany($companyId, false);
+            } catch (\Throwable) {
+                return [];
+            }
         }
-
-        // Find active vertical for this company
-        $activeVertical = $this->featureConfigRepository->getActiveVerticalForCompany(
-            $companyId,
-            $this->columnExists('appcfg', 'company_verticals', 'is_active')
-        );
 
         if (!$activeVertical) {
             return [];
@@ -228,49 +215,23 @@ class FeatureConfigService
      */
     private function getFeatureLabels(): array
     {
-        $cacheKey = self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ':labels';
+        $configured = config('features.feature_labels_es', []);
 
-        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $this->ensureFeatureLabelsPersisted($this->getCommerceFeatureCodes());
-        }
-        
-        $cached = Cache::get($cacheKey);
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        if (!$this->tableExists('appcfg', 'feature_labels')) {
-            Cache::put($cacheKey, [], self::CACHE_TTL);
+        if (!is_array($configured)) {
             return [];
         }
 
-        if (!$this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            Cache::put($cacheKey, [], self::CACHE_TTL);
-            return [];
-        }
+        return collect($configured)
+            ->mapWithKeys(function ($label, $code): array {
+                $normalizedCode = strtoupper(trim((string) $code));
+                if ($normalizedCode === '') {
+                    return [];
+                }
 
-        $labelColumn = null;
-        foreach (['label_es', 'label', 'name', 'description'] as $candidate) {
-            if ($this->columnExists('appcfg', 'feature_labels', $candidate)) {
-                $labelColumn = $candidate;
-                break;
-            }
-        }
-
-        if ($labelColumn === null) {
-            Cache::put($cacheKey, [], self::CACHE_TTL);
-            return [];
-        }
-
-        $rows = $this->featureConfigRepository->getFeatureLabels($labelColumn);
-
-        $labels = $rows->mapWithKeys(function ($row) use ($labelColumn) {
-            return [(string) $row->feature_code => (string) ($row->{$labelColumn} ?? $row->feature_code)];
-        })->toArray();
-
-        Cache::put($cacheKey, $labels, self::CACHE_TTL);
-
-        return $labels;
+                $normalizedLabel = trim((string) $label);
+                return [$normalizedCode => ($normalizedLabel !== '' ? $normalizedLabel : $normalizedCode)];
+            })
+            ->all();
     }
 
     /**
@@ -278,54 +239,8 @@ class FeatureConfigService
      */
     private function getFeatureCategories(): array
     {
-        $cacheKey = self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ':categories';
-
-        $cached = Cache::get($cacheKey);
-        if ($cached !== null) {
-            return $cached;
-        }
-
         $codes = $this->getCommerceFeatureCodes();
         $categories = [];
-
-        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $hasCategoryKey = $this->columnExists('appcfg', 'feature_labels', 'category_key');
-            $hasCategoryLabel = $this->columnExists('appcfg', 'feature_labels', 'category_label');
-
-            if ($hasCategoryKey || $hasCategoryLabel) {
-                $columns = ['feature_code'];
-                if ($hasCategoryKey) {
-                    $columns[] = 'category_key';
-                }
-                if ($hasCategoryLabel) {
-                    $columns[] = 'category_label';
-                }
-
-                $rows = $this->featureConfigRepository->getFeatureCategoryRows($codes, $columns);
-
-                foreach ($rows as $row) {
-                    $code = (string) ($row->feature_code ?? '');
-                    if ($code === '') {
-                        continue;
-                    }
-
-                    $key = strtolower(trim((string) (($row->category_key ?? '') ?: $this->deriveFeatureCategoryKey($code))));
-                    if ($key === '') {
-                        $key = $this->deriveFeatureCategoryKey($code);
-                    }
-
-                    $label = trim((string) ($row->category_label ?? ''));
-                    if ($label === '') {
-                        $label = $this->humanizeCategoryKey($key);
-                    }
-
-                    $categories[$code] = [
-                        'key' => $key,
-                        'label' => $label,
-                    ];
-                }
-            }
-        }
 
         foreach ($codes as $code) {
             if (!array_key_exists($code, $categories)) {
@@ -336,8 +251,6 @@ class FeatureConfigService
                 ];
             }
         }
-
-        Cache::put($cacheKey, $categories, self::CACHE_TTL);
 
         return $categories;
     }
@@ -474,50 +387,6 @@ class FeatureConfigService
     }
 
     /**
-     * Check if all required tables exist.
-     */
-    private function allTablesExist(array $tables): bool
-    {
-        foreach ($tables as $table) {
-            [$schema, $tableName] = explode('.', $table, 2);
-            if (!$this->tableExists($schema, $tableName)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Check if a table exists (cached in request).
-     */
-    private function tableExists(string $schema, string $table): bool
-    {
-        static $tableCache = [];
-        $key = "{$schema}.{$table}";
-        
-        if (!isset($tableCache[$key])) {
-            $tableCache[$key] = $this->featureConfigRepository->tableExists($schema, $table);
-        }
-        
-        return $tableCache[$key];
-    }
-
-    /**
-     * Check if a column exists in a table (cached in request).
-     */
-    private function columnExists(string $schema, string $table, string $column): bool
-    {
-        static $columnCache = [];
-        $key = "{$schema}.{$table}.{$column}";
-
-        if (!isset($columnCache[$key])) {
-            $columnCache[$key] = $this->featureConfigRepository->columnExists($schema, $table, $column);
-        }
-
-        return $columnCache[$key];
-    }
-
-    /**
      * Get the canonical list of commerce feature codes.
      * Source of truth: appcfg.feature_labels (status=1), ordered by feature_code.
      * Fallback: config('features.commerce_feature_codes') for environments where
@@ -525,37 +394,11 @@ class FeatureConfigService
      */
     private function getCommerceFeatureCodes(): array
     {
-        $cacheKey = self::CACHE_PREFIX . self::CACHE_SCHEMA_VERSION . ':commerce_codes';
-
-        $cached = Cache::get($cacheKey);
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        $codes = [];
-        $fallbackCodes = collect(config('features.commerce_feature_codes', []))
+        return collect(config('features.commerce_feature_codes', []))
             ->map(fn ($c) => strtoupper(trim((string) $c)))
             ->filter(fn ($c) => $c !== '')
             ->values()
             ->all();
-
-        if ($this->tableExists('appcfg', 'feature_labels') && $this->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $rows = $this->featureConfigRepository->getCommerceFeatureCodesFromLabels();
-
-            $codes = $rows;
-        }
-
-        $codes = collect($codes)
-            ->merge($fallbackCodes)
-            ->map(fn ($c) => strtoupper(trim((string) $c)))
-            ->filter(fn ($c) => $c !== '')
-            ->unique()
-            ->values()
-            ->all();
-
-        Cache::put($cacheKey, $codes, 300); // 5 min — short TTL so new feature_labels rows appear quickly
-
-        return $codes;
     }
 
     /**

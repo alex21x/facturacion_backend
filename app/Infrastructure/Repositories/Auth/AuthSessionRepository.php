@@ -16,56 +16,16 @@ use Illuminate\Support\Facades\DB;
 
 class AuthSessionRepository implements AuthSessionRepositoryInterface
 {
-    private const SCHEMA_CACHE_TTL_SECONDS = 900;
     private const ACTIVE_MODULES_CACHE_TTL_SECONDS = 300;
-    private static array $tableExistsCache = [];
-    private static array $columnExistsCache = [];
 
     public function tableExists(string $schema, string $table): bool
     {
-        $cacheKey = strtolower($schema . '.' . $table);
-        if (array_key_exists($cacheKey, self::$tableExistsCache)) {
-            return self::$tableExistsCache[$cacheKey];
-        }
-
-        $exists = (bool) Cache::remember(
-            'auth:table_exists:' . $cacheKey,
-            self::SCHEMA_CACHE_TTL_SECONDS,
-            function () use ($schema, $table): bool {
-                return DB::table('information_schema.tables')
-                    ->where('table_schema', $schema)
-                    ->where('table_name', $table)
-                    ->exists();
-            }
-        );
-
-        self::$tableExistsCache[$cacheKey] = (bool) $exists;
-
-        return self::$tableExistsCache[$cacheKey];
+        return true;
     }
 
     public function columnExists(string $schema, string $table, string $column): bool
     {
-        $cacheKey = strtolower($schema . '.' . $table . '.' . $column);
-        if (array_key_exists($cacheKey, self::$columnExistsCache)) {
-            return self::$columnExistsCache[$cacheKey];
-        }
-
-        $exists = (bool) Cache::remember(
-            'auth:column_exists:' . $cacheKey,
-            self::SCHEMA_CACHE_TTL_SECONDS,
-            function () use ($schema, $table, $column): bool {
-                return DB::table('information_schema.columns')
-                    ->where('table_schema', $schema)
-                    ->where('table_name', $table)
-                    ->where('column_name', $column)
-                    ->exists();
-            }
-        );
-
-        self::$columnExistsCache[$cacheKey] = (bool) $exists;
-
-        return self::$columnExistsCache[$cacheKey];
+        return true;
     }
 
     public function findActiveUserForLogin(string $username, ?string $accessSlug): ?AuthLoginUserDTO

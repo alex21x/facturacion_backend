@@ -981,6 +981,8 @@ class SalesLookupRepository
                 DB::raw("CASE WHEN dsrc.id IS NOT NULL THEN CONCAT(dsrc.series, '-', dsrc.number) ELSE NULL END as source_document_number"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_type, '')), ''), '-') as customer_doc_type"),
+                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_number, '')), ''), '') as customer_doc_number"),
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.customer_vehicle_id AS TEXT)), ''), (d.metadata->>'customer_vehicle_id'), (d.metadata->>'customerVehicleId')), '')::BIGINT as customer_vehicle_id"),
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_plate_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_plate'), (d.metadata->>'vehiclePlateSnapshot')), '') as vehicle_plate_snapshot"),
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_brand_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_brand'), (d.metadata->>'vehicleBrand')), '') as vehicle_brand_snapshot"),
@@ -1035,6 +1037,8 @@ class SalesLookupRepository
                     WHEN 'CANCELED' THEN 'Cancelado'
                     ELSE d.status END as status_label"),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
+                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_type, '')), ''), '-') as customer_doc_type"),
+                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_number, '')), ''), '') as customer_doc_number"),
                 DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
                 DB::raw("COALESCE(
                     NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),

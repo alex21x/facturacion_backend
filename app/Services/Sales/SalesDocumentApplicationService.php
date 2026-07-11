@@ -557,7 +557,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                 'json_rows' => $rawRows,
                 'count'     => $rawRows->count(),
                 'max'       => $max,
-                'headers'   => ['ID','Documento','Serie','Numero','Solicita','Emite','Actor','Fecha Emision','Cliente','Vehiculo','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Producto','Unidad','Cantidad','Precio Unitario','Total Linea','SENATI'],
+                'headers'   => ['ID','Documento','Serie','Numero','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Vehiculo','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Producto','Unidad','Cantidad','Precio Unitario','Total Linea','SENATI'],
                 'rows'      => $rawRows->map(function ($row) {
                     $issuer = trim((string) ($row->created_by_user_name ?? ''));
                     $seller = trim((string) ($row->origin_seller_user_name ?? ''));
@@ -574,6 +574,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                         $actor,
                         $row->issue_at ? (string) $row->issue_at : '',
                         (string) ($row->customer_name ?? ''),
+                        (string) ($row->customer_doc_type ?? '-'),
+                        (string) ($row->customer_doc_number ?? ''),
                         trim(implode(' | ', array_filter([
                             (string) ($row->vehicle_plate_snapshot ?? ''),
                             (string) ($row->vehicle_brand_snapshot ?? ''),
@@ -602,7 +604,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'json_rows' => $rawRows,
             'count'     => $rawRows->count(),
             'max'       => $max,
-            'headers'   => ['ID','Documento','Serie','Numero','Documento Afectado','Solicita','Emite','Actor','Fecha Emision','Cliente','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Descuento Item','Descuento Global','Total','Saldo','SENATI'],
+            'headers'   => ['ID','Documento','Serie','Numero','Documento Afectado','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Descuento Item','Descuento Global','Total','Saldo','SENATI'],
             'rows'      => $rawRows->map(function ($row) {
                 $issuer = trim((string) ($row->created_by_user_name ?? ''));
                 $seller = trim((string) ($row->origin_seller_user_name ?? ''));
@@ -622,6 +624,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                     $actor,
                     $row->issue_at ? (string) $row->issue_at : '',
                     (string) ($row->customer_name ?? ''),
+                    (string) ($row->customer_doc_type ?? '-'),
+                    (string) ($row->customer_doc_number ?? ''),
                     (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
                     (string) ($row->status_label ?? $row->status),
                     (string) ($row->sunat_status ?? ''),

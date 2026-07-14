@@ -30,6 +30,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
     // feature-toggles is needed by ALL authenticated users (sellers, cashiers, etc.)
     // to determine their runtime sales flow mode.  It must NOT be behind APPCFG RBAC.
     Route::get('/appcfg/feature-toggles', 'Api\\AppConfigController@featureToggles');
+    Route::get('/appcfg/company-subscription-alert', 'Api\\AppConfigController@companySubscriptionAlert');
 
     Route::middleware(['rbac.module:APPCFG,view'])->group(function () {
         Route::get('/appcfg/modules', 'Api\\AppConfigController@modules');
@@ -40,6 +41,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::get('/appcfg/company-vertical-admin-matrix', 'Api\\AppConfigController@companyVerticalAdminMatrix')->middleware('admin.only');
         Route::get('/appcfg/company-rate-limit-matrix', 'Api\\AppConfigController@companyRateLimitMatrix')->middleware('admin.only');
         Route::get('/appcfg/company-operational-limit-matrix', 'Api\\AppConfigController@companyOperationalLimitMatrix')->middleware('admin.only');
+        Route::get('/appcfg/global-subscription-schedule', 'Api\AppConfigController@globalSubscriptionSchedule')->middleware('admin.only');
         Route::get('/appcfg/igv-settings', 'Api\\AppConfigController@igvSettings');
         Route::get('/appcfg/company-profile', 'Api\\AppConfigController@companyProfile');
         Route::get('/ops/latency/summary', 'Api\\OpsLatencyController@summary')->middleware('company.scope');
@@ -72,6 +74,8 @@ Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(func
         Route::put('/appcfg/company-rate-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyRateLimitMatrixBulk')->middleware('admin.only');
         Route::put('/appcfg/company-operational-limit-matrix', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrix')->middleware('admin.only');
         Route::put('/appcfg/company-operational-limit-matrix/bulk', 'Api\\AppConfigController@updateCompanyOperationalLimitMatrixBulk')->middleware('admin.only');
+        Route::put('/appcfg/global-subscription-schedule', 'Api\AppConfigController@updateGlobalSubscriptionSchedule')->middleware('admin.only');
+        Route::put('/appcfg/company-subscription-admin-matrix', 'Api\\AppConfigController@updateCompanySubscriptionAdminMatrix')->middleware('admin.only');
         Route::post('/appcfg/admin-companies', 'Api\\AppConfigController@createAdminCompany')->middleware('admin.only');
         Route::post('/appcfg/admin-companies/{id}/reset-admin-password', 'Api\\AppConfigController@resetAdminCompanyPassword')->middleware('admin.only');
         Route::get('/appcfg/admin-companies/{id}/reveal-admin-password', 'Api\\AppConfigController@revealAdminCompanyPassword')->middleware('admin.only');

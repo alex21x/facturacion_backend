@@ -15,7 +15,8 @@ class VerticalAdminMatrixService
 
     public function __construct(
         private VerticalAdminMatrixRepository $verticalAdminMatrixRepository,
-        private CompanyAccessLinkService $companyAccessLinkService
+        private CompanyAccessLinkService $companyAccessLinkService,
+        private CompanySubscriptionService $companySubscriptionService
     ) {
     }
 
@@ -60,6 +61,8 @@ class VerticalAdminMatrixService
                 $accessLinksByCompany = $this->companyAccessLinkService->getActiveByCompanyIds($companyIds);
             }
 
+            $subscriptionsByCompany = $this->companySubscriptionService->listSummariesByCompanyIds($companyIds);
+
             $assignments = $this->verticalAdminMatrixRepository->listAssignmentsByCompanyIds($companyIds);
             $byCompany = [];
             foreach ($assignments as $row) {
@@ -103,7 +106,7 @@ class VerticalAdminMatrixService
                 }
             }
 
-            $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany) {
+            $companyRows = $companies->map(function ($company) use ($byCompany, $accessLinksByCompany, $adminUsersByCompany, $subscriptionsByCompany) {
                 $companyId = (int) $company->id;
                 $companyAssignments = $byCompany[$companyId] ?? [];
                 $accessLink = $accessLinksByCompany->get($companyId);
@@ -133,6 +136,7 @@ class VerticalAdminMatrixService
                     'assignments' => $companyAssignments,
                     'admin_username' => $adminUser ? $adminUser->username : null,
                     'admin_email' => $adminUser ? $adminUser->email : null,
+                    'subscription' => $subscriptionsByCompany[$companyId] ?? $this->companySubscriptionService->buildDefaultSummary(),
                 ];
             })->values()->all();
 
@@ -278,6 +282,11 @@ class VerticalAdminMatrixService
         $this->resetCachedAdminData();
     }
 
+    public function flushAdminMatrixCache(): void
+    {
+        $this->resetCachedAdminData();
+    }
+
     private function ensurePrimaryForEnabledVerticals(int $companyId, int $updatedBy): void
     {
         if ($this->verticalAdminMatrixRepository->hasEnabledPrimaryVertical($companyId)) {
@@ -310,6 +319,9 @@ class VerticalAdminMatrixService
 
     private function resetCachedAdminData(): void
     {
+        $configuredSystemCompanyId = (int) config('app.admin_system_company_id', 1);
+        Cache::forget('vertical_admin_matrix:v1:system_company:' . $configuredSystemCompanyId);
+
         foreach (array_keys($this->adminMatrixCache) as $systemCompanyId) {
             Cache::forget('vertical_admin_matrix:v1:system_company:' . $systemCompanyId);
         }

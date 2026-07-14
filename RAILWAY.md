@@ -31,10 +31,15 @@ CACHE_DRIVER=file
 QUEUE_CONNECTION=sync
 SESSION_DRIVER=file
 LOG_CHANNEL=stack
+COMPANY_SUBSCRIPTION_ALERT_FREQUENCY=WEEKLY
+COMPANY_SUBSCRIPTION_ALERT_TIME=08:00
+COMPANY_SUBSCRIPTION_WEEKLY_DIGEST_DAY=1
+COMPANY_SUBSCRIPTION_MONTHLY_DIGEST_DAY=1
 ```
 
 Notes:
 
 - Use the same Railway PostgreSQL service already loaded with data.
 - Keep `APP_KEY` set in Railway before the first boot.
+- The Railway image already runs `php artisan schedule:run` in a background loop inside `Dockerfile.railway`; keep `RUN_LARAVEL_SCHEDULER=true` to preserve automatic alerts.
 - If the admin is not deployed yet, `FRONTEND_ADMIN_URL` can temporarily match the app URL or be left empty.

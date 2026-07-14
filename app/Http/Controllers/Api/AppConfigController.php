@@ -14,9 +14,11 @@ use App\Http\Requests\AppConfig\UpdateCompanyOperationalLimitMatrixRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyProfileRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyRateLimitMatrixBulkRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyRateLimitMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateCompanySubscriptionAdminMatrixRequest;
 use App\Http\Requests\AppConfig\UpdateCompanySunatReconcileAdminMatrixRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyVerticalAdminMatrixBulkRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyVerticalAdminMatrixRequest;
+use App\Http\Requests\AppConfig\UpdateGlobalSubscriptionScheduleRequest;
 use App\Http\Requests\AppConfig\UpdateCompanyVerticalSettingsRequest;
 use App\Http\Requests\AppConfig\UpdateIgvSettingsRequest;
 use App\Http\Requests\AppConfig\UpdateOperationalLimitsRequest;
@@ -25,6 +27,7 @@ use App\Services\AppConfig\AdminCompanyProvisioningService;
 use App\Services\AppConfig\AdminSettingsMatrixService;
 use App\Services\AppConfig\BackupMaintenanceService;
 use App\Services\AppConfig\CompanyProfileService;
+use App\Services\AppConfig\CompanySubscriptionService;
 use App\Services\AppConfig\CompanyAccessLinkService;
 use App\Services\AppConfig\CompanyRateLimitService;
 use App\Services\AppConfig\FeatureLabelService;
@@ -135,6 +138,7 @@ class AppConfigController extends Controller
         private CompanyAccessLinkService $companyAccessLinkService,
         private VerticalAdminMatrixService $verticalAdminMatrixService,
         private CompanyRateLimitService $companyRateLimitService,
+        private CompanySubscriptionService $companySubscriptionService,
         private FeatureConfigService $featureConfigService
     ) {
     }
@@ -426,6 +430,28 @@ class AppConfigController extends Controller
         ]);
     }
 
+    public function companySubscriptionAlert(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = $this->normalizeLegacyCompanyId((int) ($authUser->company_id ?? 0));
+
+        if ($companyId <= 0) {
+            return response()->json([
+                'should_show' => false,
+                'tone' => 'ok',
+                'title' => '',
+                'detail' => '',
+                'state' => 'UNCONFIGURED',
+                'due_date' => null,
+                'days_until_due' => null,
+                'days_overdue' => null,
+                'recommended_action' => null,
+            ]);
+        }
+
+        return response()->json($this->companySubscriptionService->resolveClientAlertForCompany($companyId));
+    }
+
     public function updateCompanyVerticalAdminMatrix(UpdateCompanyVerticalAdminMatrixRequest $request)
     {
         if (!$this->verticalAdminMatrixService->hasRequiredTables()) {
@@ -520,6 +546,35 @@ class AppConfigController extends Controller
             $effectiveFrom,
             (int) $authUser->id
         );
+
+        return $this->companyVerticalAdminMatrix($request);
+    }
+
+    public function updateCompanySubscriptionAdminMatrix(UpdateCompanySubscriptionAdminMatrixRequest $request)
+    {
+        $payload = $request->validated();
+        $companyId = (int) ($payload['company_id'] ?? 0);
+
+        if ($companyId <= 0 || !$this->companySubscriptionService->companyExists($companyId)) {
+            return response()->json([
+                'message' => 'Company not found.',
+            ], 404);
+        }
+
+        $authUser = $request->attributes->get('auth_user');
+
+        try {
+            $this->companySubscriptionService->updateCompanySubscription(
+                $companyId,
+                $payload,
+                $authUser ? (int) $authUser->id : null
+            );
+            $this->verticalAdminMatrixService->flushAdminMatrixCache();
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
+        }
 
         return $this->companyVerticalAdminMatrix($request);
     }
@@ -1779,6 +1834,33 @@ class AppConfigController extends Controller
             'company_limits' => $companyLimits,
             'usage' => $usage,
         ]);
+    }
+
+    public function globalSubscriptionSchedule(Request $request)
+    {
+        $schedule = $this->companySubscriptionService->getGlobalSchedule();
+
+        return response()->json([
+            'schedule' => [
+                'company_subscription_alert_frequency' => $schedule['alert_frequency'],
+                'company_subscription_alert_time' => $schedule['alert_time'],
+                'company_subscription_weekly_digest_day' => $schedule['weekly_digest_day'],
+                'company_subscription_monthly_digest_day' => $schedule['monthly_digest_day'],
+            ],
+        ]);
+    }
+
+    public function updateGlobalSubscriptionSchedule(UpdateGlobalSubscriptionScheduleRequest $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $payload = $request->validated();
+
+        $this->companySubscriptionService->updateGlobalSchedule(
+            $payload,
+            $authUser ? (int) $authUser->id : 0
+        );
+
+        return $this->globalSubscriptionSchedule($request);
     }
 
     public function commerceSettings(Request $request)

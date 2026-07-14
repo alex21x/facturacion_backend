@@ -56,6 +56,20 @@ return [
 
     'asset_url' => env('ASSET_URL', null),
 
+    'admin_system_company_id' => (int) env('ADMIN_SYSTEM_COMPANY_ID', 1),
+
+    'company_subscription_alert_frequency' => env('COMPANY_SUBSCRIPTION_ALERT_FREQUENCY', 'WEEKLY'),
+
+    'company_subscription_alert_time' => env('COMPANY_SUBSCRIPTION_ALERT_TIME', '08:00'),
+
+    'company_subscription_weekly_digest_day' => (int) env('COMPANY_SUBSCRIPTION_WEEKLY_DIGEST_DAY', 1),
+
+    'company_subscription_monthly_digest_day' => (int) env('COMPANY_SUBSCRIPTION_MONTHLY_DIGEST_DAY', 1),
+
+    'company_subscription_weekly_digest_emails' => env('COMPANY_SUBSCRIPTION_WEEKLY_DIGEST_EMAILS', env('COMPANY_SUBSCRIPTION_ADMIN_CC_EMAIL', 'fernandezdelacruza@gmail.com')),
+
+    'company_subscription_admin_cc_email' => env('COMPANY_SUBSCRIPTION_ADMIN_CC_EMAIL', 'fernandezdelacruza@gmail.com'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

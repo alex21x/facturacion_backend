@@ -293,8 +293,7 @@ class OperationalLimitsService
 
     private function resetComputedCaches(?int $companyId = null): void
     {
-        $this->platformLimitsCache = null;
-        Cache::forget('operational_limits:platform:v1');
+        $this->resetPlatformLimitsCache();
 
         foreach (array_keys($this->companyOperationalMatrixCache) as $systemCompanyId) {
             Cache::forget('operational_limits:company_matrix:v1:system_company:' . $systemCompanyId);
@@ -317,6 +316,12 @@ class OperationalLimitsService
     private function usageSharedCacheKey(int $companyId): string
     {
         return 'operational_limits:usage:v1:company:' . $companyId;
+    }
+
+    public function resetPlatformLimitsCache(): void
+    {
+        $this->platformLimitsCache = null;
+        Cache::forget('operational_limits:platform:v1');
     }
 
     private function companyLimitsSharedCacheKey(int $companyId): string

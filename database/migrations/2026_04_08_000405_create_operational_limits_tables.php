@@ -13,6 +13,10 @@ class CreateOperationalLimitsTables extends Migration
             Schema::create('appcfg.platform_limits', function (Blueprint $table) {
                 $table->unsignedBigInteger('id')->primary();
                 $table->unsignedInteger('max_companies_enabled')->default(1);
+                $table->string('company_subscription_alert_frequency', 10)->default('WEEKLY');
+                $table->string('company_subscription_alert_time', 5)->default('08:00');
+                $table->unsignedTinyInteger('company_subscription_weekly_digest_day')->default(1);
+                $table->unsignedTinyInteger('company_subscription_monthly_digest_day')->default(1);
                 $table->unsignedBigInteger('updated_by')->nullable();
                 $table->timestamp('updated_at')->nullable();
             });
@@ -20,8 +24,36 @@ class CreateOperationalLimitsTables extends Migration
             DB::table('appcfg.platform_limits')->insert([
                 'id' => 1,
                 'max_companies_enabled' => 1,
+                'company_subscription_alert_frequency' => 'WEEKLY',
+                'company_subscription_alert_time' => '08:00',
+                'company_subscription_weekly_digest_day' => 1,
+                'company_subscription_monthly_digest_day' => 1,
                 'updated_at' => now(),
             ]);
+        } else {
+            Schema::table('appcfg.platform_limits', function (Blueprint $table) {
+                if (!Schema::hasColumn('appcfg.platform_limits', 'company_subscription_alert_frequency')) {
+                    $table->string('company_subscription_alert_frequency', 10)->default('WEEKLY');
+                }
+                if (!Schema::hasColumn('appcfg.platform_limits', 'company_subscription_alert_time')) {
+                    $table->string('company_subscription_alert_time', 5)->default('08:00');
+                }
+                if (!Schema::hasColumn('appcfg.platform_limits', 'company_subscription_weekly_digest_day')) {
+                    $table->unsignedTinyInteger('company_subscription_weekly_digest_day')->default(1);
+                }
+                if (!Schema::hasColumn('appcfg.platform_limits', 'company_subscription_monthly_digest_day')) {
+                    $table->unsignedTinyInteger('company_subscription_monthly_digest_day')->default(1);
+                }
+            });
+
+            DB::table('appcfg.platform_limits')
+                ->where('id', 1)
+                ->update([
+                    'company_subscription_alert_frequency' => 'WEEKLY',
+                    'company_subscription_alert_time' => '08:00',
+                    'company_subscription_weekly_digest_day' => 1,
+                    'company_subscription_monthly_digest_day' => 1,
+                ]);
         }
 
         if (!Schema::hasTable('appcfg.company_operational_limits')) {

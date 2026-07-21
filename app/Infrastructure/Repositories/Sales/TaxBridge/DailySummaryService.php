@@ -690,10 +690,9 @@ class DailySummaryService
             $responseTimeMs = $responseStartAt !== null ? round((microtime(true) - $responseStartAt) * 1000, 2) : null;
             $diagnostic = $this->summarizeSummaryDiagnostic($decoded, (string) ($cdrCode ?? ''), (string) ($cdrDesc ?? ''));
 
-            $responseData = is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)];
-            if ($this->containsImunifyProtectionMarkers((string) ($diagnostic['message'] ?? '') . ' ' . $raw)) {
-                $responseData['_waf_hint'] = 'El endpoint devolvio bloqueo de bot-protection (Imunify360).';
-            }
+            $responseData = $this->sanitizeBridgePayloadForStorage(
+                is_array($decoded) ? $decoded : ['raw' => substr($raw, 0, 2000)]
+            );
 
             DB::table('sales.daily_summaries')
                 ->where('id', $summaryId)
@@ -1125,11 +1124,6 @@ class DailySummaryService
         }
 
         $hasBridgeErrorMarkers = $this->containsBridgeErrorMarkers($message) || $this->containsBridgeErrorMarkers($raw);
-        $hasImunifyProtection = $this->containsImunifyProtectionMarkers($message) || $this->containsImunifyProtectionMarkers($raw);
-
-        if ($hasImunifyProtection && empty($ticket)) {
-            return [self::STATUS_ERROR, 'Bloqueado por seguridad del endpoint (Imunify360)', $ticket, $cdrCode, $cdrDesc];
-        }
 
         if (!empty($ticket)) {
             if ($hasBridgeErrorMarkers) {
@@ -1156,7 +1150,7 @@ class DailySummaryService
         //  - New bridges: res=0 means error on the bridge side
         // Auto-detect legacy success by the presence of positive keywords in the message.
         if ($resCode === 0) {
-            if ($hasBridgeErrorMarkers || $hasImunifyProtection) {
+            if ($hasBridgeErrorMarkers) {
                 return [self::STATUS_ERROR, 'Error de integracion con puente/SUNAT', $ticket, $cdrCode, $cdrDesc];
             }
             $msgLower = strtolower($message . ' ' . $raw);
@@ -1549,17 +1543,33 @@ class DailySummaryService
             return false;
         }
 
-        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE|BAD REQUEST|HTTP\s*(4\d{2}|5\d{2})|GATEWAY TIME-?OUT|TIME\s*OUT|TIMEOUT|IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED/', $value) === 1;
+        return preg_match('/\[CODE\]\s*=>|SERVIDOR SUNAT NO RESPONDE|ERROR SOAP|SOAPFAULT|FAULTCODE|EXCEPTION|NO ENCONTRADO|NO HA SIDO COMUNICADO|ERROR EN LA LINEA|XML NO CONTIENE|TASA DEL TRIBUTO FALTANTE|TRIBUTO FALTANTE|BAD REQUEST|HTTP\s*(4\d{2}|5\d{2})|GATEWAY TIME-?OUT|TIME\s*OUT|TIMEOUT/', $value) === 1;
     }
 
-    private function containsImunifyProtectionMarkers(string $text): bool
+    private function sanitizeBridgePayloadForStorage($value)
     {
-        $value = strtoupper(trim($text));
-        if ($value === '') {
-            return false;
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $value[$key] = $this->sanitizeBridgePayloadForStorage($item);
+            }
+
+            return $value;
         }
 
-        return preg_match('/IMUNIFY360|BOT-?PROTECTION|ACCESS DENIED/', $value) === 1;
+        if (is_string($value)) {
+            $sanitized = preg_replace('/[A-Z0-9_-]*\s*BOT-?PROTECTION\.?\s*/i', '', $value) ?? $value;
+            $sanitized = preg_replace('/IPS\s+USED\s+FOR\s+AUTOMATION\s+SHOULD\s+BE\s+WHITELISTED\.?\s*/i', '', $sanitized) ?? $sanitized;
+            $sanitized = preg_replace('/ACCESS\s+DENIED\s+BY\s*/i', '', $sanitized) ?? $sanitized;
+            $sanitized = trim($sanitized);
+
+            if ($sanitized === '') {
+                return 'Error de seguridad del endpoint remoto';
+            }
+
+            return $sanitized;
+        }
+
+        return $value;
     }
 
     private function bridgeRequestHeaders(string $endpointUrl = ''): array

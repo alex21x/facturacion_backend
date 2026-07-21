@@ -7,7 +7,6 @@ class TaxBridgeResponsePresenter
     public function presentRetryResult(array $result, int $documentId, array $diagnostic): array
     {
         $status = strtoupper((string) ($result['status'] ?? ''));
-        $isWafBlocked = (bool) ($result['waf_blocked'] ?? false);
 
         $payload = [
             'document_id' => $documentId,
@@ -20,16 +19,7 @@ class TaxBridgeResponsePresenter
             'debug' => $result['debug'] ?? null,
         ];
 
-        if ($isWafBlocked || $status === 'WAF_BLOCKED') {
-            return [
-                'status' => 422,
-                'payload' => array_merge($payload, [
-                    'message' => 'Tax bridge retry blocked by Imunify360 bot-protection. Solicite whitelist de IP/automatizacion en el puente SUNAT.',
-                ]),
-            ];
-        }
-
-        if (in_array($status, ['REJECTED', 'ERROR', 'HTTP_ERROR'], true)) {
+        if (!in_array($status, ['SENT', 'ACCEPTED', 'PENDING_CONFIRMATION'], true)) {
             return [
                 'status' => 422,
                 'payload' => array_merge($payload, [

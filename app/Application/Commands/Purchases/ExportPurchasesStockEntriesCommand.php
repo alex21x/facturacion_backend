@@ -12,7 +12,8 @@ final class ExportPurchasesStockEntriesCommand
         public readonly ?string $dateFrom,
         public readonly ?string $dateTo,
         public readonly mixed $warehouseId,
-        public readonly bool $includeItems
+        public readonly bool $includeItems,
+        public readonly string $format
     ) {
     }
 
@@ -24,9 +25,20 @@ final class ExportPurchasesStockEntriesCommand
         ?string $dateFrom,
         ?string $dateTo,
         mixed $warehouseId,
-        bool $includeItems
+        string $format
     ): self {
-        return new self($companyId, $branchId, $entryType, $reference, $dateFrom, $dateTo, $warehouseId, $includeItems);
+        $normalizedFormat = strtolower(trim($format));
+        return new self(
+            $companyId,
+            $branchId,
+            $entryType,
+            $reference,
+            $dateFrom,
+            $dateTo,
+            $warehouseId,
+            $normalizedFormat === 'json',
+            $normalizedFormat
+        );
     }
 
     public function filters(): array

@@ -553,7 +553,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
 
             return [
                 'mode'      => 'PRODUCT',
-                'filename'  => 'reporte_ventas_producto_' . now()->format('Ymd_His') . '.csv',
+                'filename'  => 'reporte_ventas_producto_' . Carbon::now('America/Lima')->format('Y-m-d_h-i-s_A') . '.csv',
                 'json_rows' => $rawRows,
                 'count'     => $rawRows->count(),
                 'max'       => $max,
@@ -572,7 +572,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                         $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
                         $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
                         $actor,
-                        $row->issue_at ? (string) $row->issue_at : '',
+                        $this->formatDisplayDate((string) ($row->issue_at ?? '')),
                         (string) ($row->customer_name ?? ''),
                         (string) ($row->customer_doc_type ?? '-'),
                         (string) ($row->customer_doc_number ?? ''),
@@ -600,7 +600,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
 
         return [
             'mode'      => 'SUMMARY',
-            'filename'  => 'reporte_ventas_' . now()->format('Ymd_His') . '.csv',
+            'filename'  => 'reporte_ventas_' . Carbon::now('America/Lima')->format('Y-m-d_h-i-s_A') . '.csv',
             'json_rows' => $rawRows,
             'count'     => $rawRows->count(),
             'max'       => $max,
@@ -622,7 +622,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                     $seller !== '' ? $seller : ($issuer !== '' ? $issuer : '-'),
                     $issuer !== '' ? $issuer : ($seller !== '' ? $seller : '-'),
                     $actor,
-                    $row->issue_at ? (string) $row->issue_at : '',
+                    $this->formatDisplayDate((string) ($row->issue_at ?? '')),
                     (string) ($row->customer_name ?? ''),
                     (string) ($row->customer_doc_type ?? '-'),
                     (string) ($row->customer_doc_number ?? ''),

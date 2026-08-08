@@ -696,7 +696,7 @@ class PurchasesController
         $warehouseId = $request->query('warehouse_id');
         $format = strtolower($request->query('format', 'csv')); // csv or xlsx
 
-        $entries = $this->exportPurchasesStockEntriesUseCase->execute(
+        $export = $this->exportPurchasesStockEntriesUseCase->execute(
             ExportPurchasesStockEntriesCommand::fromInput(
                 $companyId,
                 $branchId,
@@ -705,21 +705,17 @@ class PurchasesController
                 $dateFrom,
                 $dateTo,
                 $warehouseId,
-                $format === 'json'
+                $format
             )
         );
 
         if ($format === 'json') {
             return response()->json([
-                'data' => $entries,
+                'data' => $export['data'],
             ]);
         }
 
-        if ($format === 'xlsx') {
-            return $this->exportAsExcel($entries);
-        } else {
-            return $this->exportAsCsv($entries);
-        }
+        return $this->buildTabularExportResponse($export);
     }
 
     /**
@@ -798,63 +794,24 @@ class PurchasesController
     /**
      * Export entries as CSV
      */
-    private function exportAsCsv($entries)
+    private function buildTabularExportResponse(array $export)
     {
-        $csv = "ID,Tipo,Referencia,Referencia_Proveedor,Fecha,Almacen,Cantidad_Items,Cantidad_Total,Descuento_Item,Descuento_Global,Descuento_Total,Importe_Total,Metodo_Pago,Notas\n";
-
-        foreach ($entries as $entry) {
-            $metadata = [];
-            if (isset($entry->metadata) && $entry->metadata !== null && $entry->metadata !== '') {
-                $decoded = is_string($entry->metadata) ? json_decode($entry->metadata, true) : $entry->metadata;
-                if (is_array($decoded)) {
-                    $metadata = $decoded;
-                }
-            }
-
-            $itemDiscount = (float) ($metadata['item_discount_total'] ?? 0);
-            $globalDiscount = (float) ($metadata['discount_total'] ?? 0);
-            $discountTotal = $itemDiscount + $globalDiscount;
-
-            $row = [
-                $entry->id,
-                $entry->entry_type === 'PURCHASE'
-                    ? 'Compra'
-                    : ($entry->entry_type === 'PURCHASE_ORDER'
-                        ? 'Orden de compra'
-                        : ($entry->entry_type === 'NON_TAX_IN'
-                            ? 'Ingreso no tributario'
-                            : ($entry->entry_type === 'NON_TAX_OUT' ? 'Salida no tributaria' : 'Ajuste'))),
-                '"' . str_replace('"', '""', $entry->reference_no ?? '') . '"',
-                '"' . str_replace('"', '""', $entry->supplier_reference ?? '') . '"',
-                substr($entry->issue_at, 0, 10),
-                '"' . str_replace('"', '""', $entry->warehouse_name ?? $entry->warehouse_code ?? '') . '"',
-                $entry->total_items,
-                number_format($entry->total_qty, 3, '.', ''),
-                number_format($itemDiscount, 2, '.', ''),
-                number_format($globalDiscount, 2, '.', ''),
-                number_format($discountTotal, 2, '.', ''),
-                number_format($entry->total_amount, 2, '.', ''),
-                '"' . str_replace('"', '""', $entry->payment_method ?? '') . '"',
-                '"' . str_replace('"', '""', $entry->notes ?? '') . '"',
-            ];
-            $csv .= implode(',', $row) . "\n";
+        $stream = fopen('php://temp', 'r+');
+        fputcsv($stream, $export['headers']);
+        foreach ($export['rows'] as $row) {
+            fputcsv($stream, $row);
         }
+        rewind($stream);
+        $content = stream_get_contents($stream);
+        fclose($stream);
 
-        return response($csv, 200)
-            ->header('Content-Type', 'text/csv; charset=utf-8')
-            ->header('Content-Disposition', 'attachment; filename="reporte_compras_' . date('Ymd_His') . '.csv"');
-    }
+        $contentType = $export['format'] === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'text/csv; charset=utf-8';
 
-    /**
-     * Export entries as Excel (basic: using CSV format for now, can integrate PhpSpreadsheet later)
-     */
-    private function exportAsExcel($entries)
-    {
-        // For now, return the same CSV but signal it as Excel
-        // Full Excel support requires package: composer require maatwebsite/excel
-        return $this->exportAsCsv($entries)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->header('Content-Disposition', 'attachment; filename="reporte_compras_' . date('Ymd_His') . '.xlsx"');
+        return response($content, 200)
+            ->header('Content-Type', $contentType)
+            ->header('Content-Disposition', 'attachment; filename="' . $export['filename'] . '"');
     }
 
     private function resolveTaxCategories(int $companyId)

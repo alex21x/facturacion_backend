@@ -31,7 +31,7 @@ use Illuminate\Support\Carbon;
 
 class SalesDocumentApplicationService implements SalesDocumentApplicationServiceInterface
 {
-    private const SALES_PRINT_TEMPLATE_SIGNATURE = 'tpl3';
+    private const SALES_PRINT_TEMPLATE_SIGNATURE = 'tpl4';
 
     public function __construct(
         private SalesDocumentReadService $salesDocumentReadService,
@@ -1253,7 +1253,9 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         $normalizedFormat = in_array($format, ['ticket', 'a4'], true) ? $format : 'ticket';
 
         $metadata = [];
-        if ($doc->metadata !== null && trim((string) $doc->metadata) !== '') {
+        if (is_array($doc->metadata)) {
+            $metadata = $doc->metadata;
+        } elseif ($doc->metadata !== null && trim((string) $doc->metadata) !== '') {
             $decoded = json_decode((string) $doc->metadata, true);
             if (is_array($decoded)) {
                 $metadata = $decoded;

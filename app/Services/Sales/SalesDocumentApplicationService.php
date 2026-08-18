@@ -1769,6 +1769,13 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             if (is_string($candidate) && trim($candidate) !== '') {
                 return trim($candidate);
             }
+
+            if (is_array($candidate)) {
+                $scalar = $this->extractFirstScalarValue($candidate);
+                if ($scalar !== '') {
+                    return $scalar;
+                }
+            }
         }
 
         foreach ($source as $value) {

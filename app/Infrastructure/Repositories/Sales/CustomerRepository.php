@@ -61,36 +61,42 @@ class CustomerRepository implements CustomerRepositoryInterface
 
             if ($search !== '') {
                 $like = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
-                $normalizedDoc = preg_replace('/\D+/', '', $search);
+                $normalizedDoc = preg_match('/^\d+$/', $search) === 1
+                    ? preg_replace('/\D+/', '', $search)
+                    : '';
+                $normalizedPlate = preg_replace('/[^A-Za-z0-9]+/', '', $search);
 
-                $query->where(function ($nested) use ($like, $normalizedDoc, $workshopVehicleSearchEnabled) {
+                $query->where(function ($nested) use ($like, $normalizedDoc, $normalizedPlate, $workshopVehicleSearchEnabled) {
                     $nested->where('c.doc_number', 'ilike', $like)
                         ->orWhere('c.legal_name', 'ilike', $like)
                         ->orWhere('c.trade_name', 'ilike', $like)
                         ->orWhere('c.first_name', 'ilike', $like)
                         ->orWhere('c.last_name', 'ilike', $like)
-                        ->orWhere('c.plate', 'ilike', $like)
                         ->orWhere('c.phone', 'ilike', $like)
                         ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like]);
+
+                    if (!$workshopVehicleSearchEnabled) {
+                        $nested->orWhere('c.plate', 'ilike', $like);
+                    }
 
                     if ($normalizedDoc !== '') {
                         $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(c.doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
                     }
 
                     if ($workshopVehicleSearchEnabled) {
-                        $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedDoc) {
+                        $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedPlate) {
                             $vehicleQuery->select(DB::raw('1'))
                                 ->from('sales.customer_vehicles as cv')
                                 ->whereColumn('cv.company_id', 'c.company_id')
                                 ->whereColumn('cv.customer_id', 'c.id')
                                 ->where('cv.status', 1)
-                                ->where(function ($vehicleNested) use ($like, $normalizedDoc) {
+                                ->where(function ($vehicleNested) use ($like, $normalizedPlate) {
                                     $vehicleNested->where('cv.plate', 'ilike', $like)
                                         ->orWhere('cv.brand', 'ilike', $like)
                                         ->orWhere('cv.model', 'ilike', $like);
 
-                                    if ($normalizedDoc !== '') {
-                                        $normalizedLike = strlen($normalizedDoc) <= 3 ? $normalizedDoc . '%' : '%' . $normalizedDoc . '%';
+                                    if ($normalizedPlate !== '') {
+                                        $normalizedLike = strlen($normalizedPlate) <= 3 ? $normalizedPlate . '%' : '%' . $normalizedPlate . '%';
                                         $vehicleNested->orWhere('cv.plate_normalized', 'ilike', $normalizedLike);
                                     }
                                 });

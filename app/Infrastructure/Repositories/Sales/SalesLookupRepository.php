@@ -2852,11 +2852,11 @@ class SalesLookupRepository
         }
 
         if ($issueDateFrom) {
-            $query->where('d.issue_at', '>=', $issueDateFrom . self::DAY_START_SUFFIX);
+            $query->where('d.created_at', '>=', $issueDateFrom . self::DAY_START_SUFFIX);
         }
 
         if ($issueDateTo) {
-            $query->where('d.issue_at', '<=', $issueDateTo . self::DAY_END_SUFFIX);
+            $query->where('d.created_at', '<=', $issueDateTo . self::DAY_END_SUFFIX);
         }
 
         if ($series !== '') {

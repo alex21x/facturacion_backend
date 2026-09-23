@@ -10,7 +10,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 {
     public function getCustomers(int $companyId, string $search, $status, int $limit, bool $autocomplete, bool $workshopVehicleSearchEnabled): array
     {
-        $limit = max(1, min($limit, 10000));
+        /*$limit = max(1, min($limit, 10000));
         $search = trim($search);
         $cacheKey = sprintf(
             'sales_customers:%d:%s:%s:%d:%d:%d',
@@ -112,7 +112,60 @@ class CustomerRepository implements CustomerRepositoryInterface
             return $query->get()->map(function ($row) {
                 return $this->customerSuggestionFromRow($row);
             })->values()->all();
+        });*/
+
+        $limit = max(1, min($limit, 10000));
+        $search = trim($search);
+
+        // 1. Cacheamos la lista base de la compañía por 5 minutos (evita golpear la BD en cada tipeo)
+        $cacheKey = "sales_customers_company_{$companyId}";
+        
+        $customers = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($companyId) {
+            return DB::table('sales.customers as c')
+                ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
+                ->leftJoin('sales.customer_price_profiles as cpp', function ($join) use ($companyId) {
+                    $join->on('cpp.customer_id', '=', 'c.id')
+                        ->where('cpp.company_id', '=', $companyId);
+                })
+                ->leftJoin('sales.price_tiers as pt', function ($join) use ($companyId) {
+                    $join->on('pt.id', '=', 'cpp.default_tier_id')
+                        ->where('pt.company_id', '=', $companyId);
+                })
+                ->select([
+                    'c.id', 'c.doc_type', 'c.customer_type_id', 'ct.name as customer_type_name',
+                    'ct.sunat_code as customer_type_sunat_code', 'c.doc_number', 'c.legal_name',
+                    'c.trade_name', 'c.first_name', 'c.last_name', 'c.email', 'c.plate',
+                    'c.address', 'c.phone', 'c.status', 'cpp.default_tier_id', 'cpp.discount_percent',
+                    'cpp.status as price_profile_status', 'pt.code as default_tier_code', 'pt.name as default_tier_name',
+                ])
+                ->where('c.company_id', $companyId)
+                ->orderBy('c.legal_name')
+                ->get();
         });
+
+        // 2. Si hay término de búsqueda, filtramos en memoria (admite subcadenas en cualquier parte del legal_name)
+        if ($search !== '') {
+            $lowerSearch = mb_strtolower($search);
+            $customers = $customers->filter(function ($row) use ($lowerSearch) {
+                $fullName = mb_strtolower(($row->first_name ?? '') . ' ' . ($row->last_name ?? ''));
+                
+                return str_contains(mb_strtolower($row->legal_name ?? ''), $lowerSearch)
+                    || str_contains(mb_strtolower($row->trade_name ?? ''), $lowerSearch)
+                    || str_contains(mb_strtolower($row->doc_number ?? ''), $lowerSearch)
+                    || str_contains(mb_strtolower($row->phone ?? ''), $lowerSearch)
+                    || str_contains($fullName, $lowerSearch);
+            });
+        }
+
+        // 3. Aplicar filtro de status si viene en la petición
+        if ($status !== null && $status !== '') {
+            $customers = $customers->where('status', (int) $status);
+        }
+
+        // 4. Retornar mapeado con el límite solicitado
+        return $customers->take($limit)->map(function ($row) {
+            return $this->customerSuggestionFromRow($row);
+        })->values()->all();
     }
 
     private function customerSuggestionFromRow($row): array

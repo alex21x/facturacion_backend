@@ -14,7 +14,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
 {
     public function listMovements(int $companyId, ?int $sessionId, ?int $cashRegisterId, int $limit, array $documentRefTypes, array $excludedDocumentStatuses): Collection
     {
-        $query = DB::table('sales.cash_movements as cm')
+        /*$query = DB::table('sales.cash_movements as cm')
             ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cm.user_id, cm.created_by)'))
             ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
                 $join->on('cd.id', '=', 'cm.ref_id')
@@ -83,7 +83,87 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             $query->where('cm.cash_register_id', $cashRegisterId);
         }
 
-        return $query->get();
+        return $query->get();*/
+
+        // Paso 1: Subconsulta limpia que solo obtiene los IDs y datos base de cash_movements ya filtrados y limitados
+    $baseQuery = DB::table('sales.cash_movements as cm')
+        ->where('cm.company_id', $companyId);
+
+    if ($sessionId !== null) {
+        $baseQuery->where('cm.cash_session_id', $sessionId);
+    }
+    if ($cashRegisterId !== null) {
+        $baseQuery->where('cm.cash_register_id', $cashRegisterId);
+    }
+
+    $baseQuery->orderByDesc('cm.movement_at')
+        ->limit($limit);
+
+    // Paso 2: Usamos la subconsulta como tabla base (FROM subquery), evitando joins masivos innecesarios
+    $query = DB::query()->fromSub($baseQuery, 'cm')
+        ->leftJoin('auth.users as u', 'u.id', '=', DB::raw('COALESCE(cm.user_id, cm.created_by)'))
+        ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
+            $join->on('cd.id', '=', 'cm.ref_id')
+                ->whereIn('cm.ref_type', $documentRefTypes);
+        })
+        ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
+        ->leftJoin('sales.document_kinds as dk_cd_code', function ($join): void {
+            $join->on(DB::raw('UPPER(dk_cd_code.code)'), '=', DB::raw('UPPER(cd.document_kind)'))
+                ->whereNull('dk_cd.id');
+        })
+        ->leftJoin('sales.commercial_documents as dsrc', function ($join): void {
+            $join->on('dsrc.company_id', '=', 'cd.company_id')
+                ->whereRaw("dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)");
+        })
+        ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
+        ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
+        ->leftJoin('auth.users as u_src', 'u_src.id', '=', 'dsrc.created_by')
+        ->leftJoin('sales.document_kinds as dk_src', 'dk_src.id', '=', 'dsrc.document_kind_id')
+        ->leftJoin('sales.document_kinds as dk_src_code', function ($join): void {
+            $join->on(DB::raw('UPPER(dk_src_code.code)'), '=', DB::raw('UPPER(dsrc.document_kind)'))
+                ->whereNull('dk_src.id');
+        })
+        ->select([
+            'cm.id',
+            'cm.cash_register_id',
+            'cm.cash_session_id',
+            DB::raw("CASE
+                WHEN UPPER(COALESCE(dk_cd.code, dk_cd_code.code, cd.document_kind, '')) LIKE 'CREDIT_NOTE%' THEN 'OUT'
+                WHEN UPPER(COALESCE(dk_cd.code, dk_cd_code.code, cd.document_kind, '')) LIKE 'DEBIT_NOTE%' THEN 'IN'
+                WHEN cm.movement_type = 'INCOME' THEN 'IN'
+                WHEN cm.movement_type = 'EXPENSE' THEN 'OUT'
+                ELSE cm.movement_type
+            END as movement_type"),
+            'cm.amount',
+            DB::raw('COALESCE(cm.description, cm.notes) as description'),
+            'cm.ref_type',
+            'cm.ref_id',
+            DB::raw("COALESCE(dk_cd.label, dk_cd_code.label, cd.document_kind) as document_kind_label"),
+            DB::raw("CASE WHEN cd.id IS NOT NULL THEN CONCAT(cd.series, '-', cd.number) ELSE NULL END as document_number"),
+            DB::raw("NULLIF(COALESCE((cd.metadata->>'source_document_id'), ''), '') as source_document_id"),
+            DB::raw("CASE WHEN dsrc.id IS NOT NULL THEN CONCAT(dsrc.series, '-', dsrc.number) ELSE NULL END as source_document_number"),
+            DB::raw("COALESCE(dk_src.label, dk_src_code.label, dsrc.document_kind) as source_document_kind_label"),
+            DB::raw('COALESCE(cm.user_id, cm.created_by) as user_id'),
+            DB::raw("CONCAT(u.first_name, ' ', u.last_name) as user_name"),
+            DB::raw("CONCAT(u_doc.first_name, ' ', u_doc.last_name) as issuer_user_name"),
+            DB::raw("COALESCE(
+                NULLIF(TRIM(COALESCE((cd.metadata->>'origin_seller_user_name'), '')), ''),
+                NULLIF(TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), '')), '')
+            ) as origin_seller_user_name"),
+            'cm.movement_at',
+            DB::raw("pm.name as payment_method_name"),
+        ]);
+
+        // Aplicar filtro de exclusión de documentos
+        $query->where(function ($q) use ($documentRefTypes, $excludedDocumentStatuses): void {
+            $q->whereNotIn('cm.ref_type', $documentRefTypes)
+                ->orWhere(function ($nested) use ($excludedDocumentStatuses): void {
+                    $nested->whereNotNull('cd.id')
+                        ->whereNotIn('cd.status', $excludedDocumentStatuses);
+                });
+    });
+
+    return $query->orderByDesc('cm.movement_at')->get();
     }
 
     public function findMovementById(int $movementId): ?CashMovementDTO

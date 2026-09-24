@@ -742,6 +742,7 @@ class SalesLookupRepository
 
     public function paginateCommercialDocuments(int $companyId, array $filters, int $page, int $limit): array
     {
+      // 1. Query para contar el total (se mantiene igual, ya que solo cuenta IDs)
         $countQuery = DB::table('sales.commercial_documents as d')
             ->where('d.company_id', $companyId);
 
@@ -751,7 +752,30 @@ class SalesLookupRepository
         }
 
         $this->applyCommercialDocumentFilters($countQuery, $filters);
+        $total = (int) $countQuery->count('d.id');
+        
+        $lastPage = (int) max(1, ceil($total / $limit));
+        if ($page > $lastPage) {
+            $page = $lastPage;
+        }
 
+        // 2. Subconsulta base: Filtra, ordena, pagina y obtiene SOLO los IDs de la página actual
+        $baseQuery = DB::table('sales.commercial_documents as d')
+            ->where('d.company_id', $companyId);
+
+        if ($customerFilter !== '') {
+            $baseQuery->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id');
+        }
+
+        $this->applyCommercialDocumentFilters($baseQuery, $filters);
+
+        $baseQuery->select('d.id')
+            ->orderByRaw('COALESCE(d.created_at, d.issue_at) DESC')
+            ->orderBy('d.id', 'desc')
+            ->offset(($page - 1) * $limit)
+            ->limit($limit);
+
+        // 3. Subconsultas de apoyo para agregaciones (ítems y conversiones)
         $itemDiscountTotals = DB::table('sales.commercial_document_items as di')
             ->select([
                 'di.document_id',
@@ -776,7 +800,9 @@ class SalesLookupRepository
             ->whereRaw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0) > 0")
             ->groupBy('dconv.company_id', DB::raw("COALESCE((dconv.metadata->>'source_document_id')::BIGINT, 0)"));
 
-        $query = DB::table('sales.commercial_documents as d')
+        // 4. Consulta principal: Une los JOINs pesados ÚNICAMENTE sobre los IDs paginados
+        $rows = DB::query()->fromSub($baseQuery, 'filtered_docs')
+            ->join('sales.commercial_documents as d', 'd.id', '=', 'filtered_docs.id')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'd.payment_method_id')
             ->leftJoin('auth.users as u_creator', 'u_creator.id', '=', 'd.created_by')
@@ -881,21 +907,8 @@ class SalesLookupRepository
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(d.vehicle_model_snapshot AS TEXT)), ''), (d.metadata->>'vehicle_model'), (d.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 DB::raw("TRIM(COALESCE(CONCAT(COALESCE(u_creator.first_name, ''), ' ', COALESCE(u_creator.last_name, '')), '')) as created_by_user_name"),
             ])
-            ->where('d.company_id', $companyId);
-
-        $this->applyCommercialDocumentFilters($query, $filters);
-
-        $total = (int) $countQuery->count('d.id');
-        $lastPage = (int) max(1, ceil($total / $limit));
-        if ($page > $lastPage) {
-            $page = $lastPage;
-        }
-
-        $rows = $query
             ->orderByRaw('COALESCE(d.created_at, d.issue_at) DESC')
             ->orderBy('d.id', 'desc')
-            ->offset(($page - 1) * $limit)
-            ->limit($limit)
             ->get();
 
         return [

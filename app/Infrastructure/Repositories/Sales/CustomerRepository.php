@@ -10,162 +10,114 @@ class CustomerRepository implements CustomerRepositoryInterface
 {
     public function getCustomers(int $companyId, string $search, $status, int $limit, bool $autocomplete, bool $workshopVehicleSearchEnabled): array
     {
-        /*$limit = max(1, min($limit, 10000));
-        $search = trim($search);
-        $cacheKey = sprintf(
-            'sales_customers:%d:%s:%s:%d:%d:%d',
-            $companyId,
-            md5(mb_strtolower($search)),
-            $status === null || $status === '' ? 'all' : (string) (int) $status,
-            $limit,
-            $autocomplete ? 1 : 0,
-            $workshopVehicleSearchEnabled ? 1 : 0
-        );
-
-        return Cache::remember($cacheKey, now()->addSeconds(20), function () use ($companyId, $search, $status, $limit, $workshopVehicleSearchEnabled) {
-            $query = DB::table('sales.customers as c')
-                ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
-                ->leftJoin('sales.customer_price_profiles as cpp', function ($join) use ($companyId) {
-                    $join->on('cpp.customer_id', '=', 'c.id')
-                        ->where('cpp.company_id', '=', $companyId);
-                })
-                ->leftJoin('sales.price_tiers as pt', function ($join) use ($companyId) {
-                    $join->on('pt.id', '=', 'cpp.default_tier_id')
-                        ->where('pt.company_id', '=', $companyId);
-                })
-                ->select([
-                    'c.id',
-                    'c.doc_type',
-                    'c.customer_type_id',
-                    'ct.name as customer_type_name',
-                    'ct.sunat_code as customer_type_sunat_code',
-                    'c.doc_number',
-                    'c.legal_name',
-                    'c.trade_name',
-                    'c.first_name',
-                    'c.last_name',
-                    'c.email',
-                    'c.plate',
-                    'c.address',
-                    'c.phone',
-                    'c.status',
-                    'cpp.default_tier_id',
-                    'cpp.discount_percent',
-                    'cpp.status as price_profile_status',
-                    'pt.code as default_tier_code',
-                    'pt.name as default_tier_name',
-                ])
-                ->where('c.company_id', $companyId)
-                ->orderBy('c.legal_name')
-                ->limit($limit);
-
-            if ($search !== '') {
-                $like = strlen($search) <= 3 ? $search . '%' : '%' . $search . '%';
-                $normalizedDoc = preg_match('/^\d+$/', $search) === 1
-                    ? preg_replace('/\D+/', '', $search)
-                    : '';
-                $normalizedPlate = preg_replace('/[^A-Za-z0-9]+/', '', $search);
-
-                $query->where(function ($nested) use ($like, $normalizedDoc, $normalizedPlate, $workshopVehicleSearchEnabled) {
-                    $nested->where('c.doc_number', 'ilike', $like)
-                        ->orWhere('c.legal_name', 'ilike', $like)
-                        ->orWhere('c.trade_name', 'ilike', $like)
-                        ->orWhere('c.first_name', 'ilike', $like)
-                        ->orWhere('c.last_name', 'ilike', $like)
-                        ->orWhere('c.phone', 'ilike', $like)
-                        ->orWhereRaw("CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE ?", [$like]);
-
-                    if (!$workshopVehicleSearchEnabled) {
-                        $nested->orWhere('c.plate', 'ilike', $like);
-                    }
-
-                    if ($normalizedDoc !== '') {
-                        $nested->orWhereRaw("REGEXP_REPLACE(COALESCE(c.doc_number, ''), '\\D', '', 'g') ILIKE ?", ['%' . $normalizedDoc . '%']);
-                    }
-
-                    if ($workshopVehicleSearchEnabled) {
-                        $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedPlate) {
-                            $vehicleQuery->select(DB::raw('1'))
-                                ->from('sales.customer_vehicles as cv')
-                                ->whereColumn('cv.company_id', 'c.company_id')
-                                ->whereColumn('cv.customer_id', 'c.id')
-                                ->where('cv.status', 1)
-                                ->where(function ($vehicleNested) use ($like, $normalizedPlate) {
-                                    $vehicleNested->where('cv.plate', 'ilike', $like)
-                                        ->orWhere('cv.brand', 'ilike', $like)
-                                        ->orWhere('cv.model', 'ilike', $like);
-
-                                    if ($normalizedPlate !== '') {
-                                        $normalizedLike = strlen($normalizedPlate) <= 3 ? $normalizedPlate . '%' : '%' . $normalizedPlate . '%';
-                                        $vehicleNested->orWhere('cv.plate_normalized', 'ilike', $normalizedLike);
-                                    }
-                                });
-                        });
-                    }
-                });
-            }
-
-            if ($status !== null && $status !== '') {
-                $query->where('c.status', (int) $status);
-            }
-
-            return $query->get()->map(function ($row) {
-                return $this->customerSuggestionFromRow($row);
-            })->values()->all();
-        });*/
-
         $limit = max(1, min($limit, 10000));
-        $search = trim($search);
+    $search = trim($search);
 
-        // 1. Cacheamos la lista base de la compañía por 5 minutos (evita golpear la BD en cada tipeo)
-        $cacheKey = "sales_customers_company_{$companyId}";
+    $cacheKey = sprintf(
+        'sales_customers:%d:%s:%s:%d:%d:%d',
+        $companyId,
+        md5(mb_strtolower($search)),
+        $status === null || $status === '' ? 'all' : (string) (int) $status,
+        $limit,
+        $autocomplete ? 1 : 0,
+        $workshopVehicleSearchEnabled ? 1 : 0
+    );
+
+    return Cache::remember($cacheKey, now()->addSeconds(20), function () use ($companyId, $search, $status, $limit, $workshopVehicleSearchEnabled) {
         
-        $customers = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($companyId) {
-            return DB::table('sales.customers as c')
-                ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
-                ->leftJoin('sales.customer_price_profiles as cpp', function ($join) use ($companyId) {
-                    $join->on('cpp.customer_id', '=', 'c.id')
-                        ->where('cpp.company_id', '=', $companyId);
-                })
-                ->leftJoin('sales.price_tiers as pt', function ($join) use ($companyId) {
-                    $join->on('pt.id', '=', 'cpp.default_tier_id')
-                        ->where('pt.company_id', '=', $companyId);
-                })
-                ->select([
-                    'c.id', 'c.doc_type', 'c.customer_type_id', 'ct.name as customer_type_name',
-                    'ct.sunat_code as customer_type_sunat_code', 'c.doc_number', 'c.legal_name',
-                    'c.trade_name', 'c.first_name', 'c.last_name', 'c.email', 'c.plate',
-                    'c.address', 'c.phone', 'c.status', 'cpp.default_tier_id', 'cpp.discount_percent',
-                    'cpp.status as price_profile_status', 'pt.code as default_tier_code', 'pt.name as default_tier_name',
-                ])
-                ->where('c.company_id', $companyId)
-                ->orderBy('c.legal_name')
-                ->get();
-        });
+        // Paso 1: Subconsulta limpia que filtra, ordena y limita SOLO en la tabla base sales.customers
+        $baseQuery = DB::table('sales.customers as c')
+            ->where('c.company_id', $companyId);
 
-        // 2. Si hay término de búsqueda, filtramos en memoria (admite subcadenas en cualquier parte del legal_name)
+        if ($status !== null && $status !== '') {
+            $baseQuery->where('c.status', (int) $status);
+        }
+
         if ($search !== '') {
-            $lowerSearch = mb_strtolower($search);
-            $customers = $customers->filter(function ($row) use ($lowerSearch) {
-                $fullName = mb_strtolower(($row->first_name ?? '') . ' ' . ($row->last_name ?? ''));
-                
-                return str_contains(mb_strtolower($row->legal_name ?? ''), $lowerSearch)
-                    || str_contains(mb_strtolower($row->trade_name ?? ''), $lowerSearch)
-                    || str_contains(mb_strtolower($row->doc_number ?? ''), $lowerSearch)
-                    || str_contains(mb_strtolower($row->phone ?? ''), $lowerSearch)
-                    || str_contains($fullName, $lowerSearch);
+            $like = $search . '%';
+            $isNumeric = ctype_digit($search);
+            $normalizedPlate = preg_replace('/[^A-Za-z0-9]+/', '', $search);
+
+            $baseQuery->where(function ($nested) use ($like, $isNumeric, $normalizedPlate, $workshopVehicleSearchEnabled) {
+                if ($isNumeric) {
+                    $nested->where('c.doc_number', 'ilike', $like)
+                           ->orWhere('c.phone', 'ilike', $like);
+                    return;
+                }
+
+                $nested->where('c.legal_name', 'ilike', $like)
+                       ->orWhere('c.trade_name', 'ilike', $like)
+                       ->orWhere('c.first_name', 'ilike', $like)
+                       ->orWhere('c.last_name', 'ilike', $like)
+                       ->orWhere('c.phone', 'ilike', $like)
+                       ->orWhereRaw("c.first_name || ' ' || c.last_name ILIKE ?", [$like]);
+
+                if (!$workshopVehicleSearchEnabled) {
+                    $nested->orWhere('c.plate', 'ilike', $like);
+                }
+
+                if ($workshopVehicleSearchEnabled) {
+                    $nested->orWhereExists(function ($vehicleQuery) use ($like, $normalizedPlate) {
+                        $vehicleQuery->select(DB::raw('1'))
+                            ->from('sales.customer_vehicles as cv')
+                            ->whereColumn('cv.company_id', 'c.company_id')
+                            ->whereColumn('cv.customer_id', 'c.id')
+                            ->where('cv.status', 1)
+                            ->where(function ($vehicleNested) use ($like, $normalizedPlate) {
+                                $vehicleNested->where('cv.plate', 'ilike', $like)
+                                    ->orWhere('cv.brand', 'ilike', $like)
+                                    ->orWhere('cv.model', 'ilike', $like);
+
+                                if ($normalizedPlate !== '') {
+                                    $normalizedLike = strlen($normalizedPlate) <= 3 ? $normalizedPlate . '%' : '%' . $normalizedPlate . '%';
+                                    $vehicleNested->orWhere('cv.plate_normalized', 'ilike', $normalizedLike);
+                                }
+                            });
+                    });
+                }
             });
         }
 
-        // 3. Aplicar filtro de status si viene en la petición
-        if ($status !== null && $status !== '') {
-            $customers = $customers->where('status', (int) $status);
-        }
+        $baseQuery->orderBy('c.legal_name')->limit($limit);
 
-        // 4. Retornar mapeado con el límite solicitado
-        return $customers->take($limit)->map(function ($row) {
+        // Paso 2: Aplicamos los LEFT JOIN pesados únicamente sobre el resultado ya limitado
+        $query = DB::query()->fromSub($baseQuery, 'c')
+            ->leftJoin('sales.customer_types as ct', 'ct.id', '=', 'c.customer_type_id')
+            ->leftJoin('sales.customer_price_profiles as cpp', function ($join) use ($companyId) {
+                $join->on('cpp.customer_id', '=', 'c.id')
+                    ->where('cpp.company_id', '=', $companyId);
+            })
+            ->leftJoin('sales.price_tiers as pt', function ($join) use ($companyId) {
+                $join->on('pt.id', '=', 'cpp.default_tier_id')
+                    ->where('pt.company_id', '=', $companyId);
+            })
+            ->select([
+                'c.id',
+                'c.doc_type',
+                'c.customer_type_id',
+                'ct.name as customer_type_name',
+                'ct.sunat_code as customer_type_sunat_code',
+                'c.doc_number',
+                'c.legal_name',
+                'c.trade_name',
+                'c.first_name',
+                'c.last_name',
+                'c.email',
+                'c.plate',
+                'c.address',
+                'c.phone',
+                'c.status',
+                'cpp.default_tier_id',
+                'cpp.discount_percent',
+                'cpp.status as price_profile_status',
+                'pt.code as default_tier_code',
+                'pt.name as default_tier_name',
+            ]);
+
+        return $query->get()->map(function ($row) {
             return $this->customerSuggestionFromRow($row);
         })->values()->all();
+    });
     }
 
     private function customerSuggestionFromRow($row): array

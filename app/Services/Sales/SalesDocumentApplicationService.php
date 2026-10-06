@@ -1529,6 +1529,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         ], static fn ($value) => $value !== '')));
         $vehicleOdometerRaw = preg_replace('/\D+/', '', (string) ($metadata['vehicle_odometer_km'] ?? ''));
         $vehicleOdometer = $vehicleOdometerRaw !== '' ? number_format((int) $vehicleOdometerRaw, 0, '.', ',') . ' km' : '';
+        $vehicleNextOdometerRaw = preg_replace('/\D+/', '', (string) ($metadata['vehicle_next_odometer_km'] ?? ''));
+        $vehicleNextOdometer = $vehicleNextOdometerRaw !== '' ? number_format((int) $vehicleNextOdometerRaw, 0, '.', ',') . ' km' : '';
         $totalWords = $this->amountToSpanishWords($grandTotal, (string) ($doc->currency_code ?? 'PEN'));
 
         logger()->info('SalesDocumentApplicationService printable flags', [
@@ -1566,6 +1568,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'showVehicleInfo' => $showVehicleInfo,
             'vehicleInfo' => $vehicleInfo,
             'vehicleOdometer' => $vehicleOdometer,
+            'vehicleNextOdometer' => $vehicleNextOdometer,
             'documentNotes' => $documentNotes,
             'paymentMethod' => (string) ($doc->payment_method_name ?? '-'),
             'paymentBreakdown' => $paymentBreakdown,

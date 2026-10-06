@@ -156,10 +156,6 @@ class CashController extends Controller
         $sessionId = ($sessionId !== null && $sessionId !== '') ? (int) $sessionId : null;
         $cashRegId = ($cashRegId !== null && $cashRegId !== '') ? (int) $cashRegId : null;
 
-        if ($sessionId !== null) {
-            $this->ensureSessionCommercialDocumentMovements($companyId, $sessionId);
-        }
-
         return response()->json([
             'data' => $this->cashMovementService->listMovements(
                 $companyId,
@@ -182,8 +178,6 @@ class CashController extends Controller
         if (!$session) {
             return response()->json(['message' => 'Sesion no encontrada'], 404);
         }
-
-        $this->ensureSessionCommercialDocumentMovements($companyId, $sessionId);
 
         $totalIn = $this->cashSessionService->sumSessionIncome($sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
         $totalOut = $this->cashSessionService->sumSessionExpense($sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);

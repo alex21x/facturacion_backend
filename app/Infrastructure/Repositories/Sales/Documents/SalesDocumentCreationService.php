@@ -302,7 +302,10 @@ class SalesDocumentCreationService
                 $sourceDocumentKind = strtoupper(trim((string) ($metadataPayload['source_document_kind'] ?? '')));
                 $skipCashPostingForConvertedSalesOrder = $sourceDocumentId > 0 && $sourceDocumentKind === 'SALES_ORDER';
 
-                if (!$skipCashPostingForConvertedSalesOrder) {
+                $movedFromOrder = $skipCashPostingForConvertedSalesOrder
+                    && $this->cashPostingService->reassignOrderMovementsToDocument($companyId, $sourceDocumentId, (int) $documentId);
+
+                if (!$movedFromOrder) {
                     $this->cashPostingService->registerCashIncomeFromDocument(
                         $companyId,
                         $branchId !== null ? (int) $branchId : null,

@@ -128,6 +128,23 @@ class SalesDocumentCashPostingService
             ]);
     }
 
+    // Moves the sales order's cash movements to the invoice emitted from it; returns false when the order had none.
+    public function reassignOrderMovementsToDocument(int $companyId, int $sourceOrderId, int $documentId): bool
+    {
+        if (!$this->tableExists('sales.cash_movements')) {
+            return false;
+        }
+
+        $moved = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'COMMERCIAL_DOCUMENT')
+            ->where('ref_id', $sourceOrderId)
+            ->whereIn('movement_type', ['IN', 'INCOME', 'OUT', 'EXPENSE'])
+            ->update(['ref_id' => $documentId]);
+
+        return $moved > 0;
+    }
+
     private function tableExists(string $qualifiedTable): bool
     {
         [$schema, $table] = strpos($qualifiedTable, '.') === false ? ['public', $qualifiedTable] : explode('.', $qualifiedTable, 2);

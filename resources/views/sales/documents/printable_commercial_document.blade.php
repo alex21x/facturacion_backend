@@ -61,6 +61,7 @@
                         @if ($showVehicleInfo)<div class="line"><span class="k">TELEFONO:</span><span class="v">{{ $customerPhone ?: ($companyPhone ?: '-') }}</span></div>@endif
                         <div class="line"><span class="k">DIRECCION:</span><span class="v">{{ $customerAddress ?: '-' }}</span></div>
                         @if ($showVehicleInfo && !empty($vehicleInfo))<div class="line"><span class="k">VEHICULO:</span><span class="v">{{ $vehicleInfo }}</span></div>@endif
+                        @if ($showVehicleInfo && !empty($vehicleOdometer))<div class="line"><span class="k">KILOMETRAJE:</span><span class="v">{{ $vehicleOdometer }}</span></div>@endif
                     </td>
                     <td>
                         <div class="line"><span class="k">FECHA EMISION:</span><span class="v">{{ $issueDateOnly ?: $issueDate }}</span></div>
@@ -170,6 +171,7 @@
         <div class="ticket-row"><div class="ticket-label">DIRECCION:</div><div class="ticket-value">{{ $customerAddress ?: '-' }}</div></div>
         @if ($showVehicleInfo)<div class="ticket-row"><div class="ticket-label">TEL.:</div><div class="ticket-value">{{ $customerPhone ?: '-' }}</div></div>@endif
         @if ($showVehicleInfo && !empty($vehicleInfo))<div class="ticket-row"><div class="ticket-label">VEHICULO:</div><div class="ticket-value">{{ $vehicleInfo }}</div></div>@endif
+        @if ($showVehicleInfo && !empty($vehicleOdometer))<div class="ticket-row"><div class="ticket-label">KILOMETRAJE:</div><div class="ticket-value">{{ $vehicleOdometer }}</div></div>@endif
 
         <div class="ticket-divider"></div>
 

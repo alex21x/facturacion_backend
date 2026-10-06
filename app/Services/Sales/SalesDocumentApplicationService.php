@@ -1527,6 +1527,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             trim((string) ($doc->vehicle_brand_snapshot ?? '')),
             trim((string) ($doc->vehicle_model_snapshot ?? '')),
         ], static fn ($value) => $value !== '')));
+        $vehicleOdometerRaw = preg_replace('/\D+/', '', (string) ($metadata['vehicle_odometer_km'] ?? ''));
+        $vehicleOdometer = $vehicleOdometerRaw !== '' ? number_format((int) $vehicleOdometerRaw, 0, '.', ',') . ' km' : '';
         $totalWords = $this->amountToSpanishWords($grandTotal, (string) ($doc->currency_code ?? 'PEN'));
 
         logger()->info('SalesDocumentApplicationService printable flags', [
@@ -1563,6 +1565,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'customerPhone' => $customerPhone,
             'showVehicleInfo' => $showVehicleInfo,
             'vehicleInfo' => $vehicleInfo,
+            'vehicleOdometer' => $vehicleOdometer,
             'documentNotes' => $documentNotes,
             'paymentMethod' => (string) ($doc->payment_method_name ?? '-'),
             'paymentBreakdown' => $paymentBreakdown,

@@ -19,7 +19,7 @@ Route::middleware('throttle:2000,1')->group(function () {
     Route::post('/auth/refresh', 'Api\\AuthController@refresh');
 });
 
-Route::middleware(['auth.token', 'tenant.rate', 'throttle:18000,1'])->group(function () {
+Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'throttle:18000,1'])->group(function () {
     Route::get('/auth/me', 'Api\\AuthController@me');
     Route::post('/auth/logout', 'Api\\AuthController@logout');
     Route::get('/appcfg/system-backups/database-export', 'Api\\AppConfigController@exportSystemDatabaseBackup')->middleware('admin.only');

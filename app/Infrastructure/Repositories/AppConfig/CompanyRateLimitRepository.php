@@ -89,6 +89,8 @@ class CompanyRateLimitRepository
                 'requests_per_minute_read',
                 'requests_per_minute_write',
                 'requests_per_minute_reports',
+                'response_delay_enabled',
+                'response_delay_ms',
                 'plan_code',
                 'last_preset_code',
                 'updated_at',
@@ -120,6 +122,22 @@ class CompanyRateLimitRepository
             ->first();
     }
 
+    public function findCompanyResponseDelaySettings(int $companyId): ?object
+    {
+        return DB::table('appcfg.company_rate_limits as limits')
+            ->leftJoin('appcfg.company_subscriptions as subscriptions', 'subscriptions.company_id', '=', 'limits.company_id')
+            ->where('limits.company_id', $companyId)
+            ->first([
+                'limits.response_delay_enabled',
+                'limits.response_delay_ms',
+                'subscriptions.billing_cycle',
+                'subscriptions.status as subscription_status',
+                'subscriptions.starts_at',
+                'subscriptions.current_period_starts_at',
+                'subscriptions.current_period_ends_at',
+            ]);
+    }
+
     public function companyExists(int $companyId): bool
     {
         return DB::table('core.companies')->where('id', $companyId)->exists();
@@ -136,20 +154,23 @@ class CompanyRateLimitRepository
 
     public function upsertCompanyRateLimit(int $companyId, array $payload, ?int $updatedBy): void
     {
+        $values = [
+            'is_enabled' => (bool) $payload['is_enabled'],
+            'requests_per_minute' => (int) $payload['requests_per_minute_read'],
+            'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
+            'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
+            'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
+            'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
+            'last_preset_code' => $payload['preset_code'] ?? null,
+            'updated_by' => $updatedBy,
+            'updated_at' => now(),
+            'created_at' => now(),
+        ];
+        $this->appendResponseDelayValues($values, $payload);
+
         DB::table('appcfg.company_rate_limits')->updateOrInsert(
             ['company_id' => $companyId],
-            [
-                'is_enabled' => (bool) $payload['is_enabled'],
-                'requests_per_minute' => (int) $payload['requests_per_minute_read'],
-                'requests_per_minute_read' => (int) $payload['requests_per_minute_read'],
-                'requests_per_minute_write' => (int) $payload['requests_per_minute_write'],
-                'requests_per_minute_reports' => (int) $payload['requests_per_minute_reports'],
-                'plan_code' => (string) ($payload['plan_code'] ?? 'CUSTOM'),
-                'last_preset_code' => $payload['preset_code'] ?? null,
-                'updated_by' => $updatedBy,
-                'updated_at' => now(),
-                'created_at' => now(),
-            ]
+            $values
         );
 
         $this->forgetCompanyRateLimitCache($companyId);
@@ -157,14 +178,15 @@ class CompanyRateLimitRepository
 
     public function upsertCompanyRateLimitsBatch(array $companyIds, array $payload, ?int $updatedBy): void
     {
-        if ($companyIds === []) {
+        $normalizedCompanyIds = array_values(array_unique(array_map(static fn ($id) => (int) $id, $companyIds)));
+        if ($normalizedCompanyIds === []) {
             return;
         }
 
         $now = now();
         $rows = [];
-        foreach ($companyIds as $companyId) {
-            $rows[] = [
+        foreach ($normalizedCompanyIds as $companyId) {
+            $row = [
                 'company_id' => (int) $companyId,
                 'is_enabled' => (bool) $payload['is_enabled'],
                 'requests_per_minute' => (int) $payload['requests_per_minute_read'],
@@ -177,22 +199,32 @@ class CompanyRateLimitRepository
                 'updated_at' => $now,
                 'created_at' => $now,
             ];
+            $this->appendResponseDelayValues($row, $payload);
+            $rows[] = $row;
+        }
+
+        $updateColumns = [
+            'is_enabled',
+            'requests_per_minute',
+            'requests_per_minute_read',
+            'requests_per_minute_write',
+            'requests_per_minute_reports',
+            'plan_code',
+            'last_preset_code',
+            'updated_by',
+            'updated_at',
+        ];
+        if (array_key_exists('response_delay_enabled', $payload)) {
+            $updateColumns[] = 'response_delay_enabled';
+        }
+        if (array_key_exists('response_delay_ms', $payload)) {
+            $updateColumns[] = 'response_delay_ms';
         }
 
         DB::table('appcfg.company_rate_limits')->upsert(
             $rows,
             ['company_id'],
-            [
-                'is_enabled',
-                'requests_per_minute',
-                'requests_per_minute_read',
-                'requests_per_minute_write',
-                'requests_per_minute_reports',
-                'plan_code',
-                'last_preset_code',
-                'updated_by',
-                'updated_at',
-            ]
+            $updateColumns
         );
 
         foreach ($normalizedCompanyIds as $companyId) {
@@ -204,6 +236,16 @@ class CompanyRateLimitRepository
     {
         foreach (['read', 'write', 'reports'] as $profile) {
             Cache::forget(sprintf('tenant_rate_limit_cfg:%d:%s', $companyId, $profile));
+        }
+        Cache::forget(sprintf('%s:%d', config('company_response_delay.cache_key_prefix'), $companyId));
+    }
+
+    private function appendResponseDelayValues(array &$values, array $payload): void
+    {
+        foreach (['response_delay_enabled', 'response_delay_ms'] as $key) {
+            if (array_key_exists($key, $payload)) {
+                $values[$key] = $payload[$key];
+            }
         }
     }
 }

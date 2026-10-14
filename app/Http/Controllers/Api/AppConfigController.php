@@ -597,6 +597,7 @@ class AppConfigController extends Controller
                 'requests_per_minute_read' => $defaultRead,
                 'requests_per_minute_write' => $defaultWrite,
                 'requests_per_minute_reports' => $defaultReports,
+                'max_response_delay_ms' => (int) config('company_response_delay.max_delay_ms'),
             ],
             'presets' => $this->companyRateLimitPresets($defaultRead, $defaultWrite, $defaultReports),
             'companies' => $rows,

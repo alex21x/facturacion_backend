@@ -3,6 +3,7 @@
 namespace App\Infrastructure\Repositories\AppConfig;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class CompanySubscriptionRepository
@@ -81,6 +82,8 @@ class CompanySubscriptionRepository
                 'created_at' => now(),
             ]
         );
+
+        Cache::forget(sprintf('%s:%d', config('company_response_delay.cache_key_prefix'), $companyId));
     }
 
     public function listAlertCandidates(int $systemCompanyId): Collection

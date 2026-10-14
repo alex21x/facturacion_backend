@@ -56,6 +56,7 @@ class Kernel extends HttpKernel
         'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
         'company.scope' => \App\Http\Middleware\EnsureCompanyScope::class,
         'tenant.rate' => \App\Http\Middleware\EnforceCompanyRateLimit::class,
+        'tenant.response-delay' => \App\Http\Middleware\EnforceCompanyResponseDelay::class,
         'rbac.module' => \App\Http\Middleware\ModuleRbacAccess::class,
         'admin.only' => \App\Http\Middleware\RequireAdminRole::class,
         'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,

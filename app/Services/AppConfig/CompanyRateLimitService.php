@@ -39,6 +39,11 @@ class CompanyRateLimitService
         return $this->queryService->resolveEffectiveLimit($companyId, $profile, $defaultLimit);
     }
 
+    public function resolveResponseDelay(int $companyId): array
+    {
+        return $this->queryService->resolveResponseDelay($companyId);
+    }
+
     public function updateCompanyRateLimit(int $companyId, array $payload, ?int $updatedBy): void
     {
         $this->commandService->updateCompanyRateLimit($companyId, $payload, $updatedBy);

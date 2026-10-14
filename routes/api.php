@@ -126,6 +126,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
 
     Route::middleware('rbac.module:SALES,view')->group(function () {
         Route::middleware('company.scope')->group(function () {
+            Route::get('/sales/credit-payments/documents', 'Api\\CreditPaymentsController@customerDocuments');
+            Route::get('/sales/credit-payments/documents/{id}/payments', 'Api\\CreditPaymentsController@listCustomerPayments');
+            Route::get('/sales/credit-payments/documents/{id}/payments/{paymentId}/ticket', 'Api\\CreditPaymentsController@customerPaymentTicket');
             Route::get('/sales/bootstrap', 'Api\\SalesLookupController@bootstrap');
             Route::get('/sales/lookups', 'Api\\SalesLookupController@lookups');
             Route::get('/sales/price-tiers', 'Api\\SalesLookupController@priceTiers');
@@ -205,6 +208,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
 
     Route::middleware('rbac.module:SALES,create')->group(function () {
         Route::middleware('company.scope')->group(function () {
+            Route::post('/sales/credit-payments/documents/{id}/payments', 'Api\\CreditPaymentsController@createCustomerPayment');
+            Route::put('/sales/credit-payments/documents/{id}/payments/{paymentId}', 'Api\\CreditPaymentsController@updateCustomerPayment');
+            Route::delete('/sales/credit-payments/documents/{id}/payments/{paymentId}', 'Api\\CreditPaymentsController@deleteCustomerPayment');
             Route::post('/sales/commercial-documents', 'Api\\SalesDocumentController@createCommercialDocument');
             Route::post('/sales/commercial-documents/bulk-sunat-annulment', 'Api\\SalesDocumentController@bulkSunatAnnulment');
             Route::post('/sales/commercial-documents/{id}/convert', 'Api\\SalesDocumentController@convertCommercialDocument');
@@ -257,6 +263,9 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
     });
 
     Route::middleware(['rbac.module:INVENTORY,view', 'company.scope'])->group(function () {
+        Route::get('/purchases/credit-payments/documents', 'Api\\CreditPaymentsController@supplierDocuments');
+        Route::get('/purchases/credit-payments/documents/{id}/payments', 'Api\\CreditPaymentsController@listSupplierPayments');
+        Route::get('/purchases/credit-payments/documents/{id}/payments/{paymentId}/ticket', 'Api\\CreditPaymentsController@supplierPaymentTicket');
         Route::get('/purchases/lookups', 'Api\\PurchasesController@lookups');
         Route::get('/purchases/list', 'Api\\PurchasesController@listStockEntries');
         Route::get('/purchases/export', 'Api\\PurchasesController@exportStockEntries');
@@ -288,6 +297,8 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
 
     Route::middleware(['rbac.module:INVENTORY,update', 'rbac.module:INVENTORY,approve', 'company.scope'])->group(function () {
         Route::put('/purchases/stock-entries/{id}', 'Api\\PurchasesController@updateStockEntry');
+        Route::put('/purchases/credit-payments/documents/{id}/payments/{paymentId}', 'Api\\CreditPaymentsController@updateSupplierPayment');
+        Route::delete('/purchases/credit-payments/documents/{id}/payments/{paymentId}', 'Api\\CreditPaymentsController@deleteSupplierPayment');
     });
 
     Route::middleware(['rbac.module:INVENTORY,create', 'company.scope'])->group(function () {
@@ -295,6 +306,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
         Route::post('/inventory/product-masters', 'Api\\InventoryController@createProductMaster');
         Route::put('/inventory/product-masters/{id}', 'Api\\InventoryController@updateProductMaster');
         Route::post('/purchases/suppliers/bulk-import', 'Api\\PurchasesController@bulkImportSuppliers');
+        Route::post('/purchases/credit-payments/documents/{id}/payments', 'Api\\CreditPaymentsController@createSupplierPayment');
     });
 
     Route::middleware(['rbac.module:INVENTORY,update', 'company.scope'])->group(function () {

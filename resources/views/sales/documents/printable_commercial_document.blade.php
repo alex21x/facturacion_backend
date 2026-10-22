@@ -84,8 +84,15 @@
                             <div class="line"><span class="k">TIPO DE NOTA:</span><span class="v">{{ trim(($noteReasonCode ?? '-') . (!empty($noteReasonDescription) ? (' - ' . $noteReasonDescription) : '')) }}</span></div>
                         @endif
                         <div class="line"><span class="k">VENDEDOR:</span><span class="v"></span></div>
+                        <div class="line"><span class="k">CONDICION DE PAGO:</span><span class="v">{{ ($paymentCondition ?? 'CONTADO') === 'CREDITO' ? 'CREDITO' : 'CONTADO' }}</span></div>
+                        @if (empty($paymentBreakdown) && ($paymentCondition ?? 'CONTADO') !== 'CREDITO' && !empty($paymentMethod) && $paymentMethod !== '-')
+                            <div class="line"><span class="k">MEDIO DE PAGO:</span><span class="v">{{ $paymentMethod }}</span></div>
+                        @endif
+                        @foreach (($creditInstallments ?? []) as $installment)
+                            <div class="line"><span class="k">CUOTA {{ $installment['no'] }} ({{ $installment['dueDate'] ?: '-' }}):</span><span class="v">{{ $currency }} {{ $installment['amount'] }}</span></div>
+                        @endforeach
                         @foreach (($paymentBreakdown ?? []) as $paymentRow)
-                            <div class="line"><span class="k">PAGO {{ $paymentRow['method'] }}:</span><span class="v">{{ $currency }} {{ $paymentRow['amount'] }}</span></div>
+                            <div class="line"><span class="k">{{ $paymentRow['label'] ?? 'PAGO' }} {{ $paymentRow['method'] }}:</span><span class="v">{{ $currency }} {{ $paymentRow['amount'] }}</span></div>
                         @endforeach
                     </td>
                     <td>
@@ -139,6 +146,12 @@
                     <tr><td class="k2">OP. INAFECTAS</td><td class="v2">{{ $currency }} {{ $inafectaTotal ?? '0.00' }}</td></tr>
                     <tr><td class="k2">OP. EXONERADAS</td><td class="v2">{{ $currency }} {{ $exoneradaTotal ?? '0.00' }}</td></tr>
                     <tr><td class="k2">IGV</td><td class="v2">{{ $currency }} {{ $taxTotal }}</td></tr>
+                    @if (!empty($itemDiscountTotal))
+                        <tr><td class="k2">DESCUENTO ITEMS</td><td class="v2">-{{ $currency }} {{ $itemDiscountTotal }}</td></tr>
+                    @endif
+                    @if (!empty($globalDiscountTotal))
+                        <tr><td class="k2">DESCUENTO GLOBAL ({{ $globalDiscountPercent }}%)</td><td class="v2">-{{ $currency }} {{ $globalDiscountTotal }}</td></tr>
+                    @endif
                     <tr class="grand"><td class="k2">TOTAL</td><td class="v2">{{ $currency }} {{ $grandTotal }}</td></tr>
                 </table>
             </div>
@@ -203,10 +216,23 @@
             <div class="ticket-summary-row"><span>OP. INAFECTAS</span><span>{{ $currency }} {{ $inafectaTotal ?? '0.00' }}</span></div>
             <div class="ticket-summary-row"><span>OP. EXONERADAS</span><span>{{ $currency }} {{ $exoneradaTotal ?? '0.00' }}</span></div>
             <div class="ticket-summary-row"><span>IGV</span><span>{{ $currency }} {{ $taxTotal }}</span></div>
+            @if (!empty($itemDiscountTotal))
+                <div class="ticket-summary-row"><span>DESCUENTO ITEMS</span><span>-{{ $currency }} {{ $itemDiscountTotal }}</span></div>
+            @endif
+            @if (!empty($globalDiscountTotal))
+                <div class="ticket-summary-row"><span>DESCUENTO GLOBAL ({{ $globalDiscountPercent }}%)</span><span>-{{ $currency }} {{ $globalDiscountTotal }}</span></div>
+            @endif
             <div class="ticket-total"><span>TOTAL</span><span>{{ $currency }} {{ $grandTotal }}</span></div>
             <div class="ticket-words"><strong>SON:</strong> {{ $totalWords }}</div>
+            <div class="ticket-summary-row"><span>CONDICION DE PAGO</span><span>{{ ($paymentCondition ?? 'CONTADO') === 'CREDITO' ? 'CREDITO' : 'CONTADO' }}</span></div>
+            @if (empty($paymentBreakdown) && ($paymentCondition ?? 'CONTADO') !== 'CREDITO' && !empty($paymentMethod) && $paymentMethod !== '-')
+                <div class="ticket-summary-row"><span>MEDIO DE PAGO</span><span>{{ $paymentMethod }}</span></div>
+            @endif
+            @foreach (($creditInstallments ?? []) as $installment)
+                <div class="ticket-summary-row"><span>Cuota {{ $installment['no'] }} ({{ $installment['dueDate'] ?: '-' }})</span><span>{{ $currency }} {{ $installment['amount'] }}</span></div>
+            @endforeach
             @foreach (($paymentBreakdown ?? []) as $paymentRow)
-                <div class="ticket-summary-row"><span>Pago {{ $paymentRow['method'] }}</span><span>{{ $currency }} {{ $paymentRow['amount'] }}</span></div>
+                <div class="ticket-summary-row"><span>{{ ucfirst(strtolower($paymentRow['label'] ?? 'PAGO')) }} {{ $paymentRow['method'] }}</span><span>{{ $currency }} {{ $paymentRow['amount'] }}</span></div>
             @endforeach
         </div>
     @endif

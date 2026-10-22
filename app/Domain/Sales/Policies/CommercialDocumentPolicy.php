@@ -35,6 +35,24 @@ final class CommercialDocumentPolicy
             + (!empty($metadata['has_percepcion']) ? 1 : 0);
     }
 
+    /**
+     * Global discount applied over the items total (tax included). Only honored when the
+     * company feature flag is enabled; capped to the items total.
+     */
+    public static function resolveGlobalDiscount(array $metadata, bool $featureEnabled, float $itemsGrandTotal): float
+    {
+        if (!$featureEnabled) {
+            return 0.0;
+        }
+
+        $requested = (float) ($metadata['discount_total'] ?? 0);
+        if (!is_finite($requested) || $requested <= 0) {
+            return 0.0;
+        }
+
+        return round(min($requested, max($itemsGrandTotal, 0.0)), 2);
+    }
+
     public static function assertSingleTaxCondition(array $metadata): void
     {
         if (self::selectedTaxConditions($metadata) > 1) {

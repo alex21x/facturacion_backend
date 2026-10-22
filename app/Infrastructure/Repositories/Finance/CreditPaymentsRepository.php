@@ -3,10 +3,14 @@
 namespace App\Infrastructure\Repositories\Finance;
 
 use App\Domain\Finance\Repositories\CreditPaymentsRepositoryInterface;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
 class CreditPaymentsRepository implements CreditPaymentsRepositoryInterface
 {
+    private const DOCUMENT_MOVEMENT_REF_TYPES = ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'];
+    private const EXCLUDED_DOCUMENT_STATUSES = ['CANCELED', 'VOID', 'VOIDED'];
+
     private ?bool $hasCommercialDocumentCustomerName = null;
     private ?bool $hasStockEntryPaymentsTable = null;
     private array $tableColumnsCache = [];
@@ -43,24 +47,13 @@ class CreditPaymentsRepository implements CreditPaymentsRepositoryInterface
             ])
             ->where('d.company_id', $companyId)
             ->whereRaw("UPPER(COALESCE(d.status, '')) NOT IN ('VOID', 'CANCELED')")
-            ->where(function ($q) {
-                $q->whereRaw("UPPER(translate(COALESCE(pm.name, ''), 'ÁÉÍÓÚáéíóú', 'AEIOUAEIOU')) LIKE '%CREDITO%'")
-                    ->orWhereRaw("UPPER(COALESCE(d.metadata->>'payment_condition', '')) = 'CREDITO'")
-                    ->orWhereRaw("CASE WHEN COALESCE(d.metadata->>'credit_installments_count', '') ~ '^[0-9]+$' THEN (d.metadata->>'credit_installments_count')::int ELSE 0 END > 0")
-                    ->orWhereExists(function ($sub) {
-                        $sub->select(DB::raw('1'))
-                            ->from('sales.commercial_document_payments as pcred')
-                            ->whereColumn('pcred.document_id', 'd.id')
-                            ->where(function ($p) {
-                                $p->whereNotNull('pcred.due_at')
-                                    ->orWhereRaw("UPPER(COALESCE(pcred.status, '')) = 'PENDING'");
-                            });
-                    });
-            })
+            ->whereIn(DB::raw('UPPER(d.document_kind)'), ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
             ->where(function ($q) use ($balanceExpr, $paidExpr) {
                 $q->whereRaw($balanceExpr . ' > 0.0001')
                     ->orWhereRaw($paidExpr . ' > 0.0001');
             });
+
+        $this->applyCustomerCreditDocumentFilter($base);
 
         if ($hasCustomerPaymentsTable) {
             $customerPaymentSummary = DB::table('sales.commercial_document_payments')
@@ -135,70 +128,389 @@ class CreditPaymentsRepository implements CreditPaymentsRepositoryInterface
             ->all();
     }
 
-    public function createCustomerDocumentPayment(int $documentId, array $payload): int
+    public function createCustomerDocumentPayment(int $companyId, int $documentId, array $payload, ?int $cashRegisterId): int
     {
-        $insertPayload = $this->filterPayloadByTableColumns(
-            'sales',
-            'commercial_document_payments',
-            $payload + ['document_id' => $documentId]
-        );
+        return DB::transaction(function () use ($companyId, $documentId, $payload, $cashRegisterId): int {
+            $document = $this->findLockedCustomerDocument($companyId, $documentId);
+            if (!$document) {
+                throw new \RuntimeException('Documento no encontrado', 404);
+            }
 
-        return (int) DB::table('sales.commercial_document_payments')->insertGetId($insertPayload);
+            $this->assertCustomerPaymentFitsBalance($document, (float) ($payload['amount'] ?? 0), null, (string) ($payload['status'] ?? 'PAID'));
+            $insertPayload = $this->filterPayloadByTableColumns(
+                'sales',
+                'commercial_document_payments',
+                $payload + ['document_id' => $documentId]
+            );
+            $paymentId = (int) DB::table('sales.commercial_document_payments')->insertGetId($insertPayload);
+            $sessionId = $this->syncCustomerPaymentCashMovement($companyId, $document, $paymentId, $payload, $cashRegisterId);
+            $this->recalculateCustomerDocumentTotals($documentId);
+            if ($sessionId !== null) {
+                $this->recalculateCashSessionExpectedBalance($sessionId);
+            }
+
+            return $paymentId;
+        });
     }
 
-    public function updateCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, array $payload): bool
+    public function updateCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, array $payload, ?int $cashRegisterId): bool
     {
-        $updatePayload = $this->filterPayloadByTableColumns('sales', 'commercial_document_payments', $payload);
+        return DB::transaction(function () use ($companyId, $documentId, $paymentId, $payload, $cashRegisterId): bool {
+            $document = $this->findLockedCustomerDocument($companyId, $documentId);
+            if (!$document) {
+                return false;
+            }
 
-        if ($updatePayload === []) {
-            return false;
-        }
+            $existingPayment = DB::table('sales.commercial_document_payments')
+                ->where('id', $paymentId)
+                ->where('document_id', $documentId)
+                ->lockForUpdate()
+                ->first();
+            if (!$existingPayment) {
+                return false;
+            }
 
-        return DB::table('sales.commercial_document_payments as p')
-            ->where('p.id', $paymentId)
-            ->where('p.document_id', $documentId)
-            ->whereExists(function ($q) use ($companyId) {
-                $q->select(DB::raw('1'))
-                    ->from('sales.commercial_documents as d')
-                    ->whereColumn('d.id', 'p.document_id')
-                    ->where('d.company_id', $companyId);
-            })
-            ->update($updatePayload) > 0;
+            if (strtoupper((string) $existingPayment->status) === 'PAID' && !$this->customerPaymentHasCashMovement($companyId, $paymentId)) {
+                throw new \RuntimeException('Este pago pertenece al registro original del comprobante y no se puede modificar desde Cobranzas.', 409);
+            }
+
+            $this->assertCustomerPaymentFitsBalance($document, (float) ($payload['amount'] ?? 0), $paymentId, (string) ($payload['status'] ?? 'PAID'));
+            $updatePayload = $this->filterPayloadByTableColumns('sales', 'commercial_document_payments', $payload);
+            if ($updatePayload === []) {
+                return false;
+            }
+
+            DB::table('sales.commercial_document_payments')
+                ->where('id', $paymentId)
+                ->where('document_id', $documentId)
+                ->update($updatePayload);
+
+            $sessionId = $this->syncCustomerPaymentCashMovement($companyId, $document, $paymentId, $payload, $cashRegisterId);
+            $this->recalculateCustomerDocumentTotals($documentId);
+            if ($sessionId !== null) {
+                $this->recalculateCashSessionExpectedBalance($sessionId);
+            }
+
+            return true;
+        });
     }
 
-    public function deleteCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId): bool
+    public function deleteCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, ?int $cashRegisterId): bool
     {
-        return DB::table('sales.commercial_document_payments as p')
-            ->where('p.id', $paymentId)
-            ->where('p.document_id', $documentId)
-            ->whereExists(function ($q) use ($companyId) {
-                $q->select(DB::raw('1'))
-                    ->from('sales.commercial_documents as d')
-                    ->whereColumn('d.id', 'p.document_id')
-                    ->where('d.company_id', $companyId);
-            })
-            ->delete() > 0;
+        return DB::transaction(function () use ($companyId, $documentId, $paymentId, $cashRegisterId): bool {
+            if (!$this->findLockedCustomerDocument($companyId, $documentId)) {
+                return false;
+            }
+
+            $payment = DB::table('sales.commercial_document_payments')
+                ->where('id', $paymentId)
+                ->where('document_id', $documentId)
+                ->lockForUpdate()
+                ->first();
+            if (!$payment) {
+                return false;
+            }
+
+            if (strtoupper((string) $payment->status) === 'PAID' && !$this->customerPaymentHasCashMovement($companyId, $paymentId)) {
+                throw new \RuntimeException('Este pago pertenece al registro original del comprobante y no se puede eliminar desde Cobranzas.', 409);
+            }
+
+            $sessionId = $this->removeCustomerPaymentCashMovement($companyId, $paymentId, null, $cashRegisterId);
+            DB::table('sales.commercial_document_payments')
+                ->where('id', $paymentId)
+                ->where('document_id', $documentId)
+                ->delete();
+            $this->recalculateCustomerDocumentTotals($documentId);
+            if ($sessionId !== null) {
+                $this->recalculateCashSessionExpectedBalance($sessionId);
+            }
+
+            return true;
+        });
     }
 
     public function findCustomerDocument(int $companyId, int $documentId): ?object
     {
         $counterpartNameSelectExpr = $this->customerCounterpartNameExpr("'-'");
 
-        return DB::table('sales.commercial_documents as d')
+        $query = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
             ->where('d.id', $documentId)
-            ->first([
+            ->whereIn(DB::raw('UPPER(d.document_kind)'), ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->whereRaw("UPPER(COALESCE(d.status, '')) NOT IN ('CANCELED', 'VOID', 'VOIDED')")
+            ->select([
                 'd.id',
                 'd.document_kind',
                 'd.series',
                 'd.number',
                 'd.payment_method_id',
+                'd.branch_id',
                 'd.total',
                 'd.paid_total',
                 'd.balance_due',
                 DB::raw($counterpartNameSelectExpr . ' as counterpart_name'),
             ]);
+        $this->applyCustomerCreditDocumentFilter($query);
+
+        return $query->first();
+    }
+
+    private function findLockedCustomerDocument(int $companyId, int $documentId): ?object
+    {
+        $query = DB::table('sales.commercial_documents as d')
+            ->where('d.company_id', $companyId)
+            ->where('d.id', $documentId)
+            ->whereIn(DB::raw('UPPER(d.document_kind)'), ['SALES_ORDER', 'INVOICE', 'RECEIPT', 'CREDIT_NOTE', 'DEBIT_NOTE'])
+            ->whereRaw("UPPER(COALESCE(d.status, '')) NOT IN ('CANCELED', 'VOID', 'VOIDED')");
+        $this->applyCustomerCreditDocumentFilter($query);
+
+        return $query
+            ->lockForUpdate()
+            ->first(['d.id', 'd.document_kind', 'd.branch_id', 'd.series', 'd.number', 'd.total']);
+    }
+
+    private function applyCustomerCreditDocumentFilter(Builder $query): void
+    {
+        $query->where(function (Builder $credit): void {
+            $credit->whereExists(function (Builder $paymentMethod): void {
+                $paymentMethod->select(DB::raw('1'))
+                    ->from('master.payment_types as pm_credit')
+                    ->whereColumn('pm_credit.id', 'd.payment_method_id')
+                    ->whereRaw("UPPER(translate(COALESCE(pm_credit.name, ''), 'ÁÉÍÓÚáéíóú', 'AEIOUAEIOU')) LIKE '%CREDITO%'");
+            })
+                ->orWhereRaw("UPPER(COALESCE(d.metadata->>'payment_condition', '')) = 'CREDITO'")
+                ->orWhereRaw("CASE WHEN COALESCE(d.metadata->>'credit_installments_count', '') ~ '^[0-9]+$' THEN (d.metadata->>'credit_installments_count')::int ELSE 0 END > 0")
+                ->orWhereExists(function (Builder $sub): void {
+                    $sub->select(DB::raw('1'))
+                        ->from('sales.commercial_document_payments as pcred')
+                        ->whereColumn('pcred.document_id', 'd.id')
+                        ->where(function (Builder $payments): void {
+                            $payments->whereNotNull('pcred.due_at')
+                                ->orWhereRaw("UPPER(COALESCE(pcred.status, '')) = 'PENDING'");
+                        });
+                });
+        });
+
+        $query->whereNotExists(function (Builder $convertedDocument): void {
+            $convertedDocument->select(DB::raw('1'))
+                ->from('sales.commercial_documents as converted')
+                ->whereColumn('converted.company_id', 'd.company_id')
+                ->whereIn(DB::raw('UPPER(converted.document_kind)'), ['INVOICE', 'RECEIPT'])
+                ->whereRaw("COALESCE(converted.metadata->>'source_document_id', '') = d.id::text")
+                ->whereRaw("UPPER(COALESCE(converted.metadata->>'conversion_origin', '')) = 'SALES_MODULE'")
+                ->whereRaw("UPPER(COALESCE(converted.status, '')) = 'ISSUED'");
+        });
+    }
+
+    private function assertCustomerPaymentFitsBalance(object $document, float $amount, ?int $excludePaymentId, string $status): void
+    {
+        if (strtoupper(trim($status)) !== 'PAID') {
+            return;
+        }
+
+        $paidQuery = DB::table('sales.commercial_document_payments as p')
+            ->join('sales.commercial_documents as d', 'd.id', '=', 'p.document_id')
+            ->leftJoin('master.payment_types as pm_doc', 'pm_doc.id', '=', 'd.payment_method_id')
+            ->where('p.document_id', (int) $document->id)
+            ->whereRaw("UPPER(COALESCE(p.status, '')) = 'PAID'")
+            ->whereRaw('NOT (' . $this->customerAutoIssuedPaidPredicateSql('p', 'd', 'pm_doc') . ')');
+
+        if ($excludePaymentId !== null) {
+            $paidQuery->where('p.id', '<>', $excludePaymentId);
+        }
+
+        $alreadyPaid = (float) $paidQuery->sum('p.amount');
+        $balance = max(0, round((float) ($document->total ?? 0) - $alreadyPaid, 2));
+        if (round($amount, 2) > $balance + 0.0001) {
+            throw new \RuntimeException('El monto del cobro supera el saldo pendiente del comprobante.', 422);
+        }
+    }
+
+    private function syncCustomerPaymentCashMovement(int $companyId, object $document, int $paymentId, array $payment, ?int $cashRegisterId): ?int
+    {
+        $movement = DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'CUSTOMER_CREDIT_PAYMENT')
+            ->where('ref_id', $paymentId)
+            ->lockForUpdate()
+            ->first(['id', 'cash_session_id', 'cash_register_id']);
+
+        if (strtoupper(trim((string) ($payment['status'] ?? 'PAID'))) !== 'PAID') {
+            return $this->removeCustomerPaymentCashMovement($companyId, $paymentId, $movement, $cashRegisterId);
+        }
+
+        if ($movement) {
+            $session = DB::table('sales.cash_sessions')
+                ->where('company_id', $companyId)
+                ->where('id', (int) $movement->cash_session_id)
+                ->lockForUpdate()
+                ->first(['id', 'status', 'cash_register_id']);
+            if (!$session || strtoupper((string) $session->status) !== 'OPEN') {
+                throw new \RuntimeException('No se puede modificar un cobro de una caja cerrada.', 409);
+            }
+            if ($cashRegisterId === null || $cashRegisterId !== (int) $session->cash_register_id) {
+                throw new \RuntimeException('Selecciona la misma caja abierta donde se registró este cobro.', 409);
+            }
+            $sessionId = (int) $session->id;
+        } else {
+            if ($cashRegisterId === null || $cashRegisterId <= 0) {
+                throw new \RuntimeException('Selecciona una caja abierta antes de registrar el cobro.', 409);
+            }
+
+            $sessionQuery = DB::table('sales.cash_sessions')
+                ->where('company_id', $companyId)
+                ->where('cash_register_id', $cashRegisterId)
+                ->where('status', 'OPEN');
+            if (!empty($document->branch_id)) {
+                $sessionQuery->where(function ($query) use ($document): void {
+                    $query->where('branch_id', (int) $document->branch_id)
+                        ->orWhereNull('branch_id');
+                });
+            }
+
+            $sessions = $sessionQuery->lockForUpdate()->limit(2)->get(['id', 'branch_id']);
+            if ($sessions->count() !== 1) {
+                if ($sessions->isEmpty()) {
+                    throw new \RuntimeException('La caja seleccionada no está abierta para la sucursal del comprobante.', 409);
+                }
+                throw new \RuntimeException('Hay varias sesiones abiertas para la caja seleccionada. Contacta al administrador antes de registrar el cobro.', 409);
+            }
+            $session = $sessions->first();
+            if (!$session) {
+                throw new \RuntimeException('La caja seleccionada no está abierta para la sucursal del comprobante.', 409);
+            }
+            $sessionId = (int) $session->id;
+        }
+
+        $description = $this->customerCollectionDescription($document);
+        $movementPayload = [
+            'payment_method_id' => (int) $payment['payment_method_id'],
+            'amount' => round((float) $payment['amount'], 2),
+            'description' => $description,
+            'notes' => $description,
+            'movement_at' => $payment['paid_at'] ?? now(),
+        ];
+
+        if ($movement) {
+            DB::table('sales.cash_movements')
+                ->where('company_id', $companyId)
+                ->where('id', (int) $movement->id)
+                ->update($movementPayload);
+        } else {
+            $movementPayload += [
+                'company_id' => $companyId,
+                'branch_id' => $document->branch_id,
+                'cash_register_id' => $cashRegisterId,
+                'cash_session_id' => $sessionId,
+                'movement_type' => 'INCOME',
+                'ref_type' => 'CUSTOMER_CREDIT_PAYMENT',
+                'ref_id' => $paymentId,
+                'created_by' => $payment['created_by'] ?? $payment['updated_by'] ?? null,
+                'user_id' => $payment['updated_by'] ?? $payment['created_by'] ?? null,
+                'created_at' => now(),
+            ];
+            DB::table('sales.cash_movements')->insert($movementPayload);
+        }
+
+        return $sessionId;
+    }
+
+    private function customerPaymentHasCashMovement(int $companyId, int $paymentId): bool
+    {
+        return DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'CUSTOMER_CREDIT_PAYMENT')
+            ->where('ref_id', $paymentId)
+            ->exists();
+    }
+
+    private function removeCustomerPaymentCashMovement(int $companyId, int $paymentId, ?object $movement = null, ?int $cashRegisterId = null): ?int
+    {
+        $movement ??= DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('ref_type', 'CUSTOMER_CREDIT_PAYMENT')
+            ->where('ref_id', $paymentId)
+            ->lockForUpdate()
+            ->first(['id', 'cash_session_id', 'cash_register_id']);
+
+        if (!$movement) {
+            return null;
+        }
+
+        $session = DB::table('sales.cash_sessions')
+            ->where('company_id', $companyId)
+            ->where('id', (int) $movement->cash_session_id)
+            ->lockForUpdate()
+            ->first(['id', 'status']);
+        if (!$session || strtoupper((string) $session->status) !== 'OPEN') {
+            throw new \RuntimeException('No se puede anular un cobro de una caja cerrada.', 409);
+        }
+        if ($cashRegisterId === null || $cashRegisterId !== (int) $movement->cash_register_id) {
+            throw new \RuntimeException('Selecciona la misma caja abierta donde se registró este cobro.', 409);
+        }
+
+        DB::table('sales.cash_movements')
+            ->where('company_id', $companyId)
+            ->where('id', (int) $movement->id)
+            ->delete();
+
+        return (int) $session->id;
+    }
+
+    private function recalculateCashSessionExpectedBalance(int $sessionId): void
+    {
+        $session = DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->lockForUpdate()
+            ->first(['opening_balance']);
+        if (!$session) {
+            return;
+        }
+
+        $baseMovements = DB::table('sales.cash_movements as cm')
+            ->leftJoin('sales.commercial_documents as cd', function ($join): void {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES);
+            })
+            ->where('cm.cash_session_id', $sessionId)
+            ->where(function ($query): void {
+                $query->whereNotIn('cm.ref_type', self::DOCUMENT_MOVEMENT_REF_TYPES)
+                    ->orWhere(function ($nested): void {
+                        $nested->whereNotNull('cd.id')
+                            ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
+                    });
+            });
+
+        $totalIn = (float) (clone $baseMovements)
+            ->whereIn('cm.movement_type', ['IN', 'INCOME'])
+            ->sum('cm.amount');
+        $totalOut = (float) (clone $baseMovements)
+            ->whereIn('cm.movement_type', ['OUT', 'EXPENSE'])
+            ->sum('cm.amount');
+
+        DB::table('sales.cash_sessions')
+            ->where('id', $sessionId)
+            ->update(['expected_balance' => round((float) $session->opening_balance + $totalIn - $totalOut, 4)]);
+    }
+
+    private function customerCollectionDescription(object $document): string
+    {
+        $kind = match (strtoupper((string) ($document->document_kind ?? ''))) {
+            'SALES_ORDER' => 'pedido',
+            'INVOICE' => 'factura',
+            'RECEIPT' => 'boleta',
+            'CREDIT_NOTE' => 'nota de crédito',
+            'DEBIT_NOTE' => 'nota de débito',
+            default => 'documento',
+        };
+
+        return sprintf(
+            'Cobro de %s %s-%s',
+            $kind,
+            (string) ($document->series ?? ''),
+            (string) ($document->number ?? '')
+        );
     }
 
     public function recalculateCustomerDocumentTotals(int $documentId): void

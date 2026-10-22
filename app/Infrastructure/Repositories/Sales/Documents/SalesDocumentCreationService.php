@@ -168,6 +168,11 @@ class SalesDocumentCreationService
                     $resolvedDocumentKindId
                 );
 
+                $payload['items'] = $this->itemPreparationService->applyItemDiscountPolicy(
+                    $payload['items'],
+                    $this->isCommerceFeatureEnabledForContext($companyId, $branchId, 'SALES_ITEM_DISCOUNT_ENABLED')
+                );
+
                 $processedItems = $this->itemPreparationService->prepareProcessedItems(
                     $companyId,
                     $warehouseId,
@@ -183,6 +188,16 @@ class SalesDocumentCreationService
                 $discountTotal = $totals->discountTotal;
                 $grandTotal = $totals->grandTotal;
 
+                $globalDiscount = CommercialDocumentPolicy::resolveGlobalDiscount(
+                    $metadata,
+                    $this->isCommerceFeatureEnabledForContext($companyId, $branchId, 'SALES_GLOBAL_DISCOUNT_ENABLED'),
+                    $grandTotal
+                );
+                $metadata['discount_total'] = $globalDiscount;
+                $payload['metadata'] = $metadata;
+                $discountTotal += $globalDiscount;
+                $grandTotal = max($grandTotal - $globalDiscount, 0.0);
+
                 $this->noteValidationService->validateSourceAndAvailableAmount(
                     $payload,
                     $metadata,
@@ -197,6 +212,49 @@ class SalesDocumentCreationService
                     $companyId,
                     $branchId
                 );
+
+                $isCreditSale = strtoupper(trim((string) ($metadata['payment_condition'] ?? ''))) === 'CREDITO';
+                $sourceDocumentId = isset($metadata['source_document_id']) ? (int) $metadata['source_document_id'] : 0;
+                $sourceDocumentKind = strtoupper(trim((string) ($metadata['source_document_kind'] ?? '')));
+                $isSalesOrderConversion = $sourceDocumentId > 0
+                    && $sourceDocumentKind === 'SALES_ORDER'
+                    && in_array($normalizedDocumentKind, ['INVOICE', 'RECEIPT'], true);
+                $sourcePaidPayments = $isSalesOrderConversion
+                    ? $this->linePersistenceService->listPaidPayments($sourceDocumentId)
+                    : [];
+
+                if ($sourcePaidPayments !== []) {
+                    $pendingPayments = array_values(array_filter(
+                        is_array($payload['payments'] ?? null) ? $payload['payments'] : [],
+                        static fn ($payment): bool => is_array($payment)
+                            && strtoupper(trim((string) ($payment['status'] ?? ''))) === 'PENDING'
+                    ));
+                    $payload['payments'] = [
+                        ...array_map(static fn (array $payment): array => [
+                            'payment_method_id' => (int) $payment['payment_method_id'],
+                            'amount' => round((float) $payment['amount'], 2),
+                            'status' => 'PAID',
+                            'paid_at' => $payment['paid_at'] ?? null,
+                            'due_at' => $payment['due_at'] ?? null,
+                            'notes' => $payment['notes'] ?? null,
+                        ], $sourcePaidPayments),
+                        ...$pendingPayments,
+                    ];
+                }
+
+                if ($isCreditSale) {
+                    $payload['payment_method_id'] = null;
+                    if ($sourcePaidPayments === []) {
+                        $payload['payments'] = array_values(array_filter(
+                            is_array($payload['payments'] ?? null) ? $payload['payments'] : [],
+                            static fn ($payment): bool => is_array($payment)
+                                && strtoupper(trim((string) ($payment['status'] ?? ''))) === 'PENDING'
+                        ));
+                    }
+                    $metadata['advance_amount'] = 0;
+                    $metadata['has_advance'] = false;
+                    $metadata['payment_breakdown'] = [];
+                }
 
                 $paymentSummary = $this->paymentMetadataService->summarizePayments($payload['payments'] ?? []);
                 $paidTotal = $paymentSummary->paidTotal;
@@ -217,7 +275,8 @@ class SalesDocumentCreationService
                     $paidTotal,
                     $companyId,
                     $branchId,
-                    $payload['payments'] ?? []
+                    $payload['payments'] ?? [],
+                    $isPreDocument
                 );
 
                 if ($isTributaryIssued) {
@@ -293,19 +352,33 @@ class SalesDocumentCreationService
                     (int) $nextNumber
                 );
 
-                if (!empty($payload['payments'])) {
-                    $this->linePersistenceService->persistPayments((int) $documentId, $payload['payments']);
+                $transferredSourcePayments = false;
+                if ($sourcePaidPayments !== []) {
+                    $transferredSourcePayments = $this->linePersistenceService->transferPaidPayments(
+                        $sourceDocumentId,
+                        (int) $documentId
+                    ) > 0;
+                }
+
+                $paymentsToPersist = $transferredSourcePayments
+                    ? array_values(array_filter(
+                        $payload['payments'] ?? [],
+                        static fn ($payment): bool => is_array($payment)
+                            && strtoupper(trim((string) ($payment['status'] ?? ''))) !== 'PAID'
+                    ))
+                    : ($payload['payments'] ?? []);
+
+                if (!empty($paymentsToPersist)) {
+                    $this->linePersistenceService->persistPayments((int) $documentId, $paymentsToPersist);
                 }
 
                 $metadataPayload = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
-                $sourceDocumentId = isset($metadataPayload['source_document_id']) ? (int) $metadataPayload['source_document_id'] : 0;
-                $sourceDocumentKind = strtoupper(trim((string) ($metadataPayload['source_document_kind'] ?? '')));
                 $skipCashPostingForConvertedSalesOrder = $sourceDocumentId > 0 && $sourceDocumentKind === 'SALES_ORDER';
 
                 $movedFromOrder = $skipCashPostingForConvertedSalesOrder
                     && $this->cashPostingService->reassignOrderMovementsToDocument($companyId, $sourceDocumentId, (int) $documentId);
 
-                if (!$movedFromOrder) {
+                if (!$movedFromOrder && !$transferredSourcePayments) {
                     $this->cashPostingService->registerCashIncomeFromDocument(
                         $companyId,
                         $branchId !== null ? (int) $branchId : null,

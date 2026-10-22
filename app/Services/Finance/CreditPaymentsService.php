@@ -92,10 +92,11 @@ class CreditPaymentsService
         }
 
         $insertedId = $this->repository->createCustomerDocumentPayment(
+            $companyId,
             $documentId,
-            $this->normalizePaymentPayload($payload, (int) $authUser->id, true, isset($doc->payment_method_id) ? (int) $doc->payment_method_id : null)
+            $this->normalizePaymentPayload($payload, (int) $authUser->id, true, isset($doc->payment_method_id) ? (int) $doc->payment_method_id : null),
+            isset($payload['cash_register_id']) ? (int) $payload['cash_register_id'] : null
         );
-        $this->repository->recalculateCustomerDocumentTotals($documentId);
 
         return $this->listCustomerDocumentPayments($companyId, $documentId) + ['inserted_id' => $insertedId];
     }
@@ -111,24 +112,23 @@ class CreditPaymentsService
             $companyId,
             $documentId,
             $paymentId,
-            $this->normalizePaymentPayload($payload, (int) $authUser->id, false, isset($doc->payment_method_id) ? (int) $doc->payment_method_id : null)
+            $this->normalizePaymentPayload($payload, (int) $authUser->id, false, isset($doc->payment_method_id) ? (int) $doc->payment_method_id : null),
+            isset($payload['cash_register_id']) ? (int) $payload['cash_register_id'] : null
         );
         if (!$updated) {
             throw new \RuntimeException('Pago no encontrado', 404);
         }
 
-        $this->repository->recalculateCustomerDocumentTotals($documentId);
         return $this->listCustomerDocumentPayments($companyId, $documentId);
     }
 
-    public function deleteCustomerPayment(int $companyId, int $documentId, int $paymentId): array
+    public function deleteCustomerPayment(int $companyId, int $documentId, int $paymentId, ?int $cashRegisterId): array
     {
-        $deleted = $this->repository->deleteCustomerDocumentPayment($companyId, $documentId, $paymentId);
+        $deleted = $this->repository->deleteCustomerDocumentPayment($companyId, $documentId, $paymentId, $cashRegisterId);
         if (!$deleted) {
             throw new \RuntimeException('Pago no encontrado', 404);
         }
 
-        $this->repository->recalculateCustomerDocumentTotals($documentId);
         return $this->listCustomerDocumentPayments($companyId, $documentId);
     }
 

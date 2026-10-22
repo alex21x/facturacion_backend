@@ -268,4 +268,14 @@ class SalesDocumentLinePersistenceService
 
         $this->paymentRepository->createBatch($rows);
     }
+
+    public function listPaidPayments(int $documentId): array
+    {
+        return $this->paymentRepository->listPaidByDocumentId($documentId);
+    }
+
+    public function transferPaidPayments(int $sourceDocumentId, int $targetDocumentId): int
+    {
+        return $this->paymentRepository->transferPaidToDocument($sourceDocumentId, $targetDocumentId);
+    }
 }

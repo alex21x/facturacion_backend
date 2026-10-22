@@ -95,6 +95,7 @@ class CreditPaymentsController extends Controller
 
         $payload = $request->validate([
             'payment_method_id' => ['nullable', 'integer'],
+            'cash_register_id' => ['nullable', 'integer', 'min:1'],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'status' => ['nullable', 'in:PENDING,PAID,CANCELED'],
             'paid_at' => ['nullable', 'date'],
@@ -116,6 +117,7 @@ class CreditPaymentsController extends Controller
 
         $payload = $request->validate([
             'payment_method_id' => ['nullable', 'integer'],
+            'cash_register_id' => ['nullable', 'integer', 'min:1'],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'status' => ['nullable', 'in:PENDING,PAID,CANCELED'],
             'paid_at' => ['nullable', 'date'],
@@ -133,9 +135,13 @@ class CreditPaymentsController extends Controller
     public function deleteCustomerPayment(Request $request, int $id, int $paymentId)
     {
         $companyId = (int) $request->attributes->get('resolved_company_id');
+        $payload = $request->validate([
+            'cash_register_id' => ['nullable', 'integer', 'min:1'],
+        ]);
 
         try {
-            return response()->json($this->deleteCustomerCreditPaymentUseCase->execute($companyId, $id, $paymentId));
+            $cashRegisterId = isset($payload['cash_register_id']) ? (int) $payload['cash_register_id'] : null;
+            return response()->json($this->deleteCustomerCreditPaymentUseCase->execute($companyId, $id, $paymentId, $cashRegisterId));
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], $this->resolveHttpStatus($e->getCode()));
         }

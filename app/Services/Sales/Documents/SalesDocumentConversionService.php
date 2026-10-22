@@ -6,6 +6,7 @@ use App\Application\DTOs\Sales\SalesSeriesCandidateDTO;
 use App\Application\DTOs\Sales\SalesSourceDocumentDTO;
 use App\Domain\Sales\Repositories\CommercialDocumentItemLotRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
+use App\Domain\Sales\Repositories\CommercialDocumentPaymentRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
 
 class SalesDocumentConversionService
@@ -13,7 +14,8 @@ class SalesDocumentConversionService
     public function __construct(
         private CommercialDocumentRepositoryInterface $commercialDocumentRepository,
         private CommercialDocumentItemRepositoryInterface $commercialDocumentItemRepository,
-        private CommercialDocumentItemLotRepositoryInterface $commercialDocumentItemLotRepository
+        private CommercialDocumentItemLotRepositoryInterface $commercialDocumentItemLotRepository,
+        private CommercialDocumentPaymentRepositoryInterface $commercialDocumentPaymentRepository
     ) {
     }
 
@@ -61,5 +63,10 @@ class SalesDocumentConversionService
     public function resolveUserFullName(int $userId): string
     {
         return $this->commercialDocumentRepository->findUserFullNameById($userId);
+    }
+
+    public function getPaidPaymentsForSource(int $sourceDocumentId): array
+    {
+        return $this->commercialDocumentPaymentRepository->listPaidByDocumentId($sourceDocumentId);
     }
 }

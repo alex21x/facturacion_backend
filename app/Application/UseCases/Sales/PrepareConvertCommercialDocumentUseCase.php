@@ -92,8 +92,33 @@ class PrepareConvertCommercialDocumentUseCase
                 $sourceMetadata = $decoded;
             }
         }
+        $sourcePaidPayments = strtoupper((string) $source->document_kind) === 'SALES_ORDER'
+            ? $this->salesDocumentConversionService->getPaidPaymentsForSource($sourceId)
+            : [];
 
         $sourceHadStockImpact = CommercialDocumentPolicy::shouldAffectStock((string) $source->document_kind, (string) $source->status);
+
+        // Total the converted document will have once the global discount (if flag active) is applied over the items.
+        $sourceBranchId = $source->branch_id !== null ? (int) $source->branch_id : null;
+        $itemDiscountEnabled = $this->isFeatureEnabledForBranch($companyId, $sourceBranchId, 'SALES_ITEM_DISCOUNT_ENABLED');
+        $sourceItemsTotal = (float) $sourceItems->sum(function ($item) use ($itemDiscountEnabled) {
+            $lineTotal = (float) $item->total;
+            if ($itemDiscountEnabled || (float) $item->discount_total <= 0) {
+                return $lineTotal;
+            }
+            $meta = is_string($item->metadata ?? null) ? json_decode($item->metadata, true) : (array) ($item->metadata ?? []);
+            if (filter_var($meta['is_free_operation'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                return $lineTotal;
+            }
+
+            return (float) $item->subtotal + (float) $item->tax_total;
+        });
+        $sourceGlobalDiscount = CommercialDocumentPolicy::resolveGlobalDiscount(
+            $sourceMetadata,
+            $this->isFeatureEnabledForBranch($companyId, $sourceBranchId, 'SALES_GLOBAL_DISCOUNT_ENABLED'),
+            round($sourceItemsTotal, 2)
+        );
+        $expectedConvertedTotal = round(max($sourceItemsTotal - $sourceGlobalDiscount, 0.0), 2);
 
         $allProductIds = $sourceItems
             ->pluck('product_id')
@@ -147,17 +172,16 @@ class PrepareConvertCommercialDocumentUseCase
             ->filter(fn (array $row) => $row['payment_method_id'] > 0 && $row['amount'] > 0)
             ->values();
 
-        $shouldUseRequestedPayments = $targetDocumentKind === 'SALES_ORDER'
-            && strtoupper($targetStatus) === 'ISSUED'
+        $shouldUseRequestedPayments = strtoupper($targetStatus) === 'ISSUED'
             && $requestedPayments->isNotEmpty();
 
         if ($shouldUseRequestedPayments) {
-            $paidRequestedTotal = (float) $requestedPayments
-                ->filter(fn (array $row) => $row['status'] === 'PAID')
+            $requestedPaymentTotal = (float) $requestedPayments
+                ->filter(fn (array $row) => $row['status'] !== 'CANCELED')
                 ->sum('amount');
 
-            if (abs($paidRequestedTotal - (float) $source->total) > 0.01) {
-                throw new SalesDocumentException('La suma de pagos debe coincidir con el total del documento para convertir a nota de pedido.');
+            if (abs($requestedPaymentTotal - $expectedConvertedTotal) > 0.01) {
+                throw new SalesDocumentException('La suma de pagos debe coincidir con el total del documento convertido.');
             }
 
             $resolvedPaymentMethodId = (int) ($requestedPayments->first()['payment_method_id'] ?? $resolvedPaymentMethodId);
@@ -215,7 +239,7 @@ class PrepareConvertCommercialDocumentUseCase
                 'tax_total' => (float) $item->tax_total,
                 'subtotal' => (float) $item->subtotal,
                 'total' => (float) $item->total,
-                'metadata' => null,
+                'metadata' => is_string($item->metadata ?? null) ? (json_decode($item->metadata, true) ?: null) : null,
                 'lots' => !empty($itemLots) ? $itemLots : null,
             ];
         })->values()->all();
@@ -250,7 +274,8 @@ class PrepareConvertCommercialDocumentUseCase
             'payment_method_id' => $resolvedPaymentMethodId,
             'exchange_rate' => $source->exchange_rate !== null ? (float) $source->exchange_rate : null,
             'notes' => $payload['notes'] ?? $source->notes,
-            'metadata' => array_merge($sourceMetadata, $conversionMetadata),
+            // client_request_id identifies the source creation; inheriting it makes creation return the source as an idempotent retry.
+            'metadata' => array_merge(array_diff_key($sourceMetadata, ['client_request_id' => true]), $conversionMetadata),
             'status' => $targetStatus,
             'items' => $itemsPayload,
             'payments' => $shouldUseRequestedPayments
@@ -268,24 +293,196 @@ class PrepareConvertCommercialDocumentUseCase
                     ];
                 })->values()->all()
                 : ((
-                    in_array($targetDocumentKind, ['INVOICE', 'RECEIPT'], true)
-                    || ($sellerToCashierEnabled && $targetDocumentKind === 'SALES_ORDER')
+                    in_array($targetDocumentKind, ['INVOICE', 'RECEIPT', 'SALES_ORDER'], true)
                 )
                     && strtoupper($targetStatus) === 'ISSUED'
                     && $resolvedPaymentMethodId !== null
-                    ? [[
-                        'payment_method_id' => $resolvedPaymentMethodId,
-                        'amount' => (float) $source->total,
-                        'status' => 'PAID',
-                        'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
-                        'method' => 'REGISTERED',
-                    ]]
+                    ? $this->buildSourceConversionPayments(
+                        $sourceMetadata,
+                        strtoupper((string) $source->status),
+                        $resolvedPaymentMethodId,
+                        $expectedConvertedTotal,
+                        $source->due_at ?? null,
+                        $sourcePaidPayments
+                    )
                     : []),
         ];
 
         return [
             'forward_payload' => $forwardPayload,
         ];
+    }
+
+    // Same resolution as document creation: branch override first, then company.
+    private function isFeatureEnabledForBranch(int $companyId, ?int $branchId, string $featureCode): bool
+    {
+        $code = strtoupper(trim($featureCode));
+        $find = fn ($rows) => $rows->first(fn ($t) => strtoupper(trim((string) ($t->feature_code ?? ''))) === $code);
+
+        if ($branchId !== null) {
+            $branchRow = $find($this->salesLookupService->loadBranchFeatureToggles($companyId, $branchId));
+            if ($branchRow && $branchRow->is_enabled !== null) {
+                return (bool) $branchRow->is_enabled;
+            }
+        }
+
+        return $this->isCompanyFeatureEnabled($companyId, $featureCode, false);
+    }
+
+    private function buildSourceConversionPayments(
+        array $sourceMetadata,
+        string $sourceStatus,
+        int $paymentMethodId,
+        float $expectedTotal,
+        $sourceDueAt,
+        array $sourcePaidPayments = []
+    ): array
+    {
+        $breakdown = collect($sourceMetadata['payment_breakdown'] ?? [])
+            ->filter(fn ($row) => is_array($row) && (int) ($row['payment_method_id'] ?? 0) > 0 && (float) ($row['amount'] ?? 0) > 0)
+            ->values();
+        $isCredit = strtoupper(trim((string) ($sourceMetadata['payment_condition'] ?? ''))) === 'CREDITO';
+        $isSourceIssued = $sourceStatus === 'ISSUED';
+
+        if (!$isCredit) {
+            $paidRows = $this->mapSourcePaidPayments($sourcePaidPayments);
+            if ($paidRows === []) {
+                $paidRows = $breakdown
+                    ->filter(fn (array $row) => !$isSourceIssued || strtoupper(trim((string) ($row['status'] ?? 'PAID'))) === 'PAID')
+                    ->map(fn (array $row) => [
+                        'payment_method_id' => (int) $row['payment_method_id'],
+                        'amount' => round((float) $row['amount'], 2),
+                        'status' => 'PAID',
+                        'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
+                        'method' => 'REGISTERED',
+                    ])
+                    ->values()
+                    ->all();
+            }
+
+            if ($paidRows === []) {
+                $paidRows[] = [
+                    'payment_method_id' => $paymentMethodId,
+                    'amount' => $expectedTotal,
+                    'status' => 'PAID',
+                    'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
+                    'method' => 'REGISTERED',
+                ];
+            }
+
+            $paidTotal = round(array_sum(array_column($paidRows, 'amount')), 2);
+            if ($paidTotal >= $expectedTotal) {
+                $this->normalizePaymentRowsToTotal($paidRows, $expectedTotal);
+                return $paidRows;
+            }
+
+            return [
+                ...$paidRows,
+                [
+                    'payment_method_id' => $paymentMethodId,
+                    'amount' => round($expectedTotal - $paidTotal, 2),
+                    'due_at' => $sourceDueAt
+                        ? Carbon::parse($sourceDueAt)->format('Y-m-d')
+                        : now('America/Lima')->addDays(30)->format('Y-m-d'),
+                    'status' => 'PENDING',
+                    'method' => 'REGISTERED',
+                ],
+            ];
+        }
+
+        $installments = collect($sourceMetadata['credit_installments'] ?? [])
+            ->filter(fn ($row) => is_array($row) && (float) ($row['amount'] ?? 0) > 0 && trim((string) ($row['due_at'] ?? '')) !== '')
+            ->values();
+
+        $declaredAdvance = max(0.0, (float) ($sourceMetadata['advance_amount'] ?? 0));
+        $paidBreakdown = $this->mapSourcePaidPayments($sourcePaidPayments);
+        if ($paidBreakdown === []) {
+            $paidBreakdown = $breakdown
+                ->filter(fn (array $row) => !$isSourceIssued || strtoupper(trim((string) ($row['status'] ?? ''))) === 'PAID')
+                ->map(fn (array $row) => [
+                    'payment_method_id' => (int) $row['payment_method_id'],
+                    'amount' => round((float) $row['amount'], 2),
+                    'status' => 'PAID',
+                    'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
+                    'method' => 'REGISTERED',
+                ])
+                ->values()
+                ->all();
+        }
+        $paidSum = array_sum(array_column($paidBreakdown, 'amount'));
+
+        if (!$isSourceIssued && $declaredAdvance > 0 && $paidSum > $declaredAdvance) {
+            $this->normalizePaymentRowsToTotal($paidBreakdown, $declaredAdvance);
+            $paidSum = array_sum(array_column($paidBreakdown, 'amount'));
+        }
+
+        if ($paidBreakdown === [] && $declaredAdvance > 0) {
+            $paidBreakdown[] = [
+                'payment_method_id' => $paymentMethodId,
+                'amount' => round(min($declaredAdvance, $expectedTotal), 2),
+                'status' => 'PAID',
+                'paid_at' => now('America/Lima')->format('Y-m-d H:i:sP'),
+                'method' => 'REGISTERED',
+            ];
+            $paidSum = (float) $paidBreakdown[0]['amount'];
+        }
+
+        $pendingTotal = round(max(0.0, $expectedTotal - $paidSum), 2);
+        $pendingRows = $installments->map(fn ($row) => [
+            'payment_method_id' => $paymentMethodId,
+            'amount' => round((float) $row['amount'], 2),
+            'due_at' => $row['due_at'],
+            'status' => 'PENDING',
+            'notes' => $row['notes'] ?? null,
+            'method' => 'REGISTERED',
+        ])->all();
+
+        if ($pendingRows === [] && $pendingTotal > 0) {
+            $dueAt = $sourceDueAt ? Carbon::parse($sourceDueAt)->format('Y-m-d') : now('America/Lima')->addDays(30)->format('Y-m-d');
+            $pendingRows[] = [
+                'payment_method_id' => $paymentMethodId,
+                'amount' => $pendingTotal,
+                'due_at' => $dueAt,
+                'status' => 'PENDING',
+                'method' => 'REGISTERED',
+            ];
+        } elseif ($pendingRows !== []) {
+            $this->normalizePaymentRowsToTotal($pendingRows, $pendingTotal);
+        }
+
+        return [...$paidBreakdown, ...$pendingRows];
+    }
+
+    private function mapSourcePaidPayments(array $sourcePaidPayments): array
+    {
+        return collect($sourcePaidPayments)
+            ->filter(fn (array $row) => (int) ($row['payment_method_id'] ?? 0) > 0 && (float) ($row['amount'] ?? 0) > 0)
+            ->map(fn (array $row) => [
+                'payment_method_id' => (int) $row['payment_method_id'],
+                'amount' => round((float) $row['amount'], 2),
+                'status' => 'PAID',
+                'paid_at' => $row['paid_at'] ?? null,
+                'notes' => $row['notes'] ?? null,
+                'method' => 'REGISTERED',
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function normalizePaymentRowsToTotal(array &$rows, float $targetTotal): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        $sum = array_sum(array_column($rows, 'amount'));
+        $diff = round($targetTotal - $sum, 2);
+        $lastIndex = array_key_last($rows);
+        $rows[$lastIndex]['amount'] = round((float) $rows[$lastIndex]['amount'] + $diff, 2);
+        if ($rows[$lastIndex]['amount'] <= 0) {
+            $rows[$lastIndex]['amount'] = round($targetTotal, 2);
+            $rows = [$rows[$lastIndex]];
+        }
     }
 
     private function isCompanyFeatureEnabled(int $companyId, string $featureCode, bool $defaultValue): bool

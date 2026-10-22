@@ -18,6 +18,7 @@ use App\Services\AppConfig\CompanyIgvRateService;
 use App\Services\Sales\CustomerVehicleService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
@@ -31,7 +32,7 @@ use Illuminate\Support\Carbon;
 
 class SalesDocumentApplicationService implements SalesDocumentApplicationServiceInterface
 {
-    private const SALES_PRINT_TEMPLATE_SIGNATURE = 'tpl4';
+    private const SALES_PRINT_TEMPLATE_SIGNATURE = 'tpl7';
 
     public function __construct(
         private SalesDocumentReadService $salesDocumentReadService,
@@ -557,7 +558,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                 'json_rows' => $rawRows,
                 'count'     => $rawRows->count(),
                 'max'       => $max,
-                'headers'   => ['ID','Documento','Serie','Numero','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Vehiculo','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Producto','Unidad','Cantidad','Precio Unitario','Total Linea','SENATI'],
+                'headers'   => ['ID','Documento','Serie','Numero','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Vehiculo','Medio de pago','Estado','Estado SUNAT','Estado Baja SUNAT','Producto','Unidad','Cantidad','Precio Unitario','Total Linea','SENATI'],
                 'rows'      => $rawRows->map(function ($row) {
                     $issuer = trim((string) ($row->created_by_user_name ?? ''));
                     $seller = trim((string) ($row->origin_seller_user_name ?? ''));
@@ -581,7 +582,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                             (string) ($row->vehicle_brand_snapshot ?? ''),
                             (string) ($row->vehicle_model_snapshot ?? ''),
                         ], fn ($v) => trim($v) !== ''))),
-                        (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
+                        (string) ($row->payment_method_name ?? 'Sin medio de pago'),
                         (string) ($row->status_label ?? $row->status),
                         (string) ($row->sunat_status ?? ''),
                         (string) ($row->sunat_void_status ?? ''),
@@ -604,7 +605,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'json_rows' => $rawRows,
             'count'     => $rawRows->count(),
             'max'       => $max,
-            'headers'   => ['ID','Documento','Serie','Numero','Documento Afectado','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Forma de Pago','Estado','Estado SUNAT','Estado Baja SUNAT','Descuento Item','Descuento Global','Total','Saldo','SENATI'],
+            'headers'   => ['ID','Documento','Serie','Numero','Documento Afectado','Solicita','Emite','Actor','Fecha Emision','Cliente','Tipo Doc Cliente','Nro Doc Cliente','Medio de pago','Estado','Estado SUNAT','Estado Baja SUNAT','Descuento Item','Descuento Global','Total','Saldo','SENATI'],
             'rows'      => $rawRows->map(function ($row) {
                 $issuer = trim((string) ($row->created_by_user_name ?? ''));
                 $seller = trim((string) ($row->origin_seller_user_name ?? ''));
@@ -626,7 +627,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
                     (string) ($row->customer_name ?? ''),
                     (string) ($row->customer_doc_type ?? '-'),
                     (string) ($row->customer_doc_number ?? ''),
-                    (string) ($row->payment_method_name ?? 'Sin metodo de pago'),
+                    (string) ($row->payment_method_name ?? 'Sin medio de pago'),
                     (string) ($row->status_label ?? $row->status),
                     (string) ($row->sunat_status ?? ''),
                     (string) ($row->sunat_void_status ?? ''),
@@ -1263,6 +1264,7 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         }
 
         $documentKindRaw = strtoupper(trim((string) ($doc->document_kind ?? 'DOCUMENTO')));
+        $isCommercialPreDocument = in_array($documentKindRaw, ['QUOTATION', 'SALES_ORDER'], true);
         $noteBaseKind = null;
         if ($documentKindRaw === 'CREDIT_NOTE' || str_starts_with($documentKindRaw, 'CREDIT_NOTE_')) {
             $noteBaseKind = 'CREDIT_NOTE';
@@ -1377,36 +1379,87 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         }
 
         $branchId = isset($doc->branch_id) && $doc->branch_id !== null ? (int) $doc->branch_id : null;
-        $salesOrderMultiPaymentEnabled = $this->supportService->isCommerceFeatureEnabledForContextWithDefault(
-            $companyId,
-            $branchId,
-            'SALES_ORDER_MULTI_PAYMENT_ENABLED',
-            false
-        );
-        $isSalesOrderDocument = $documentKindRaw === 'SALES_ORDER';
-        $showPaymentBreakdown = $isSalesOrderDocument && $salesOrderMultiPaymentEnabled;
-
-        $paymentBreakdown = [];
-        $paymentRows = $metadata['payment_breakdown'] ?? null;
-        if ($showPaymentBreakdown && is_array($paymentRows)) {
-            foreach ($paymentRows as $paymentRow) {
-                if (!is_array($paymentRow)) {
+        $isCreditCondition = strtoupper(trim((string) ($metadata['payment_condition'] ?? 'CONTADO'))) === 'CREDITO';
+        $paidPaymentRows = DB::table('sales.commercial_document_payments as p')
+            ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'p.payment_method_id')
+            ->where('p.document_id', (int) $doc->id)
+            ->where('p.status', 'PAID')
+            ->where('p.amount', '>', 0)
+            ->orderBy('p.id')
+            ->get(['p.amount', 'pm.name as payment_method_name']);
+        $paymentBreakdown = $paidPaymentRows
+            ->map(fn ($paymentRow) => [
+                'method' => trim((string) ($paymentRow->payment_method_name ?? 'Metodo de pago')),
+                'amount' => number_format((float) $paymentRow->amount, 2, '.', ''),
+            ])
+            ->values()
+            ->all();
+        if ($paymentBreakdown === [] && (float) ($doc->paid_total ?? 0) > 0) {
+            $paymentBreakdown[] = [
+                'method' => trim((string) ($doc->payment_method_name ?? 'Metodo de pago')),
+                'amount' => number_format((float) $doc->paid_total, 2, '.', ''),
+                'label' => 'PAGO',
+            ];
+        }
+        if (
+            $paymentBreakdown === []
+            && $isCommercialPreDocument
+            && strtoupper(trim((string) ($doc->status ?? ''))) !== 'ISSUED'
+            && is_array($metadata['payment_breakdown'] ?? null)
+        ) {
+            foreach ($metadata['payment_breakdown'] as $plannedPayment) {
+                if (!is_array($plannedPayment)) {
                     continue;
                 }
 
-                $amount = (float) ($paymentRow['amount'] ?? 0);
-                if ($amount <= 0) {
+                $amount = (float) ($plannedPayment['amount'] ?? 0);
+                $status = strtoupper(trim((string) ($plannedPayment['status'] ?? 'PENDING')));
+                if ($amount <= 0 || $status === 'CANCELED') {
                     continue;
                 }
 
+                $paymentMethodName = trim((string) (
+                    $plannedPayment['payment_method_name']
+                    ?? $plannedPayment['method_name']
+                    ?? $doc->payment_method_name
+                    ?? 'Medio de pago'
+                ));
                 $paymentBreakdown[] = [
-                    'method' => trim((string) (
-                        $paymentRow['payment_method_name']
-                        ?? $paymentRow['method_name']
-                        ?? $paymentRow['name']
-                        ?? 'Metodo de pago'
-                    )),
+                    'method' => $paymentMethodName !== '' ? $paymentMethodName : 'Medio de pago',
                     'amount' => number_format($amount, 2, '.', ''),
+                    'label' => 'MEDIO',
+                ];
+            }
+        }
+        if (
+            $paymentBreakdown === []
+            && $isCommercialPreDocument
+            && strtoupper(trim((string) ($doc->status ?? ''))) !== 'ISSUED'
+        ) {
+            $plannedAmount = $isCreditCondition
+                ? (float) ($metadata['advance_amount'] ?? 0)
+                : (float) ($doc->total ?? 0);
+            $paymentMethodName = trim((string) ($doc->payment_method_name ?? ''));
+            if ($plannedAmount > 0 && $paymentMethodName !== '') {
+                $paymentBreakdown[] = [
+                    'method' => $paymentMethodName,
+                    'amount' => number_format($plannedAmount, 2, '.', ''),
+                    'label' => 'MEDIO',
+                ];
+            }
+        }
+
+        $creditInstallments = [];
+        if ($isCreditCondition && is_array($metadata['credit_installments'] ?? null)) {
+            foreach ($metadata['credit_installments'] as $installment) {
+                if (!is_array($installment) || (float) ($installment['amount'] ?? 0) <= 0) {
+                    continue;
+                }
+
+                $creditInstallments[] = [
+                    'no' => (int) ($installment['installment_no'] ?? (count($creditInstallments) + 1)),
+                    'amount' => number_format((float) $installment['amount'], 2, '.', ''),
+                    'dueDate' => $this->formatDisplayDateOnly((string) ($installment['due_at'] ?? '')),
                 ];
             }
         }
@@ -1503,6 +1556,13 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
         }
 
         $grandTotal = (float) ($doc->total ?? 0);
+        $globalDiscountTotal = round(max((float) ($metadata['discount_total'] ?? 0), 0), 2);
+        $itemDiscountTotal = round((float) $items->sum(fn ($row) => (float) data_get($row, 'discount_total', 0)), 2);
+        $discountableAmount = max($subtotal + $taxTotal - $itemDiscountTotal, 0);
+        $savedDiscountPercent = $metadata['discount_percent'] ?? $metadata['global_discount_percent'] ?? null;
+        $globalDiscountPercent = is_numeric($savedDiscountPercent) && (float) $savedDiscountPercent > 0
+            ? min((float) $savedDiscountPercent, 100)
+            : ($discountableAmount > 0 ? min(($globalDiscountTotal / $discountableAmount) * 100, 100) : 0);
         $showProductCodes = $this->supportService->isCommerceFeatureEnabledForContextWithDefault(
             $companyId,
             $branchId,
@@ -1572,6 +1632,8 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'documentNotes' => $documentNotes,
             'paymentMethod' => (string) ($doc->payment_method_name ?? '-'),
             'paymentBreakdown' => $paymentBreakdown,
+            'paymentCondition' => $isCreditCondition ? 'CREDITO' : 'CONTADO',
+            'creditInstallments' => $creditInstallments,
             'guideNo' => $guideNo,
             'electronicSignature' => $electronicSignature,
             'isNoteDocument' => $isNoteDocument,
@@ -1587,6 +1649,9 @@ class SalesDocumentApplicationService implements SalesDocumentApplicationService
             'exoneradaTotal' => number_format($exoneradaTotal, 2, '.', ''),
             'taxTotal' => number_format($taxTotal, 2, '.', ''),
             'grandTotal' => number_format($grandTotal, 2, '.', ''),
+            'globalDiscountTotal' => $globalDiscountTotal > 0 ? number_format($globalDiscountTotal, 2, '.', '') : null,
+            'globalDiscountPercent' => $globalDiscountTotal > 0 ? number_format($globalDiscountPercent, 2, '.', '') : null,
+            'itemDiscountTotal' => $itemDiscountTotal > 0 ? number_format($itemDiscountTotal, 2, '.', '') : null,
             'total' => number_format((float) ($doc->total ?? 0), 2, '.', ''),
             'totalWords' => $totalWords,
             'showProductCodes' => $showProductCodes,

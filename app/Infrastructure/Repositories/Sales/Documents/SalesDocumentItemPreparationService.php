@@ -185,6 +185,40 @@ class SalesDocumentItemPreparationService
         return $processedItems;
     }
 
+    /**
+     * When the item-discount feature is disabled, discounts are stripped from regular lines
+     * (free operations keep their own handling) and the line total is recalculated.
+     */
+    public static function applyItemDiscountPolicy(array $items, bool $itemDiscountEnabled): array
+    {
+        if ($itemDiscountEnabled) {
+            return $items;
+        }
+
+        return array_map(function ($item) {
+            if (!is_array($item)) {
+                return $item;
+            }
+
+            $meta = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+            $isFree = filter_var($meta['is_free_operation'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            if ($isFree || (float) ($item['discount_total'] ?? 0) <= 0) {
+                return $item;
+            }
+
+            $qty = (float) ($item['qty'] ?? $item['quantity'] ?? 0);
+            $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : ($qty * (float) ($item['unit_price'] ?? 0));
+            $tax = isset($item['tax_total']) ? (float) $item['tax_total'] : 0.0;
+
+            $item['discount_total'] = 0.0;
+            $item['total'] = round($subtotal + $tax, 2);
+            $meta['descuento'] = 0;
+            $item['metadata'] = $meta;
+
+            return $item;
+        }, $items);
+    }
+
     public function calculateDocumentTotals(array $items): DocumentTotalsDTO
     {
         $subtotal = 0.0;

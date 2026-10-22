@@ -10,8 +10,8 @@ class DeleteCustomerCreditPaymentUseCase
     {
     }
 
-    public function execute(int $companyId, int $documentId, int $paymentId): array
+    public function execute(int $companyId, int $documentId, int $paymentId, ?int $cashRegisterId): array
     {
-        return $this->service->deleteCustomerPayment($companyId, $documentId, $paymentId);
+        return $this->service->deleteCustomerPayment($companyId, $documentId, $paymentId, $cashRegisterId);
     }
 }

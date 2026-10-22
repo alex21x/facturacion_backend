@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 class CashSessionRepository implements CashSessionRepositoryInterface
 {
+    private const CUSTOMER_COLLECTION_REF_TYPE = 'CUSTOMER_CREDIT_PAYMENT';
+
     public function paginateSessions(int $companyId, ?int $cashRegisterId, ?string $status, int $page, int $limit): array
     {
         $query = DB::table('sales.cash_sessions as cs')
@@ -176,7 +178,10 @@ class CashSessionRepository implements CashSessionRepositoryInterface
         END";
 
         return DB::table('sales.cash_movements as cm')
-            ->join('sales.commercial_documents as cd', 'cd.id', '=', 'cm.ref_id')
+            ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
+                $join->on('cd.id', '=', 'cm.ref_id')
+                    ->whereIn('cm.ref_type', $documentRefTypes);
+            })
             ->leftJoin('sales.document_kinds as dk_cd', 'dk_cd.id', '=', 'cd.document_kind_id')
             ->leftJoin('sales.document_kinds as dk_legacy', function ($join): void {
                 $join->on(DB::raw('UPPER(dk_legacy.code)'), '=', DB::raw('UPPER(cd.document_kind)'));
@@ -186,7 +191,7 @@ class CashSessionRepository implements CashSessionRepositoryInterface
                 DB::raw('COALESCE(pm.id, 0) as payment_method_id'),
                 DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO') as payment_method_code"),
                 DB::raw("COALESCE(pm.name, 'Sin método de pago') as payment_method_name"),
-                DB::raw('COUNT(DISTINCT cm.ref_id) as document_count'),
+                DB::raw("COUNT(DISTINCT CASE WHEN cm.ref_type = '" . self::CUSTOMER_COLLECTION_REF_TYPE . "' THEN cm.id ELSE cm.ref_id END) as document_count"),
                 DB::raw("SUM(CASE
                     WHEN ({$documentKindBaseExpr}) = 'CREDIT_NOTE' THEN -ABS(COALESCE(cm.amount, 0))
                     ELSE ABS(COALESCE(cm.amount, 0))
@@ -194,8 +199,13 @@ class CashSessionRepository implements CashSessionRepositoryInterface
             ])
             ->where('cm.cash_session_id', $sessionId)
             ->where('cm.company_id', $companyId)
-            ->whereIn('cm.ref_type', $documentRefTypes)
-            ->whereNotIn('cd.status', $excludedDocumentStatuses)
+            ->where(function ($query) use ($documentRefTypes, $excludedDocumentStatuses): void {
+                $query->where(function ($documents) use ($documentRefTypes, $excludedDocumentStatuses): void {
+                    $documents->whereIn('cm.ref_type', $documentRefTypes)
+                        ->whereNotNull('cd.id')
+                        ->whereNotIn('cd.status', $excludedDocumentStatuses);
+                })->orWhere('cm.ref_type', self::CUSTOMER_COLLECTION_REF_TYPE);
+            })
             ->groupBy(
                 DB::raw('COALESCE(pm.id, 0)'),
                 DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"),

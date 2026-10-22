@@ -99,6 +99,8 @@ class TaxBridgePayloadBuilder
         $totalInafectas = 0.0;
         $totalExoneradas = 0.0;
         $totalIcbper = 0.0;
+        $itemDiscountSum = 0.0;
+        $itemTaxReduction = 0.0;
         foreach ($items as $item) {
             $lineMeta = json_decode((string) ($item->metadata ?? '{}'), true);
             $lineMeta = is_array($lineMeta) ? $lineMeta : [];
@@ -117,13 +119,24 @@ class TaxBridgePayloadBuilder
             $icbperTax = (float) ($lineMeta['igv_icbper'] ?? 0);
             $gratuitas = (float) ($lineMeta['gratuitas'] ?? $lineMeta['free_operation_total'] ?? 0);
             $descuento = (float) ($lineMeta['descuento'] ?? $item->discount_total ?? 0);
+            $itemDiscountSum += (float) ($item->discount_total ?? 0);
+
+            // Header amounts are net of line discounts (free operations keep their own handling).
+            $lineGross = $lineSubtotal + $lineTax;
+            $lineNet = (float) ($item->total ?? 0);
+            $isFreeLine = !empty($lineMeta['is_free_operation']);
+            $headerFactor = (!$isFreeLine && (float) ($item->discount_total ?? 0) > 0 && $lineGross > 0)
+                ? max(0.0, min(1.0, $lineNet / $lineGross))
+                : 1.0;
+            $itemTaxReduction += $lineTax * (1 - $headerFactor);
+            $headerSubtotal = $lineSubtotal * $headerFactor;
 
             if (in_array($tipoIgv, ['10', '11', '12', '13', '14', '15', '16', '17'], true)) {
-                $totalGravadas += $lineSubtotal;
+                $totalGravadas += $headerSubtotal;
             } elseif (in_array($tipoIgv, ['20', '21'], true)) {
-                $totalExoneradas += $lineSubtotal;
+                $totalExoneradas += $headerSubtotal;
             } elseif (in_array($tipoIgv, ['30', '31', '32', '33', '34', '35', '36'], true)) {
-                $totalInafectas += $lineSubtotal;
+                $totalInafectas += $headerSubtotal;
             }
 
             $totalIcbper += $icbperTax;
@@ -148,6 +161,23 @@ class TaxBridgePayloadBuilder
                 'gratuitas' => round($gratuitas, 2),
                 'descuento' => round($descuento, 2),
             ];
+        }
+
+        $globalDiscount = round(max((float) ($meta['discount_total'] ?? 0), 0), 2);
+        $documentTotal = (float) ($document->total ?? 0);
+        $documentTax = (float) ($document->tax_total ?? 0) - $itemTaxReduction;
+        $globalDiscountApplied = $globalDiscount > 0
+            && abs((float) ($document->discount_total ?? 0) - $itemDiscountSum - $globalDiscount) <= 0.02;
+        $globalBaseDiscount = $globalDiscount;
+        if ($globalDiscountApplied && ($documentTotal + $globalDiscount) > 0) {
+            // Global discount reduces the taxable bases and IGV proportionally.
+            $factor = $documentTotal / ($documentTotal + $globalDiscount);
+            $bases = $totalGravadas + $totalExoneradas + $totalInafectas;
+            $totalGravadas *= $factor;
+            $totalExoneradas *= $factor;
+            $totalInafectas *= $factor;
+            $documentTax *= $factor;
+            $globalBaseDiscount = round($bases - ($totalGravadas + $totalExoneradas + $totalInafectas), 2);
         }
 
         $sourceDocumentId = (int) ($meta['source_document_id'] ?? $document->reference_document_id ?? 0);
@@ -233,11 +263,11 @@ class TaxBridgePayloadBuilder
                 'gravadas' => round($totalGravadas, 2),
                 'inafectas' => round($totalInafectas, 2),
                 'exoneradas' => round($totalExoneradas, 2),
-                'igv' => round((float) ($document->tax_total ?? 0), 2),
+                'igv' => round($documentTax, 2),
                 'icbper' => round($totalIcbper, 2),
-                'impuestos' => round((float) ($document->tax_total ?? 0) + $totalIcbper, 2),
-                'importe_venta' => round((float) ($document->total ?? 0), 2),
-                'descuentoGlobal' => round((float) ($meta['discount_total'] ?? $document->discount_total ?? 0), 2),
+                'impuestos' => round($documentTax + $totalIcbper, 2),
+                'importe_venta' => round($documentTotal, 2),
+                'descuentoGlobal' => round($globalBaseDiscount, 2),
                 'observaciones' => trim((string) ($meta['observaciones'] ?? '')),
                 'cod_motivo' => (string) ($meta['note_reason_code'] ?? $document->reference_reason_code ?? ''),
                 'des_motivo' => (string) ($meta['note_reason_description'] ?? ''),

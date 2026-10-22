@@ -44,7 +44,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             $join->on('dsrc.company_id', '=', 'cd.company_id')
                 ->whereRaw("dsrc.id = COALESCE((cd.metadata->>'source_document_id')::BIGINT, 0)");
         })
-        ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cd.payment_method_id')
+        ->leftJoin('master.payment_types as pm', 'pm.id', '=', 'cm.payment_method_id')
         ->leftJoin('auth.users as u_doc', 'u_doc.id', '=', 'cd.created_by')
         ->leftJoin('auth.users as u_src', 'u_src.id', '=', 'dsrc.created_by')
         ->leftJoin('sales.document_kinds as dk_src', 'dk_src.id', '=', 'dsrc.document_kind_id')
@@ -175,6 +175,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 DB::raw("NULLIF(COALESCE(NULLIF(TRIM(CAST(cd.vehicle_model_snapshot AS TEXT)), ''), (cd.metadata->>'vehicle_model'), (cd.metadata->>'vehicleModel')), '') as vehicle_model_snapshot"),
                 'pm.name as payment_method_name',
                 'cd.total',
+                'cd.paid_total',
                 'cd.metadata',
                 'cd.status',
                 'cd.created_at',
@@ -228,6 +229,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 'cd.payment_method_id',
                 'cd.total',
                 'cd.paid_total',
+                'cd.metadata',
                 'cd.document_kind',
                 'cd.series',
                 'cd.number',
@@ -260,6 +262,7 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                 'cdi.unit_cost',
                 'p.cost_price as product_cost_price',
                 'cdi.subtotal as line_subtotal',
+                'cdi.tax_total as line_tax',
                 'cdi.total as line_total',
             ])
             ->where('cdi.document_id', $documentId)
@@ -297,45 +300,160 @@ class CashMovementRepository implements CashMovementRepositoryInterface
 
     public function upsertSessionCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
-        $existingMovement = DB::table('sales.cash_movements')
+        $existingMovements = DB::table('sales.cash_movements')
             ->where('company_id', $companyId)
             ->where('ref_type', 'COMMERCIAL_DOCUMENT')
             ->where('ref_id', (int) $document->id)
             ->orderBy('id')
-            ->first(['id', 'cash_register_id', 'cash_session_id']);
+            ->get(['id', 'cash_register_id', 'cash_session_id', 'payment_method_id', 'amount']);
 
-        if ($existingMovement) {
-            $needsReassign = (int) ($existingMovement->cash_register_id ?? 0) !== (int) $session->cash_register_id
-                || (int) ($existingMovement->cash_session_id ?? 0) !== (int) $session->id;
-
-            if ($needsReassign) {
-                DB::table('sales.cash_movements')
-                    ->where('id', (int) $existingMovement->id)
-                    ->update([
-                        'cash_register_id' => (int) $session->cash_register_id,
-                        'cash_session_id' => (int) $session->id,
-                        'branch_id' => $document->branch_id ?? $session->branch_id,
-                    ]);
-
-                return true;
+        $desiredPayments = $this->resolvePaidDocumentPayments($document);
+        if ($desiredPayments === []) {
+            if ($existingMovements->isEmpty()) {
+                return false;
             }
+            DB::table('sales.cash_movements')
+                ->whereIn('id', $existingMovements->pluck('id'))
+                ->delete();
 
-            return false;
+            return true;
         }
 
-        return $this->insertCommercialDocumentMovement($companyId, $sessionId, $document, $session);
+        $changed = false;
+        $existingByMethod = $existingMovements->groupBy(fn ($row) => $row->payment_method_id === null ? 'null' : (string) $row->payment_method_id);
+        foreach ($desiredPayments as $payment) {
+            $methodKey = $payment['payment_method_id'] === null ? 'null' : (string) $payment['payment_method_id'];
+            $matches = $existingByMethod->get($methodKey, collect());
+            $values = [
+                'cash_register_id' => (int) $session->cash_register_id,
+                'cash_session_id' => (int) $session->id,
+                'branch_id' => $document->branch_id ?? $session->branch_id,
+                'payment_method_id' => $payment['payment_method_id'],
+                'movement_type' => $this->resolveMovementTypeForDocumentKind((string) ($document->document_kind ?? '')),
+                'amount' => round((float) $payment['amount'], 4),
+            ];
+
+            if ($matches->isEmpty()) {
+                $this->insertDocumentMovementRow($companyId, $document, $session, $values);
+                $changed = true;
+                continue;
+            }
+
+            $existing = $matches->first();
+            $needsUpdate = (int) ($existing->cash_register_id ?? 0) !== (int) $session->cash_register_id
+                || (int) ($existing->cash_session_id ?? 0) !== (int) $session->id
+                || (int) ($existing->payment_method_id ?? 0) !== (int) ($payment['payment_method_id'] ?? 0)
+                || abs((float) $existing->amount - (float) $values['amount']) > 0.0001;
+            if ($needsUpdate) {
+                DB::table('sales.cash_movements')->where('id', (int) $existing->id)->update($values);
+                $changed = true;
+            }
+
+            $extraIds = $matches->skip(1)->pluck('id');
+            if ($extraIds->isNotEmpty()) {
+                DB::table('sales.cash_movements')->whereIn('id', $extraIds)->delete();
+                $changed = true;
+            }
+
+            $existingByMethod->forget($methodKey);
+        }
+
+        $staleIds = $existingByMethod->flatten(1)->pluck('id');
+        if ($staleIds->isNotEmpty()) {
+            DB::table('sales.cash_movements')->whereIn('id', $staleIds)->delete();
+            $changed = true;
+        }
+
+        return $changed;
     }
 
     public function insertCommercialDocumentMovement(int $companyId, int $sessionId, object $document, object $session): bool
     {
-        $amount = (float) ($document->paid_total ?? 0);
-        if ($amount <= 0) {
-            $amount = (float) ($document->total ?? 0);
-        }
-        if ($amount <= 0) {
+        $payments = $this->resolvePaidDocumentPayments($document);
+        if ($payments === []) {
             return false;
         }
 
+        foreach ($payments as $payment) {
+            $this->insertDocumentMovementRow($companyId, $document, $session, [
+                'cash_register_id' => (int) $session->cash_register_id,
+                'cash_session_id' => (int) $session->id,
+                'branch_id' => $document->branch_id ?? $session->branch_id,
+                'payment_method_id' => $payment['payment_method_id'],
+                'movement_type' => $this->resolveMovementTypeForDocumentKind((string) ($document->document_kind ?? '')),
+                'amount' => round((float) $payment['amount'], 4),
+            ]);
+        }
+
+        return true;
+    }
+
+    private function resolvePaidDocumentPayments(object $document): array
+    {
+        $paidTotal = max(0.0, (float) ($document->paid_total ?? 0));
+        $rawMetadata = $document->metadata ?? null;
+        $metadata = is_array($rawMetadata) ? $rawMetadata : (json_decode((string) $rawMetadata, true) ?: []);
+        $isCreditSale = strtoupper(trim((string) ($metadata['payment_condition'] ?? ''))) === 'CREDITO';
+        if ($isCreditSale && $paidTotal <= 0) {
+            return [];
+        }
+
+        $paymentRows = is_array($metadata['payment_breakdown'] ?? null) ? $metadata['payment_breakdown'] : [];
+        $paidByMethod = [];
+
+        foreach ($paymentRows as $row) {
+            if (!is_array($row) || strtoupper(trim((string) ($row['status'] ?? 'PAID'))) !== 'PAID') {
+                continue;
+            }
+            $amount = max(0.0, (float) ($row['amount'] ?? 0));
+            if ($amount <= 0) {
+                continue;
+            }
+            $methodId = isset($row['payment_method_id']) && (int) $row['payment_method_id'] > 0
+                ? (int) $row['payment_method_id']
+                : null;
+            $key = $methodId === null ? 'null' : (string) $methodId;
+            $paidByMethod[$key] = [
+                'payment_method_id' => $methodId,
+                'amount' => ($paidByMethod[$key]['amount'] ?? 0.0) + $amount,
+            ];
+        }
+
+        if ($paidByMethod !== []) {
+            $sum = array_sum(array_column($paidByMethod, 'amount'));
+            if ($paidTotal > 0 && abs($sum - $paidTotal) > 0.01) {
+                $targetTotal = round($paidTotal, 2);
+                $remaining = $targetTotal;
+                $keys = array_keys($paidByMethod);
+                foreach ($keys as $index => $key) {
+                    $amount = $index === array_key_last($keys)
+                        ? $remaining
+                        : min($remaining, round(((float) $paidByMethod[$key]['amount'] / $sum) * $targetTotal, 2));
+                    $paidByMethod[$key]['amount'] = $amount;
+                    $remaining = round($remaining - $amount, 2);
+                }
+            }
+
+            return array_values(array_filter($paidByMethod, fn ($row) => (float) $row['amount'] > 0));
+        }
+
+        if ($paidTotal <= 0 && $isCreditSale) {
+            return [];
+        }
+
+        $amount = $paidTotal > 0 ? $paidTotal : max(0.0, (float) ($document->total ?? 0));
+        if ($amount <= 0) {
+            return [];
+        }
+
+        return [[
+            'payment_method_id' => isset($document->payment_method_id) ? (int) $document->payment_method_id : null,
+            'amount' => $amount,
+        ]];
+    }
+
+    private function insertDocumentMovementRow(int $companyId, object $document, object $session, array $values): void
+    {
         $label = [
             'INVOICE' => 'Factura',
             'RECEIPT' => 'Boleta',
@@ -343,21 +461,18 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             'DEBIT_NOTE' => 'Nota Debito',
             'SALES_ORDER' => 'Pedido',
         ][$document->document_kind] ?? (string) $document->document_kind;
-
-        $desc = 'Cobro doc ' . $label . ' ' . $document->series . '-' . $document->number;
-
-        $movementType = $this->resolveMovementTypeForDocumentKind((string) ($document->document_kind ?? ''));
+        $description = 'Cobro doc ' . $label . ' ' . $document->series . '-' . $document->number;
 
         DB::table('sales.cash_movements')->insert([
             'company_id' => $companyId,
-            'branch_id' => $document->branch_id ?? $session->branch_id,
-            'cash_register_id' => (int) $session->cash_register_id,
-            'cash_session_id' => (int) $session->id,
-            'movement_type' => $movementType,
-            'payment_method_id' => $document->payment_method_id,
-            'amount' => round($amount, 4),
-            'description' => $desc,
-            'notes' => $desc,
+            'branch_id' => $values['branch_id'],
+            'cash_register_id' => $values['cash_register_id'],
+            'cash_session_id' => $values['cash_session_id'],
+            'movement_type' => $values['movement_type'],
+            'payment_method_id' => $values['payment_method_id'],
+            'amount' => $values['amount'],
+            'description' => $description,
+            'notes' => $description,
             'ref_type' => 'COMMERCIAL_DOCUMENT',
             'ref_id' => (int) $document->id,
             'created_by' => $document->created_by,
@@ -365,8 +480,6 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             'movement_at' => $document->created_at ?? now(),
             'created_at' => now(),
         ]);
-
-        return true;
     }
 
     public function findSessionById(int $sessionId): ?CashSessionRecordDTO

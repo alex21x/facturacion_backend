@@ -8,5 +8,9 @@ interface CommercialDocumentPaymentRepositoryInterface
 
     public function createBatch(array $rows): void;
 
+    public function listPaidByDocumentId(int $documentId): array;
+
+    public function transferPaidToDocument(int $sourceDocumentId, int $targetDocumentId): int;
+
     public function deleteByDocumentId(int $documentId): void;
 }

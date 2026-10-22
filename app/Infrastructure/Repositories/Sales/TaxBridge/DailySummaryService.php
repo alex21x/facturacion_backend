@@ -900,6 +900,10 @@ class DailySummaryService
                 'cd.subtotal',
                 'cd.tax_total',
                 'cd.total',
+                'cd.discount_total',
+                DB::raw('(SELECT COALESCE(SUM(i.discount_total), 0) FROM sales.commercial_document_items i WHERE i.document_id = cd.id) as item_discount_total'),
+                DB::raw("(SELECT COALESCE(SUM(i.subtotal * CASE WHEN COALESCE(i.discount_total, 0) > 0 AND COALESCE((i.metadata->>'is_free_operation'), 'false') NOT IN ('true', '1') AND (i.subtotal + i.tax_total) > 0 THEN LEAST(1, i.total / (i.subtotal + i.tax_total)) ELSE 1 END), 0) FROM sales.commercial_document_items i WHERE i.document_id = cd.id) as item_net_subtotal"),
+                DB::raw("(SELECT COALESCE(SUM(i.tax_total * CASE WHEN COALESCE(i.discount_total, 0) > 0 AND COALESCE((i.metadata->>'is_free_operation'), 'false') NOT IN ('true', '1') AND (i.subtotal + i.tax_total) > 0 THEN LEAST(1, i.total / (i.subtotal + i.tax_total)) ELSE 1 END), 0) FROM sales.commercial_document_items i WHERE i.document_id = cd.id) as item_net_tax"),
                 'cd.metadata',
                 'dsi.item_status',
                 'cu.doc_number as customer_doc_number',
@@ -1002,8 +1006,19 @@ class DailySummaryService
                 $customerName = trim((string) ($item->customer_first_name ?? '') . ' ' . (string) ($item->customer_last_name ?? ''));
             }
 
-            return [
-                'ruc_cliente' => trim((string) ($item->customer_doc_number ?? '')),
+            $total = (float) ($item->total ?? 0);
+            $tax = (float) ($item->item_net_tax ?? $item->tax_total ?? 0);
+            $subtotal = (float) ($item->item_net_subtotal ?? $item->subtotal ?? 0);
+            $globalDiscount = round(max((float) ($meta['discount_total'] ?? 0), 0), 2);
+            $globalDiscountApplied = $globalDiscount > 0
+                && abs((float) ($item->discount_total ?? 0) - (float) ($item->item_discount_total ?? 0) - $globalDiscount) <= 0.02;
+            if ($globalDiscountApplied && ($total + $globalDiscount) > 0) {
+                $factor = $total / ($total + $globalDiscount);
+                $subtotal *= $factor;
+                $tax *= $factor;
+            }
+
+            return [ trim((string) ($item->customer_doc_number ?? '')),
                 'razon_social_cliente' => $customerName,
                 'tipo_documento_cliente' => $this->resolveSummaryCustomerDocTypeCode($item->customer_doc_type_code),
                 'tipo_operacion' => (string) ($meta['sunat_operation_type_code'] ?? '0101'),
@@ -1012,10 +1027,10 @@ class DailySummaryService
                 'numero' => (string) $item->number,
                 'fecha_emision' => date('Y-m-d', strtotime((string) $item->issue_at)),
                 'tipo_moneda' => (string) ($item->currency_code ?? 'PEN'),
-                'gravadas' => round((float) ($item->subtotal ?? 0), 2),
-                'impuestos' => round((float) ($item->tax_total ?? 0), 2),
-                'valor_venta' => round((float) ($item->total ?? 0) - (float) ($item->tax_total ?? 0), 2),
-                'importe_venta' => round((float) ($item->total ?? 0), 2),
+                'gravadas' => round($subtotal, 2),
+                'impuestos' => round($tax, 2),
+                'valor_venta' => round($total - $tax, 2),
+                'importe_venta' => round($total, 2),
             ];
         })->values()->all();
 

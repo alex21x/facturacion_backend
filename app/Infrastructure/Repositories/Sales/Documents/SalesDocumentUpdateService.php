@@ -156,6 +156,7 @@ class SalesDocumentUpdateService
                 $currentMetadata,
                 $documentStatus,
                 $isTributaryDocument,
+                $isCommercialPreDocument,
                 $documentKind,
                 $workshopMultiVehicleEnabled
             ) {
@@ -167,6 +168,7 @@ class SalesDocumentUpdateService
                 ];
 
                 $requestedPaymentsProvided = array_key_exists('payments', $payload) && is_array($payload['payments']);
+                $globalDiscount = null;
                 $requestedPayments = $requestedPaymentsProvided
                     ? $this->normalizePaymentsPayload($payload['payments'])
                     : [];
@@ -174,6 +176,11 @@ class SalesDocumentUpdateService
                 $shouldSyncPayments = $requestedPaymentsProvided || !empty($payload['items']);
 
                 if (!empty($payload['items'])) {
+                    $payload['items'] = SalesDocumentItemPreparationService::applyItemDiscountPolicy(
+                        $payload['items'],
+                        $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId !== null ? (int) $branchId : null, 'SALES_ITEM_DISCOUNT_ENABLED', false)
+                    );
+
                     $productIds = collect($payload['items'])
                         ->pluck('product_id')
                         ->filter(function ($rowId) {
@@ -311,6 +318,15 @@ class SalesDocumentUpdateService
                         $discountTotal += $itemDiscount;
                         $grandTotal += $itemTotal;
                     }
+
+                    $requestedMetadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+                    $globalDiscount = CommercialDocumentPolicy::resolveGlobalDiscount(
+                        array_merge($currentMetadata, $requestedMetadata),
+                        $this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId !== null ? (int) $branchId : null, 'SALES_GLOBAL_DISCOUNT_ENABLED', false),
+                        $grandTotal
+                    );
+                    $discountTotal += $globalDiscount;
+                    $grandTotal = max($grandTotal - $globalDiscount, 0.0);
 
                     $shouldRebuildInventory = $documentStatus === 'ISSUED' && $isTributaryDocument;
                     $inventorySettings = $this->inventorySettingsForCompany($companyId);
@@ -470,7 +486,14 @@ class SalesDocumentUpdateService
                     ? ($requestedPaymentsProvided ? $requestedPayments : $currentPayments)
                     : $currentPayments;
 
-                if ($documentStatus === 'ISSUED' && $shouldSyncPayments && empty($effectivePayments)) {
+                $requestedMetadata = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+                $isCreditCondition = strtoupper(trim((string) (
+                    $requestedMetadata['payment_condition']
+                    ?? $currentMetadata['payment_condition']
+                    ?? ''
+                ))) === 'CREDITO';
+
+                if ($documentStatus === 'ISSUED' && $shouldSyncPayments && empty($effectivePayments) && !$isCreditCondition) {
                     $fallbackPaymentMethodId = array_key_exists('payment_method_id', $payload)
                         ? ($payload['payment_method_id'] !== null ? (int) $payload['payment_method_id'] : null)
                         : ($document->payment_method_id !== null ? (int) $document->payment_method_id : null);
@@ -547,6 +570,11 @@ class SalesDocumentUpdateService
                     'last_manual_update_by' => (int) $authUser->id,
                     'last_manual_update_at' => now()->toDateTimeString(),
                 ]);
+                if ($globalDiscount !== null) {
+                    $updatedMetadata['discount_total'] = $globalDiscount;
+                } else {
+                    $updatedMetadata['discount_total'] = $currentMetadata['discount_total'] ?? 0;
+                }
 
                 if ($workshopMultiVehicleEnabled && $hasCustomerVehicleUpdate) {
                     $updatedMetadata['customer_vehicle_id'] = $resolvedCustomerVehicleId;
@@ -555,7 +583,16 @@ class SalesDocumentUpdateService
                     $updatedMetadata['vehicle_model'] = $resolvedVehicleModelSnapshot !== '' ? $resolvedVehicleModelSnapshot : null;
                 }
 
-                $updatedMetadata['payment_breakdown'] = $this->buildPaymentBreakdown($effectivePayments);
+                if ($isCreditCondition) {
+                    $updatedMetadata['payment_breakdown'] = [];
+                } elseif ($isCommercialPreDocument && $documentStatus !== 'ISSUED') {
+                    if (array_key_exists('payment_breakdown', $metadataUpdates) && is_array($metadataUpdates['payment_breakdown'])) {
+                        $plannedPayments = $this->normalizePaymentsPayload($metadataUpdates['payment_breakdown']);
+                        $updatedMetadata['payment_breakdown'] = $this->buildPaymentBreakdown($plannedPayments);
+                    }
+                } else {
+                    $updatedMetadata['payment_breakdown'] = $this->buildPaymentBreakdown($effectivePayments);
+                }
 
                 if (array_key_exists('document_kind', $payload) || array_key_exists('document_kind_id', $payload)) {
                     $requestedKind = strtoupper(trim((string) ($payload['document_kind'] ?? $document->document_kind)));

@@ -19,9 +19,13 @@ class SalesDocumentPaymentMetadataService
 
         foreach ($payments as $payment) {
             $paymentAmount = (float) ($payment['amount'] ?? 0);
+            $status = strtoupper(trim((string) ($payment['status'] ?? 'PENDING')));
+            if ($status === 'CANCELED') {
+                continue;
+            }
             $paymentTotal += $paymentAmount;
 
-            if (($payment['status'] ?? 'PENDING') === 'PAID') {
+            if ($status === 'PAID') {
                 $paidTotal += $paymentAmount;
             } else {
                 $pendingPayments[] = $payment;
@@ -53,11 +57,24 @@ class SalesDocumentPaymentMetadataService
         }
     }
 
-    public function enrichPaymentMetadata(array $metadata, array $pendingPayments, float $paidTotal, int $companyId, ?int $branchId, array $payments = []): array
+    public function enrichPaymentMetadata(
+        array $metadata,
+        array $pendingPayments,
+        float $paidTotal,
+        int $companyId,
+        ?int $branchId,
+        array $payments = [],
+        bool $isPreDocument = false
+    ): array
     {
-        $isCreditSale = count($pendingPayments) > 0;
+        $requestedCondition = strtoupper(trim((string) ($metadata['payment_condition'] ?? '')));
+        $hasPendingCredit = count($pendingPayments) > 0
+            && (!$isPreDocument || $requestedCondition === '');
+        $isCreditSale = $requestedCondition === 'CREDITO' || $hasPendingCredit;
         $metadata['payment_condition'] = $isCreditSale ? 'CREDITO' : 'CONTADO';
-        $metadata['credit_installments'] = $isCreditSale
+        $metadata['credit_installments'] = $isPreDocument
+            ? (is_array($metadata['credit_installments'] ?? null) ? array_values($metadata['credit_installments']) : [])
+            : ($isCreditSale
             ? array_values(array_map(function ($payment, $index) {
                 return [
                     'installment_no' => $index + 1,
@@ -68,18 +85,23 @@ class SalesDocumentPaymentMetadataService
                         : null,
                 ];
             }, $pendingPayments, array_keys($pendingPayments)))
-            : [];
+            : []);
         $metadata['credit_installments_count'] = $isCreditSale ? count($pendingPayments) : 0;
-        $metadata['credit_total'] = $isCreditSale
+        $metadata['credit_installments_count'] = count($metadata['credit_installments']);
+        $metadata['credit_total'] = $isPreDocument
+            ? round((float) ($metadata['credit_total'] ?? array_sum(array_column($metadata['credit_installments'], 'amount'))), 2)
+            : ($isCreditSale
             ? round(array_reduce($pendingPayments, function ($carry, $payment) {
                 return $carry + (float) ($payment['amount'] ?? 0);
             }, 0.0), 2)
-            : 0;
+            : 0);
 
-        $declaredAdvance = isset($metadata['advance_amount']) && is_numeric($metadata['advance_amount'])
+        $declaredAdvance = !$isCreditSale && isset($metadata['advance_amount']) && is_numeric($metadata['advance_amount'])
             ? (float) $metadata['advance_amount']
             : 0.0;
-        $declaredAdvance = max(0.0, min($declaredAdvance, $paidTotal));
+        $declaredAdvance = $isPreDocument
+            ? max(0.0, $declaredAdvance)
+            : max(0.0, min($declaredAdvance, $paidTotal));
 
         if ($declaredAdvance > 0.00001 && !$this->support->isCommerceFeatureEnabledForContextWithDefault($companyId, $branchId, 'SALES_ANTICIPO_ENABLED', false)) {
             throw new SalesDocumentException('Anticipos no habilitados para esta empresa/sucursal.');
@@ -88,7 +110,14 @@ class SalesDocumentPaymentMetadataService
         $metadata['advance_amount'] = round($declaredAdvance, 2);
         $metadata['has_advance'] = $declaredAdvance > 0.00001;
 
-        $paymentMethodIds = collect($payments)
+        $paymentRows = $isCreditSale ? [] : $payments;
+        if (!$isCreditSale && $isPreDocument && $paymentRows === []) {
+            $paymentRows = is_array($metadata['payment_breakdown'] ?? null)
+                ? $metadata['payment_breakdown']
+                : [];
+        }
+
+        $paymentMethodIds = collect($paymentRows)
             ->map(fn ($payment) => isset($payment['payment_method_id']) ? (int) $payment['payment_method_id'] : 0)
             ->filter(fn ($methodId) => $methodId > 0)
             ->unique()
@@ -104,9 +133,9 @@ class SalesDocumentPaymentMetadataService
                 ->all();
         }
 
-        $metadata['payment_breakdown'] = array_values(array_map(function ($payment) use ($paymentMethodMap) {
+        $metadata['payment_breakdown'] = array_values(array_map(function ($payment) use ($paymentMethodMap, $isPreDocument) {
             $methodId = isset($payment['payment_method_id']) ? (int) $payment['payment_method_id'] : 0;
-            $status = strtoupper(trim((string) ($payment['status'] ?? 'PENDING')));
+            $status = strtoupper(trim((string) ($payment['status'] ?? ($isPreDocument ? 'PENDING' : 'PAID'))));
             if (!in_array($status, ['PENDING', 'PAID', 'CANCELED'], true)) {
                 $status = 'PENDING';
             }
@@ -114,8 +143,8 @@ class SalesDocumentPaymentMetadataService
             return [
                 'payment_method_id' => $methodId > 0 ? $methodId : null,
                 'payment_method_name' => $methodId > 0
-                    ? ((string) ($paymentMethodMap[$methodId] ?? ('Metodo #' . $methodId)))
-                    : null,
+                    ? ((string) ($paymentMethodMap[$methodId] ?? ($payment['payment_method_name'] ?? ('Metodo #' . $methodId))))
+                    : ($payment['payment_method_name'] ?? null),
                 'amount' => round((float) ($payment['amount'] ?? 0), 2),
                 'status' => $status,
                 'paid_at' => $payment['paid_at'] ?? null,
@@ -124,7 +153,7 @@ class SalesDocumentPaymentMetadataService
                     ? trim((string) $payment['notes'])
                     : null,
             ];
-        }, $payments));
+        }, $paymentRows));
 
         return $metadata;
     }

@@ -8,11 +8,11 @@ interface CreditPaymentsRepositoryInterface
 
     public function listCustomerDocumentPayments(int $companyId, int $documentId): array;
 
-    public function createCustomerDocumentPayment(int $documentId, array $payload): int;
+    public function createCustomerDocumentPayment(int $companyId, int $documentId, array $payload, ?int $cashRegisterId): int;
 
-    public function updateCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, array $payload): bool;
+    public function updateCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, array $payload, ?int $cashRegisterId): bool;
 
-    public function deleteCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId): bool;
+    public function deleteCustomerDocumentPayment(int $companyId, int $documentId, int $paymentId, ?int $cashRegisterId): bool;
 
     public function findCustomerDocument(int $companyId, int $documentId): ?object;
 

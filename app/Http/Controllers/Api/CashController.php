@@ -22,7 +22,6 @@ class CashController extends Controller
 
     private const DOCUMENT_MOVEMENT_REF_TYPES = ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'];
     private const EXCLUDED_DOCUMENT_STATUSES = ['CANCELED', 'VOID', 'VOIDED'];
-    private const SALES_ORDER_MULTI_PAYMENT_FEATURE_CODE = 'SALES_ORDER_MULTI_PAYMENT_ENABLED';
 
     public function sessions(Request $request)
     {
@@ -192,15 +191,28 @@ class CashController extends Controller
             )
         );
 
-        $salesOrderMultiPaymentEnabled = $this->isSalesOrderMultiPaymentEnabled($companyId);
-
         $documentsWithItems = [];
         foreach ($this->cashMovementService->listSessionCommercialDocuments($companyId, $sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES) as $doc) {
-            $documentItems = array_map(function ($item) {
+            $rawItems = $this->cashMovementService->listDocumentItems((int) $doc->id, $companyId);
+
+            // Items store gross subtotal/tax; line_total already has item discount. Global discount only lives in the document total.
+            $itemsTotalSum = 0.0;
+            foreach ($rawItems as $rawItem) {
+                $itemsTotalSum += (float) data_get($rawItem, 'line_total', 0);
+            }
+            $globalFactor = ($itemsTotalSum > 0.0 && (float) $doc->total < $itemsTotalSum - 0.01)
+                ? max(0.0, (float) $doc->total) / $itemsTotalSum
+                : 1.0;
+
+            $documentItems = array_map(function ($item) use ($globalFactor) {
                     $qty = round((float) data_get($item, 'qty', 0), 3);
                     $unitPrice = round((float) data_get($item, 'unit_price', 0), 2);
-                    $lineSubtotal = round((float) data_get($item, 'line_subtotal', 0), 2);
-                    $lineTotal = round((float) data_get($item, 'line_total', 0), 2);
+                    $grossSubtotal = (float) data_get($item, 'line_subtotal', 0);
+                    $grossLineTotal = $grossSubtotal + (float) data_get($item, 'line_tax', 0);
+                    $rawLineTotal = (float) data_get($item, 'line_total', 0);
+                    $itemFactor = $grossLineTotal > 0 ? min(1.0, $rawLineTotal / $grossLineTotal) : 1.0;
+                    $lineSubtotal = round($grossSubtotal * $itemFactor * $globalFactor, 2);
+                    $lineTotal = round($rawLineTotal * $globalFactor, 2);
                     $lineRevenueForMargin = $lineSubtotal > 0 ? $lineSubtotal : $lineTotal;
                     $costMeta = $this->resolveItemCostAndMargin(
                         $qty,
@@ -229,7 +241,7 @@ class CashController extends Controller
                         'margin_percent_commercial' => $costMeta['margin_percent_commercial'],
                         'margin_source' => $costMeta['margin_source'],
                     ];
-                }, $this->cashMovementService->listDocumentItems((int) $doc->id, $companyId));
+                }, $rawItems);
 
             $baseDocument = [
                 'id' => (int) $doc->id,
@@ -243,15 +255,18 @@ class CashController extends Controller
                 'vehicle_model_snapshot' => $doc->vehicle_model_snapshot !== null ? (string) $doc->vehicle_model_snapshot : null,
                 'payment_method_name' => $doc->payment_method_name,
                 'total' => round((float) $doc->total, 2),
+                'paid_total' => round((float) $doc->paid_total, 2),
                 'status' => $doc->status,
                 'created_at' => $doc->created_at,
                 'user_name' => $doc->user_name,
                 'items' => $documentItems,
             ];
 
-            $paymentBreakdown = $salesOrderMultiPaymentEnabled && strtoupper((string) ($doc->document_kind ?? '')) === 'SALES_ORDER'
-                ? $this->extractPaymentBreakdownFromMetadata($doc->metadata ?? null, (float) ($doc->total ?? 0))
-                : [];
+            $paymentBreakdown = $this->extractPaymentBreakdownFromMetadata(
+                $doc->metadata ?? null,
+                (float) ($doc->paid_total ?? 0),
+                (string) ($doc->payment_method_name ?? '-')
+            );
 
             if (count($paymentBreakdown) === 0) {
                 $documentsWithItems[] = $baseDocument;
@@ -285,9 +300,7 @@ class CashController extends Controller
             }
         }
 
-        $paymentMethodBreakdown = $salesOrderMultiPaymentEnabled
-            ? $this->buildPaymentBreakdownFromDocuments($documentsWithItems)
-            : $this->cashSessionService->listSessionSalesByPaymentMethod($sessionId, $companyId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
+        $paymentMethodBreakdown = $this->buildPaymentBreakdownFromDocuments($documentsWithItems);
 
         return response()->json([
             'session' => [
@@ -521,16 +534,7 @@ class CashController extends Controller
         ];
     }
 
-    private function isSalesOrderMultiPaymentEnabled(int $companyId): bool
-    {
-        return DB::table('appcfg.company_feature_toggles')
-            ->where('company_id', $companyId)
-            ->whereRaw('UPPER(feature_code) = ?', [self::SALES_ORDER_MULTI_PAYMENT_FEATURE_CODE])
-            ->where('is_enabled', true)
-            ->exists();
-    }
-
-    private function extractPaymentBreakdownFromMetadata($metadataRaw, float $documentTotal): array
+    private function extractPaymentBreakdownFromMetadata($metadataRaw, float $paidTotal, string $fallbackMethodName): array
     {
         $metadata = [];
         if (is_array($metadataRaw)) {
@@ -549,7 +553,8 @@ class CashController extends Controller
             }
 
             $amount = round((float) ($row['amount'] ?? 0), 2);
-            if ($amount <= 0) {
+            $status = strtoupper(trim((string) ($row['status'] ?? 'PAID')));
+            if ($amount <= 0 || $status !== 'PAID') {
                 continue;
             }
 
@@ -565,21 +570,21 @@ class CashController extends Controller
             ];
         }
 
-        if (count($normalized) <= 1) {
-            return [];
-        }
-
         $totalBreakdown = array_reduce($normalized, static fn (float $carry, array $row): float => $carry + (float) $row['amount'], 0.0);
-        if ($documentTotal <= 0 || $totalBreakdown <= 0) {
+        if ($normalized === [] && $paidTotal > 0) {
+            return [[
+                'payment_method_name' => trim($fallbackMethodName) !== '' ? trim($fallbackMethodName) : 'Sin método de pago',
+                'amount' => round($paidTotal, 2),
+            ]];
+        }
+        if ($totalBreakdown <= 0) {
             return [];
         }
 
-        // Normalize split total to document total to avoid rounding drift in UI totals.
-        $factor = $documentTotal / $totalBreakdown;
-        foreach ($normalized as &$row) {
-            $row['amount'] = round((float) $row['amount'] * $factor, 2);
+        if ($paidTotal > 0 && abs($totalBreakdown - $paidTotal) > 0.01) {
+            $normalized[0]['amount'] = round($normalized[0]['amount'] + $paidTotal - $totalBreakdown, 2);
+            $normalized = array_values(array_filter($normalized, static fn (array $row): bool => $row['amount'] > 0));
         }
-        unset($row);
 
         return $normalized;
     }

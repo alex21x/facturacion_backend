@@ -896,7 +896,7 @@ class SalesLookupRepository
                     NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
                     TRIM(COALESCE(CONCAT(COALESCE(u_source.first_name, ''), ' ', COALESCE(u_source.last_name, '')), ''))
                 ) as origin_seller_user_name"),
-                DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                DB::raw($this->commercialDocumentPaymentMethodsSql() . ' as payment_method_name'),
                 DB::raw('COALESCE(doc_conversion_flags.has_tributary_conversion, 0) > 0 as has_tributary_conversion'),
                 DB::raw('COALESCE(doc_conversion_flags.has_order_conversion, 0) > 0 as has_order_conversion'),
                 DB::raw('doc_item_totals.document_id IS NOT NULL as has_items'),
@@ -992,7 +992,7 @@ class SalesLookupRepository
                     TRIM(COALESCE(CONCAT(COALESCE(u_src.first_name, ''), ' ', COALESCE(u_src.last_name, '')), ''))
                 ) as origin_seller_user_name"),
                 DB::raw("CASE WHEN dsrc.id IS NOT NULL THEN CONCAT(dsrc.series, '-', dsrc.number) ELSE NULL END as source_document_number"),
-                DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                DB::raw($this->commercialDocumentPaymentMethodsSql() . ' as payment_method_name'),
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                 DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_type, '')), ''), '-') as customer_doc_type"),
                 DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_number, '')), ''), '') as customer_doc_number"),
@@ -1052,7 +1052,7 @@ class SalesLookupRepository
                 DB::raw("COALESCE(c.legal_name, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) as customer_name"),
                 DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_type, '')), ''), '-') as customer_doc_type"),
                 DB::raw("COALESCE(NULLIF(TRIM(COALESCE(c.doc_number, '')), ''), '') as customer_doc_number"),
-                DB::raw("COALESCE(pm.name, 'Sin metodo de pago') as payment_method_name"),
+                DB::raw($this->commercialDocumentPaymentMethodsSql() . ' as payment_method_name'),
                 DB::raw("COALESCE(
                     NULLIF(TRIM(COALESCE((d.metadata->>'origin_seller_user_name'), '')), ''),
                     (
@@ -2542,6 +2542,58 @@ class SalesLookupRepository
                 'role_id' => (int) $payload['role_id'],
             ]);
         }
+    }
+
+    private function commercialDocumentPaymentMethodsSql(): string
+    {
+        return <<<'SQL'
+            COALESCE(
+                (
+                    SELECT STRING_AGG(DISTINCT methods.method_name, ', ' ORDER BY methods.method_name)
+                    FROM (
+                        SELECT NULLIF(TRIM(pm_paid.name), '') AS method_name
+                        FROM sales.commercial_document_payments p
+                        LEFT JOIN master.payment_types pm_paid ON pm_paid.id = p.payment_method_id
+                        WHERE p.document_id = d.id
+                          AND p.amount > 0
+                          AND UPPER(COALESCE(p.status, '')) = 'PAID'
+
+                        UNION ALL
+
+                        SELECT NULLIF(TRIM(COALESCE(
+                            metadata_payment.payment_row->>'payment_method_name',
+                            pm_metadata.name
+                        )), '') AS method_name
+                        FROM jsonb_array_elements(
+                            CASE
+                                WHEN jsonb_typeof(d.metadata->'payment_breakdown') = 'array'
+                                    THEN d.metadata->'payment_breakdown'
+                                ELSE '[]'::jsonb
+                            END
+                        ) AS metadata_payment(payment_row)
+                        LEFT JOIN master.payment_types pm_metadata
+                            ON pm_metadata.id = CASE
+                                WHEN COALESCE(metadata_payment.payment_row->>'payment_method_id', '') ~ '^[0-9]+$'
+                                    THEN (metadata_payment.payment_row->>'payment_method_id')::BIGINT
+                                ELSE NULL
+                            END
+                        WHERE UPPER(COALESCE(metadata_payment.payment_row->>'status', '')) <> 'CANCELED'
+                          AND (
+                              UPPER(COALESCE(metadata_payment.payment_row->>'status', '')) = 'PAID'
+                              OR (
+                                  d.document_kind IN ('QUOTATION', 'SALES_ORDER')
+                                  AND UPPER(COALESCE(d.metadata->>'payment_condition', '')) <> 'CREDITO'
+                              )
+                          )
+                          AND COALESCE(metadata_payment.payment_row->>'amount', '0') ~ '^[0-9]+(\.[0-9]+)?$'
+                          AND (metadata_payment.payment_row->>'amount')::NUMERIC > 0
+                    ) AS methods
+                    WHERE methods.method_name IS NOT NULL
+                ),
+                NULLIF(TRIM(pm.name), ''),
+                'Sin medio de pago'
+            )
+            SQL;
     }
 
     private function validateOperationalContextSelection(

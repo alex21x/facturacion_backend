@@ -4,6 +4,8 @@ namespace App\Infrastructure\Repositories\Restaurant;
 
 use App\Application\UseCases\Sales\CreateCommercialDocumentUseCase;
 use App\Contracts\VerticalSalesPolicy;
+use App\Services\Cash\CashMovementService;
+use App\Services\Cash\CashSessionService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -19,7 +21,9 @@ use Illuminate\Support\Facades\DB;
 class RestaurantOrderService implements VerticalSalesPolicy
 {
     public function __construct(
-        private CreateCommercialDocumentUseCase $createDocumentUseCase
+        private CreateCommercialDocumentUseCase $createDocumentUseCase,
+        private CashMovementService $cashMovementService,
+        private CashSessionService $cashSessionService
     ) {}
 
     // =========================================================================
@@ -174,11 +178,18 @@ class RestaurantOrderService implements VerticalSalesPolicy
         bool $includeItems = false,
         bool $includeMeta = false
     ): array {
+        $quickSaleEnabled = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $branchId,
+            'RESTAURANT_QUICK_SALE_ENABLED',
+            false
+        );
+
         $base = DB::table('sales.commercial_documents as d')
             ->leftJoin('sales.customers as c', 'c.id', '=', 'd.customer_id')
             ->where('d.company_id', $companyId)
             // Issued orders are final for comanda operations and should not stay in the kitchen board.
-            ->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED'])
+            ->when(!$quickSaleEnabled, fn ($q) => $q->whereNotIn('d.status', ['VOID', 'CANCELED', 'ISSUED']))
             ->when($branchId !== null, fn ($q) => $q->where('d.branch_id', $branchId))
             ->when($kitchenStatus !== '', fn ($q) => $q->whereRaw(
                 "UPPER(COALESCE(d.metadata->>'restaurant_order_status', 'PENDING')) = ?",
@@ -423,6 +434,12 @@ class RestaurantOrderService implements VerticalSalesPolicy
         }
 
         $sourceBranchId = $source->branch_id !== null ? (int) $source->branch_id : null;
+        $quickSaleEnabled = $this->isCommerceFeatureEnabledForContextWithDefault(
+            $companyId,
+            $sourceBranchId,
+            'RESTAURANT_QUICK_SALE_ENABLED',
+            false
+        );
         $sellerToCashierEnabled = $this->isCommerceFeatureEnabledForContextWithDefault(
             $companyId,
             $sourceBranchId,
@@ -456,6 +473,98 @@ class RestaurantOrderService implements VerticalSalesPolicy
                 }
             }
 
+            if ($quickSaleEnabled) {
+                if ($cashRegisterId === null || $cashRegisterId <= 0) {
+                    throw new \RuntimeException('Selecciona una caja abierta para registrar el ingreso.', 422);
+                }
+
+                $cashSession = $this->cashSessionService->findOpenSessionByRegister($companyId, $cashRegisterId);
+                if (!$cashSession) {
+                    throw new \RuntimeException('Debes aperturar caja antes de cerrar el pago.', 422);
+                }
+
+                $resolvedPaymentMethodId = $paymentMethodId ?? (
+                    $source->payment_method_id !== null ? (int) $source->payment_method_id : null
+                );
+                if ($resolvedPaymentMethodId === null || $resolvedPaymentMethodId <= 0) {
+                    throw new \RuntimeException('Selecciona un metodo de pago para registrar el ingreso.', 422);
+                }
+
+                $paidAmount = round((float) $source->total, 2);
+                $quickSaleMetadata = array_merge($sourceMetadata, [
+                    'restaurant_order_status' => 'CHECKED_OUT',
+                    'pending_cashier_checkout' => false,
+                    'checkout_document_id' => (int) $source->id,
+                    'checkout_document_kind' => 'SALES_ORDER',
+                    'checkout_document_number' => (string) $source->series . '-' . (string) $source->number,
+                    'checked_out_at' => now('America/Lima')->toIso8601String(),
+                    'conversion_origin' => 'RESTAURANT_QUICK_SALE',
+                    'cash_register_id' => $cashRegisterId,
+                    'payment_breakdown' => [[
+                        'payment_method_id' => $resolvedPaymentMethodId,
+                        'amount' => $paidAmount,
+                        'status' => 'PAID',
+                    ]],
+                ]);
+                $metadataJson = json_encode($quickSaleMetadata, JSON_UNESCAPED_UNICODE);
+                $tableId = $sourceMetadata['restaurant_table_id'] ?? null;
+
+                DB::transaction(function () use (
+                    $orderId,
+                    $companyId,
+                    $authUser,
+                    $notes,
+                    $source,
+                    $resolvedPaymentMethodId,
+                    $paidAmount,
+                    $metadataJson,
+                    $cashSession,
+                    $tableId
+                ): void {
+                    DB::table('sales.commercial_documents')
+                        ->where('id', $orderId)
+                        ->where('company_id', $companyId)
+                        ->update([
+                            'status' => 'ISSUED',
+                            'notes' => $notes ?? $source->notes,
+                            'payment_method_id' => $resolvedPaymentMethodId,
+                            'paid_total' => $paidAmount,
+                            'metadata' => $metadataJson,
+                            'updated_by' => (int) ($authUser->id ?? 0),
+                            'updated_at' => now(),
+                        ]);
+
+                    $source->status = 'ISSUED';
+                    $source->payment_method_id = $resolvedPaymentMethodId;
+                    $source->paid_total = $paidAmount;
+                    $source->metadata = $metadataJson;
+                    $this->cashMovementService->upsertSessionCommercialDocumentMovement(
+                        $companyId,
+                        (int) $cashSession->id,
+                        $source,
+                        $cashSession
+                    );
+
+                    if ($tableId !== null) {
+                        DB::table('restaurant.tables')
+                            ->where('id', (int) $tableId)
+                            ->where('company_id', $companyId)
+                            ->where('status', '!=', 'DISABLED')
+                            ->update(['status' => 'AVAILABLE', 'updated_at' => now()]);
+                    }
+                });
+
+                return [
+                    'id' => (int) $source->id,
+                    'document_kind' => 'SALES_ORDER',
+                    'series' => (string) $source->series,
+                    'number' => (int) $source->number,
+                    'total' => (float) $source->total,
+                    'status' => 'ISSUED',
+                    'pending_cashier_checkout' => false,
+                ];
+            }
+
             $requestMetadata = array_merge($sourceMetadata, [
                 'restaurant_checkout_request' => [
                     'requested_by' => (int) ($authUser->id ?? 0),
@@ -481,6 +590,15 @@ class RestaurantOrderService implements VerticalSalesPolicy
                     'updated_by' => (int) ($authUser->id ?? 0),
                     'updated_at' => now(),
                 ]);
+
+            $tableId = $sourceMetadata['restaurant_table_id'] ?? null;
+            if ($tableId !== null && $this->tablesStorageExists()) {
+                DB::table('restaurant.tables')
+                    ->where('id', (int) $tableId)
+                    ->where('company_id', $companyId)
+                    ->where('status', '!=', 'DISABLED')
+                    ->update(['status' => 'AVAILABLE', 'updated_at' => now()]);
+            }
 
             return [
                 'id' => (int) $source->id,

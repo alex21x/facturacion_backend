@@ -10,21 +10,16 @@ abstract class AppConfigFormRequest extends ApiFormRequest
     protected function resolveAllowedFeatureCodes(): array
     {
         $featureLabelService = app(FeatureLabelService::class);
+        $configuredCodes = collect(config('features.commerce_feature_codes', []));
+        $labeledCodes = collect($featureLabelService->listActiveFeatureCodes());
 
-        if ($featureLabelService->tableExists('appcfg', 'feature_labels')
-            && $featureLabelService->columnExists('appcfg', 'feature_labels', 'feature_code')) {
-            $codes = collect($featureLabelService->listActiveFeatureCodes())
-                ->map(fn ($code) => strtoupper(trim((string) $code)))
-                ->filter(fn ($code) => $code !== '')
-                ->values()
-                ->all();
-
-            if (!empty($codes)) {
-                return $codes;
-            }
-        }
-
-        return config('features.commerce_feature_codes', []);
+        return $configuredCodes
+            ->merge($labeledCodes)
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->filter(fn ($code) => $code !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     protected function hasInventoryLowStockAlertThreshold(): bool

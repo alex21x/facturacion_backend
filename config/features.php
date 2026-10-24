@@ -7,6 +7,7 @@ return [
     'commerce_feature_codes' => [
         'RESTAURANT_MENU_IGV_INCLUDED',
         'RESTAURANT_RECIPES_ENABLED',
+        'RESTAURANT_QUICK_SALE_ENABLED',
         'PRODUCT_MULTI_UOM',
         'PRODUCT_UOM_CONVERSIONS',
         'PRODUCT_WHOLESALE_PRICING',
@@ -42,6 +43,7 @@ return [
     'feature_labels_es' => [
         'RESTAURANT_MENU_IGV_INCLUDED' => 'Precios restaurante con IGV incluido',
         'RESTAURANT_RECIPES_ENABLED' => 'Recetas de restaurante',
+        'RESTAURANT_QUICK_SALE_ENABLED' => 'Venta rapida desde pedidos',
         'PRODUCT_MULTI_UOM' => 'Productos con multiples unidades',
         'PRODUCT_UOM_CONVERSIONS' => 'Conversiones de unidades de producto',
         'PRODUCT_WHOLESALE_PRICING' => 'Precios por mayor',

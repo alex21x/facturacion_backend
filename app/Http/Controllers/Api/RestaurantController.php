@@ -129,6 +129,8 @@ class RestaurantController extends Controller
                 ? (bool) $recipesBranchToggle
                 : ($recipesCompanyToggle !== null ? (bool) $recipesCompanyToggle : false);
 
+            $quickSaleEnabled = $companyToggles->get('RESTAURANT_QUICK_SALE_ENABLED');
+
             $sellerToCashierCompanyToggle = $companyToggles->get('SALES_SELLER_TO_CASHIER');
             $sellerToCashierBranchToggle = $branchToggles->get('SALES_SELLER_TO_CASHIER');
 
@@ -142,6 +144,7 @@ class RestaurantController extends Controller
                 'active_igv_rate_percent' => $this->companyIgvRateService->resolveActiveRatePercent($companyId),
                 'restaurant_price_includes_igv' => $restaurantPriceIncludesIgv,
                 'restaurant_recipes_enabled' => $restaurantRecipesEnabled,
+                'restaurant_quick_sale_enabled' => $quickSaleEnabled !== null ? (bool) $quickSaleEnabled : false,
                 'sales_seller_to_cashier_enabled' => $sellerToCashierEnabled,
                 'document_kind_ids' => $documentKindIdsByCode,
                 'series_numbers' => $seriesNumbers,

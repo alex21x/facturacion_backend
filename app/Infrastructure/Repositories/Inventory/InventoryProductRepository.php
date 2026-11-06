@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryProductRepository implements InventoryProductRepositoryInterface
 {
+    private const PRODUCT_CACHE_VERSION_KEY = 'inventory_products_version:%d';
     private const SCHEMA_CHECK_CACHE_TTL_SECONDS = 300;
     private static ?bool $hasRestaurantRecipesTable = null;
     private static ?bool $hasRestaurantRecipesDeletedAt = null;
@@ -15,13 +16,18 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
     public function getProducts(int $companyId, string $search, $status, int $limit, bool $autocomplete): array
     {
         $limit = max(1, min($limit, 50000));
+        $cacheVersion = (int) Cache::get(
+            sprintf(self::PRODUCT_CACHE_VERSION_KEY, $companyId),
+            0
+        );
         $cacheKey = sprintf(
-            'inventory_products:%d:%s:%s:%d:%d',
+            'inventory_products:%d:%s:%s:%d:%d:%d',
             $companyId,
             md5(mb_strtolower(trim($search))),
             $status === null || $status === '' ? 'all' : (string) (int) $status,
             $limit,
-            $autocomplete ? 1 : 0
+            $autocomplete ? 1 : 0,
+            $cacheVersion
         );
         $ttlSeconds = $autocomplete ? 45 : 60;
 
@@ -154,6 +160,13 @@ class InventoryProductRepository implements InventoryProductRepositoryInterface
 
             return $query->get()->all();
         });
+    }
+
+    public function invalidateCompanyProductsCache(int $companyId): void
+    {
+        $key = sprintf(self::PRODUCT_CACHE_VERSION_KEY, $companyId);
+        Cache::add($key, 0);
+        Cache::increment($key);
     }
 
     private function hasRestaurantRecipesTable(): bool

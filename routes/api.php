@@ -181,6 +181,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
             Route::get('/cash/sessions', 'Api\\CashController@sessions');
             Route::get('/cash/sessions/current', 'Api\\CashController@currentSession');
             Route::get('/cash/sessions/{id}/detail', 'Api\\CashController@sessionDetail');
+            Route::get('/cash/sessions/{id}/payment-method-breakdown', 'Api\\CashController@sessionPaymentMethodBreakdown');
             Route::get('/cash/movements', 'Api\\CashController@movements');
             Route::post('/cash/movements', 'Api\\CashController@createMovement');
             Route::put('/cash/movements/{id}', 'Api\\CashController@updateMovement');
@@ -282,6 +283,7 @@ Route::middleware(['auth.token', 'tenant.rate', 'tenant.response-delay', 'thrott
         Route::get('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@productCommercialConfig');
         Route::get('/inventory/product-masters', 'Api\\InventoryController@productMasters');
         Route::post('/inventory/products', 'Api\\InventoryController@createProduct');
+        Route::post('/inventory/products/{id}/image', 'Api\\InventoryController@uploadProductImage');
         Route::post('/inventory/products/bulk-import', 'Api\\InventoryController@bulkImportProducts');
         Route::put('/inventory/products/{id}', 'Api\\InventoryController@updateProduct');
         Route::put('/inventory/products/{id}/commercial-config', 'Api\\InventoryController@updateProductCommercialConfig');

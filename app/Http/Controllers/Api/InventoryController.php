@@ -18,6 +18,7 @@ use App\Http\Requests\Inventory\BulkUpdateProductStockRequest;
 use App\Http\Requests\Inventory\StoreProductMasterRequest;
 use App\Http\Requests\Inventory\StoreProductRequest;
 use App\Http\Requests\Inventory\StoreStockEntryRequest;
+use App\Http\Requests\Inventory\UploadProductImageRequest;
 use App\Http\Requests\Inventory\UpdateProductCommercialConfigRequest;
 use App\Http\Requests\Inventory\UpdateProductMasterRequest;
 use App\Http\Requests\Inventory\UpdateProductRequest;
@@ -149,6 +150,31 @@ class InventoryController extends Controller
         }
 
         return response()->json(['message' => $result['message']], (int) $result['status']);
+    }
+
+    public function uploadProductImage(UploadProductImageRequest $request, int $id)
+    {
+        $authUser = $request->attributes->get('auth_user');
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+
+        if (!$this->canManageProducts($authUser, $companyId)) {
+            return response()->json(['message' => 'No tienes permiso para guardar productos.'], 403);
+        }
+
+        $result = $this->inventoryProductService->uploadProductImage(
+            $companyId,
+            $id,
+            $request->file('image'),
+            (int) ($authUser->id ?? 0)
+        );
+        if (!$result['ok']) {
+            return response()->json(['message' => $result['message']], (int) $result['status']);
+        }
+
+        return response()->json([
+            'message' => 'Imagen del producto actualizada.',
+            'image_url' => $result['image_url'],
+        ]);
     }
 
     public function bulkImportProducts(BulkImportProductsRequest $request)

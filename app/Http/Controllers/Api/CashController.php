@@ -329,6 +329,34 @@ class CashController extends Controller
         ]);
     }
 
+    public function sessionPaymentMethodBreakdown(Request $request, $id)
+    {
+        $companyId = (int) $request->attributes->get('resolved_company_id');
+        $sessionId = (int) $id;
+        $session = $this->cashSessionService->findSessionByIdAndCompany(
+            $sessionId,
+            $companyId
+        );
+
+        if (!$session) {
+            return response()->json(['message' => 'Sesion no encontrada'], 404);
+        }
+
+        if ($session->status === 'OPEN') {
+            $this->ensureSessionCommercialDocumentMovements($companyId, $sessionId);
+        }
+
+        return response()->json([
+            'payment_method_breakdown' => $this->cashSessionService
+                ->listSessionSalesByPaymentMethod(
+                    $sessionId,
+                    $companyId,
+                    self::DOCUMENT_MOVEMENT_REF_TYPES,
+                    self::EXCLUDED_DOCUMENT_STATUSES
+                ),
+        ]);
+    }
+
     /**
      * Registrar movimiento manual de efectivo (entrada/salida).
      * Requiere: rbac.module:SALES,create

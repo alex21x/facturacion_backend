@@ -22,6 +22,20 @@ class InventoryProductCommandRepository
         return $this->inventoryProductRepository->getProducts($companyId, $search, $status, $limit, $autocomplete);
     }
 
+    public function findProductImage(int $companyId, int $id): ?object
+    {
+        return DB::table('inventory.products')
+            ->where('company_id', $companyId)
+            ->where('id', $id)
+            ->whereNull('deleted_at')
+            ->first(['id', 'image_url']);
+    }
+
+    public function invalidateProductCacheForCompany(int $companyId): void
+    {
+        $this->inventoryProductRepository->invalidateCompanyProductsCache($companyId);
+    }
+
     public function bulkImportProducts(int $companyId, int $userId, array $validated): array
     {
         $rows = $validated['rows'] ?? [];

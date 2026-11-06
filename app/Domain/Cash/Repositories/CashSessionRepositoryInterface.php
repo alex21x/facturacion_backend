@@ -20,7 +20,7 @@ interface CashSessionRepositoryInterface
 
     public function findSessionByIdAndCompany(int $sessionId, int $companyId): ?CashSessionRecordDTO;
 
-    public function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses): float;
+    public function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses, bool $physicalCashOnly = false): float;
 
     public function listSessionSalesByPaymentMethod(int $sessionId, int $companyId, array $documentRefTypes, array $excludedDocumentStatuses): Collection;
 

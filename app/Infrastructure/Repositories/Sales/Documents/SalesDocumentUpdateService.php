@@ -9,6 +9,7 @@ use App\Domain\Sales\Repositories\CommercialDocumentRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemLotRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentItemRepositoryInterface;
 use App\Domain\Sales\Repositories\CommercialDocumentPaymentRepositoryInterface;
+use App\Infrastructure\Repositories\Cash\CashPaymentMethodQuery;
 use App\Services\Sales\Documents\SalesDocumentException;
 use DomainException;
 use Illuminate\Support\Facades\DB;
@@ -1124,15 +1125,17 @@ class SalesDocumentUpdateService
             DB::table('sales.cash_movements')->insert($insertRows);
         }
 
-        $totalIn = (float) DB::table('sales.cash_movements')
+        $totalInQuery = DB::table('sales.cash_movements as cm')
             ->where('cash_session_id', $sessionId)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
-            ->sum('amount');
+            ->whereIn('movement_type', ['IN', 'INCOME']);
+        CashPaymentMethodQuery::applyPhysicalCashFilter($totalInQuery);
+        $totalIn = (float) $totalInQuery->sum('cm.amount');
 
-        $totalOut = (float) DB::table('sales.cash_movements')
+        $totalOutQuery = DB::table('sales.cash_movements as cm')
             ->where('cash_session_id', $sessionId)
-            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
-            ->sum('amount');
+            ->whereIn('movement_type', ['OUT', 'EXPENSE']);
+        CashPaymentMethodQuery::applyPhysicalCashFilter($totalOutQuery);
+        $totalOut = (float) $totalOutQuery->sum('cm.amount');
 
         $openingBalance = (float) (DB::table('sales.cash_sessions')
             ->where('id', $sessionId)

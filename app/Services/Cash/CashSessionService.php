@@ -48,9 +48,33 @@ class CashSessionService
         return $this->queryService->sumSessionIncome($sessionId, $documentRefTypes, $excludedDocumentStatuses);
     }
 
+    public function sumSessionCashIncome(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
+    {
+        return $this->queryService->sumSessionCashIncome($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+    }
+
     public function sumSessionExpense(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
     {
         return $this->queryService->sumSessionExpense($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+    }
+
+    public function sumSessionCashExpense(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
+    {
+        return $this->queryService->sumSessionCashExpense($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+    }
+
+    public function summarizeSessionBalance(
+        int $sessionId,
+        float $openingBalance,
+        array $documentRefTypes,
+        array $excludedDocumentStatuses
+    ): array {
+        return $this->queryService->summarizeSessionBalance(
+            $sessionId,
+            $openingBalance,
+            $documentRefTypes,
+            $excludedDocumentStatuses
+        );
     }
 
     public function listSessionSalesByPaymentMethod(int $sessionId, int $companyId, array $documentRefTypes, array $excludedDocumentStatuses): array

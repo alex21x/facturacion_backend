@@ -3,6 +3,7 @@
 namespace App\Infrastructure\Repositories\Finance;
 
 use App\Domain\Finance\Repositories\CreditPaymentsRepositoryInterface;
+use App\Infrastructure\Repositories\Cash\CashPaymentMethodQuery;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -481,6 +482,7 @@ class CreditPaymentsRepository implements CreditPaymentsRepositoryInterface
                             ->whereNotIn('cd.status', self::EXCLUDED_DOCUMENT_STATUSES);
                     });
             });
+        CashPaymentMethodQuery::applyPhysicalCashFilter($baseMovements);
 
         $totalIn = (float) (clone $baseMovements)
             ->whereIn('cm.movement_type', ['IN', 'INCOME'])

@@ -86,6 +86,24 @@ class CashSessionRepository implements CashSessionRepositoryInterface
 
         $session = $query->first();
 
+        if ($session) {
+            $totalIn = $this->sumSessionMovementsByDirection(
+                (int) $session->id,
+                ['IN', 'INCOME'],
+                ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'],
+                ['CANCELED', 'VOID', 'VOIDED'],
+                true
+            );
+            $totalOut = $this->sumSessionMovementsByDirection(
+                (int) $session->id,
+                ['OUT', 'EXPENSE'],
+                ['INVOICE', 'RECEIPT', 'COMMERCIAL_DOCUMENT', 'SALES_ORDER'],
+                ['CANCELED', 'VOID', 'VOIDED'],
+                true
+            );
+            $session->expected_balance = round((float) $session->opening_balance + $totalIn - $totalOut, 4);
+        }
+
         return $session ? CashSessionDetailDTO::fromRow($session) : null;
     }
 
@@ -122,7 +140,7 @@ class CashSessionRepository implements CashSessionRepositoryInterface
         return $session ? CashSessionRecordDTO::fromRow($session) : null;
     }
 
-    public function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses): float
+    public function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses, bool $physicalCashOnly = false): float
     {
         $documentKindBaseExpr = "CASE
             WHEN UPPER(COALESCE(dk_cd.code, dk_legacy.code, cd.document_kind)) LIKE 'CREDIT_NOTE_%' THEN 'CREDIT_NOTE'
@@ -148,7 +166,7 @@ class CashSessionRepository implements CashSessionRepositoryInterface
             ? "COALESCE(SUM(CASE WHEN {$signedAmountExpr} < 0 THEN ABS({$signedAmountExpr}) ELSE 0 END), 0)"
             : "COALESCE(SUM(CASE WHEN {$signedAmountExpr} > 0 THEN {$signedAmountExpr} ELSE 0 END), 0)";
 
-        return (float) DB::table('sales.cash_movements as cm')
+        $query = DB::table('sales.cash_movements as cm')
             ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes) {
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->whereIn('cm.ref_type', $documentRefTypes);
@@ -164,7 +182,13 @@ class CashSessionRepository implements CashSessionRepositoryInterface
                         $nested->whereNotNull('cd.id')
                             ->whereNotIn('cd.status', $excludedDocumentStatuses);
                     });
-            })
+            });
+
+        if ($physicalCashOnly) {
+            CashPaymentMethodQuery::applyPhysicalCashFilter($query);
+        }
+
+        return (float) $query
             ->selectRaw($aggregateExpr . ' as amount')
             ->value('amount');
     }
@@ -177,7 +201,7 @@ class CashSessionRepository implements CashSessionRepositoryInterface
             ELSE UPPER(COALESCE(dk_cd.code, dk_legacy.code, cd.document_kind))
         END";
 
-        return DB::table('sales.cash_movements as cm')
+        $query = DB::table('sales.cash_movements as cm')
             ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->whereIn('cm.ref_type', $documentRefTypes);
@@ -211,7 +235,15 @@ class CashSessionRepository implements CashSessionRepositoryInterface
                 DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"),
                 DB::raw("COALESCE(pm.name, 'Sin método de pago')")
             )
-            ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"))
+            ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"));
+
+        [$physicalCashCase, $physicalCashBindings] = CashPaymentMethodQuery::physicalCashCase(
+            'pm.id',
+            'pm.name'
+        );
+
+        return $query
+            ->selectRaw($physicalCashCase . ' as is_cash_payment', $physicalCashBindings)
             ->get();
     }
 

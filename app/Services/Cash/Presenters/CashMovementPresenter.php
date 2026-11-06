@@ -22,6 +22,9 @@ class CashMovementPresenter
             'user_name' => $this->buildActorLabel($movement),
             'movement_at' => $movement->movement_at,
             'payment_method_name' => $movement->payment_method_name,
+            'is_cash_payment' => isset($movement->is_cash_payment)
+                ? (bool) $movement->is_cash_payment
+                : ($movement->payment_method_id === null),
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Infrastructure\Repositories\Sales\Documents;
 
+use App\Infrastructure\Repositories\Cash\CashPaymentMethodQuery;
 use Illuminate\Support\Facades\DB;
 
 class SalesDocumentCashPostingService
@@ -111,15 +112,17 @@ class SalesDocumentCashPostingService
 
         DB::table('sales.cash_movements')->insert($rowsToInsert);
 
-        $totalIn = (float) DB::table('sales.cash_movements')
+        $totalInQuery = DB::table('sales.cash_movements as cm')
             ->where('cash_session_id', (int) $session->id)
-            ->whereIn('movement_type', ['IN', 'INCOME'])
-            ->sum('amount');
+            ->whereIn('movement_type', ['IN', 'INCOME']);
+        CashPaymentMethodQuery::applyPhysicalCashFilter($totalInQuery);
+        $totalIn = (float) $totalInQuery->sum('cm.amount');
 
-        $totalOut = (float) DB::table('sales.cash_movements')
+        $totalOutQuery = DB::table('sales.cash_movements as cm')
             ->where('cash_session_id', (int) $session->id)
-            ->whereIn('movement_type', ['OUT', 'EXPENSE'])
-            ->sum('amount');
+            ->whereIn('movement_type', ['OUT', 'EXPENSE']);
+        CashPaymentMethodQuery::applyPhysicalCashFilter($totalOutQuery);
+        $totalOut = (float) $totalOutQuery->sum('cm.amount');
 
         DB::table('sales.cash_sessions')
             ->where('id', (int) $session->id)

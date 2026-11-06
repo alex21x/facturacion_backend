@@ -45,9 +45,42 @@ class CashSessionQueryService
         return $this->repository->sumSessionMovementsByDirection($sessionId, ['IN', 'INCOME'], $documentRefTypes, $excludedDocumentStatuses);
     }
 
+    public function sumSessionCashIncome(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
+    {
+        return $this->repository->sumSessionMovementsByDirection($sessionId, ['IN', 'INCOME'], $documentRefTypes, $excludedDocumentStatuses, true);
+    }
+
     public function sumSessionExpense(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
     {
         return $this->repository->sumSessionMovementsByDirection($sessionId, ['OUT', 'EXPENSE'], $documentRefTypes, $excludedDocumentStatuses);
+    }
+
+    public function sumSessionCashExpense(int $sessionId, array $documentRefTypes, array $excludedDocumentStatuses): float
+    {
+        return $this->repository->sumSessionMovementsByDirection($sessionId, ['OUT', 'EXPENSE'], $documentRefTypes, $excludedDocumentStatuses, true);
+    }
+
+    /**
+     * @return array{total_in: float, total_out: float, cash_total_in: float, cash_total_out: float, expected_balance: float}
+     */
+    public function summarizeSessionBalance(
+        int $sessionId,
+        float $openingBalance,
+        array $documentRefTypes,
+        array $excludedDocumentStatuses
+    ): array {
+        $totalIn = $this->sumSessionIncome($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+        $totalOut = $this->sumSessionExpense($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+        $cashTotalIn = $this->sumSessionCashIncome($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+        $cashTotalOut = $this->sumSessionCashExpense($sessionId, $documentRefTypes, $excludedDocumentStatuses);
+
+        return [
+            'total_in' => $totalIn,
+            'total_out' => $totalOut,
+            'cash_total_in' => $cashTotalIn,
+            'cash_total_out' => $cashTotalOut,
+            'expected_balance' => round($openingBalance + $cashTotalIn - $cashTotalOut, 4),
+        ];
     }
 
     public function listSessionSalesByPaymentMethod(int $sessionId, int $companyId, array $documentRefTypes, array $excludedDocumentStatuses): array

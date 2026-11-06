@@ -115,16 +115,19 @@ class CashController extends Controller
 
         $this->ensureSessionCommercialDocumentMovements((int) $companyId, (int) $session->id);
 
-        $totalIn = $this->cashSessionService->sumSessionIncome((int) $id, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
-        $totalOut = $this->cashSessionService->sumSessionExpense((int) $id, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
-        $expectedBalance = round((float) $session->opening_balance + $totalIn - $totalOut, 4);
+        $balanceSummary = $this->cashSessionService->summarizeSessionBalance(
+            (int) $id,
+            (float) $session->opening_balance,
+            self::DOCUMENT_MOVEMENT_REF_TYPES,
+            self::EXCLUDED_DOCUMENT_STATUSES
+        );
         $paymentMethodBreakdown = $this->cashSessionService->listSessionSalesByPaymentMethod((int) $id, (int) $companyId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
 
         $this->cashSessionService->closeSession(
             (int) $id,
             (int) $authUser->id,
             round((float) $payload['closing_balance'], 4),
-            $expectedBalance,
+            $balanceSummary['expected_balance'],
             $payload['notes'] ?? $session->notes
         );
 
@@ -135,11 +138,11 @@ class CashController extends Controller
             'session' => $updated,
             'summary' => [
                 'opening_balance' => (float) $session->opening_balance,
-                'total_in' => $totalIn,
-                'total_out' => $totalOut,
-                'expected_balance' => $expectedBalance,
+                ...$balanceSummary,
+                'digital_total_in' => $balanceSummary['total_in'] - $balanceSummary['cash_total_in'],
+                'digital_total_out' => $balanceSummary['total_out'] - $balanceSummary['cash_total_out'],
                 'closing_balance' => round((float) $payload['closing_balance'], 4),
-                'difference' => round((float) $payload['closing_balance'] - $expectedBalance, 4),
+                'difference' => round((float) $payload['closing_balance'] - $balanceSummary['expected_balance'], 4),
             ],
             'sales_by_payment_method' => $paymentMethodBreakdown,
         ]);
@@ -178,8 +181,12 @@ class CashController extends Controller
             return response()->json(['message' => 'Sesion no encontrada'], 404);
         }
 
-        $totalIn = $this->cashSessionService->sumSessionIncome($sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
-        $totalOut = $this->cashSessionService->sumSessionExpense($sessionId, self::DOCUMENT_MOVEMENT_REF_TYPES, self::EXCLUDED_DOCUMENT_STATUSES);
+        $balanceSummary = $this->cashSessionService->summarizeSessionBalance(
+            $sessionId,
+            (float) $session->opening_balance,
+            self::DOCUMENT_MOVEMENT_REF_TYPES,
+            self::EXCLUDED_DOCUMENT_STATUSES
+        );
         $movements = array_reverse(
             $this->cashMovementService->listMovements(
                 $companyId,
@@ -311,16 +318,17 @@ class CashController extends Controller
                 'opened_at' => $session->opened_at,
                 'closed_at' => $session->closed_at,
                 'opening_balance' => round((float) $session->opening_balance, 2),
-                'closing_balance' => $session->closing_balance ? round((float) $session->closing_balance, 2) : null,
-                'expected_balance' => round((float) $session->expected_balance, 2),
+                'closing_balance' => $session->closing_balance !== null ? round((float) $session->closing_balance, 2) : null,
+                'expected_balance' => round($balanceSummary['expected_balance'], 2),
                 'status' => $session->status,
                 'notes' => $session->notes,
             ],
             'summary' => [
-                'total_in' => round($totalIn, 2),
-                'total_out' => round($totalOut, 2),
-                'difference' => $session->closing_balance
-                    ? round((float) $session->closing_balance - ((float) $session->opening_balance + $totalIn - $totalOut), 2)
+                ...$balanceSummary,
+                'digital_total_in' => round($balanceSummary['total_in'] - $balanceSummary['cash_total_in'], 2),
+                'digital_total_out' => round($balanceSummary['total_out'] - $balanceSummary['cash_total_out'], 2),
+                'difference' => $session->closing_balance !== null
+                    ? round((float) $session->closing_balance - $balanceSummary['expected_balance'], 2)
                     : null,
             ],
             'movements' => $movements,

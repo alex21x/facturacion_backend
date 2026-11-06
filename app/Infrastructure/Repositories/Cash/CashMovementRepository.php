@@ -82,6 +82,11 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             'cm.movement_at',
             DB::raw("pm.name as payment_method_name"),
         ]);
+        [$physicalCashCase, $physicalCashBindings] = CashPaymentMethodQuery::physicalCashCase(
+            'cm.payment_method_id',
+            'pm.name'
+        );
+        $query->selectRaw($physicalCashCase . ' as is_cash_payment', $physicalCashBindings);
 
         // Aplicar filtro de exclusión de documentos
         $query->where(function ($q) use ($documentRefTypes, $excludedDocumentStatuses): void {
@@ -489,9 +494,9 @@ class CashMovementRepository implements CashMovementRepositoryInterface
         return $session ? CashSessionRecordDTO::fromRow($session) : null;
     }
 
-    private function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses): float
+    private function sumSessionMovementsByDirection(int $sessionId, array $movementTypes, array $documentRefTypes, array $excludedDocumentStatuses, bool $physicalCashOnly = false): float
     {
-        return (float) DB::table('sales.cash_movements as cm')
+        $query = DB::table('sales.cash_movements as cm')
             ->leftJoin('sales.commercial_documents as cd', function ($join) use ($documentRefTypes): void {
                 $join->on('cd.id', '=', 'cm.ref_id')
                     ->whereIn('cm.ref_type', $documentRefTypes);
@@ -504,8 +509,13 @@ class CashMovementRepository implements CashMovementRepositoryInterface
                             ->whereNotIn('cd.status', $excludedDocumentStatuses);
                     });
             })
-            ->whereIn('cm.movement_type', $movementTypes)
-            ->sum('cm.amount');
+            ->whereIn('cm.movement_type', $movementTypes);
+
+        if ($physicalCashOnly) {
+            CashPaymentMethodQuery::applyPhysicalCashFilter($query);
+        }
+
+        return (float) $query->sum('cm.amount');
     }
 
     private function resolveMovementTypeForDocumentKind(string $documentKind): string
@@ -526,8 +536,8 @@ class CashMovementRepository implements CashMovementRepositoryInterface
             return;
         }
 
-        $totalIn = $this->sumSessionMovementsByDirection($sessionId, ['IN', 'INCOME'], $documentRefTypes, $excludedDocumentStatuses);
-        $totalOut = $this->sumSessionMovementsByDirection($sessionId, ['OUT', 'EXPENSE'], $documentRefTypes, $excludedDocumentStatuses);
+        $totalIn = $this->sumSessionMovementsByDirection($sessionId, ['IN', 'INCOME'], $documentRefTypes, $excludedDocumentStatuses, true);
+        $totalOut = $this->sumSessionMovementsByDirection($sessionId, ['OUT', 'EXPENSE'], $documentRefTypes, $excludedDocumentStatuses, true);
 
         $expectedBalance = round((float) $sess->opening_balance + $totalIn - $totalOut, 4);
         $currentExpectedBalance = round((float) ($sess->expected_balance ?? 0), 4);

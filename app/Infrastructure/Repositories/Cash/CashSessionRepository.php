@@ -231,9 +231,9 @@ class CashSessionRepository implements CashSessionRepositoryInterface
                 })->orWhere('cm.ref_type', self::CUSTOMER_COLLECTION_REF_TYPE);
             })
             ->groupBy(
-                DB::raw('COALESCE(pm.id, 0)'),
-                DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"),
-                DB::raw("COALESCE(pm.name, 'Sin método de pago')")
+                'pm.id',
+                'pm.comment',
+                'pm.name'
             )
             ->orderBy(DB::raw("COALESCE(NULLIF(TRIM(pm.comment), ''), CONCAT('PM', pm.id::text), 'SIN_METODO')"));
 
